@@ -1,0 +1,6 @@
+{
+  "name": "AutoAd Pro",
+  "description": "Professional advertisement network management for auto-rickshaw digital displays, connecting local drivers with targeted advertisers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI_SUPPORT", "REAL_TIME_ANALYTICS", "MULTI_PORTAL_ACCESS"]
+}
