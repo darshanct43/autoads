@@ -1,6 +1,5 @@
 {
-  "name": "AutoAd Pro",
-  "description": "Professional advertisement network management for auto-rickshaw digital displays, connecting local drivers with targeted advertisers.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["AI_SUPPORT", "REAL_TIME_ANALYTICS", "MULTI_PORTAL_ACCESS"]
+  "name": "Auto Ads Driver & Fleet",
+  "description": "Real-time driver earnings dashboard, fleet tracking, and automated ad campaign assignment system with simplified driver tasks and live location updates.",
+  "requestFramePermissions": ["geolocation", "camera"]
 }

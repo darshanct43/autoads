@@ -1,0 +1,242 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // HELPERS
+    // ---------------------------------------------------------
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    
+    // Admin check: Only trust email if it's the specific dev/admin account.
+    // In production, we'd use a roles collection.
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == 'admin@autoads.in' ||
+        request.auth.token.email == 'darshanct43@gmail.com' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN'
+      );
+    }
+    
+    // Master Admin Override
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+    
+    function isStaff() {
+      return isSignedIn() && (
+        isAdmin() ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['STAFF', 'SUPPORT']
+      );
+    }
+    function isSupport() {
+      return isSignedIn() && (
+        isAdmin() ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPORT'
+      );
+    }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // ---------------------------------------------------------
+    // VALIDATORS
+    // ---------------------------------------------------------
+    
+    function isValidDriver(d) {
+      return d.uid == request.auth.uid &&
+             d.name is string && d.name.size() > 0 && d.name.size() < 100 &&
+             d.phone is string && d.phone.size() <= 15 &&
+             d.vehicleNumber is string && d.vehicleNumber.size() > 0 &&
+             d.status in ['active', 'inactive'];
+    }
+
+    function isValidCampaign(c) {
+      return c.title is string && c.title.size() > 0 &&
+             c.mediaUrl is string && c.mediaUrl.size() > 0 &&
+             c.mediaType in ['IMAGE', 'VIDEO'] &&
+             c.status == 'PENDING' &&
+             c.createdBy == request.auth.uid &&
+             c.createdAt == request.time;
+    }
+
+    function isValidUser(u) {
+      return u.uid == request.auth.uid &&
+             u.phone is string &&
+             u.role in ['DRIVER', 'CUSTOMER', 'STAFF', 'SUPPORT', 'ADMIN'];
+    }
+
+    function isValidSupportTicket(t) {
+      return t.driverId == request.auth.uid &&
+             t.title is string && t.title.size() < 200 &&
+             t.status == 'open' &&
+             t.createdAt == request.time;
+    }
+
+    function isValidChatMessage(m) {
+      return m.senderId == request.auth.uid &&
+             m.text is string && m.text.size() > 0 && m.text.size() < 1000 &&
+             m.timestamp == request.time;
+    }
+
+    function isValidDriverLocation(l) {
+      return l.driverId == request.auth.uid &&
+             l.lat is number && l.lng is number &&
+             l.speed is number && l.heading is number &&
+             l.isOnline is bool &&
+             l.updatedAt == request.time &&
+             l.keys().hasAll(['driverId', 'lat', 'lng', 'speed', 'heading', 'isOnline', 'updatedAt']) &&
+             l.keys().size() == 7;
+    }
+
+    // ---------------------------------------------------------
+    // COLLECTIONS
+    // ---------------------------------------------------------
+
+    // Users
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && (
+        !incoming().diff(existing()).affectedKeys().hasAny(['role']) || isAdmin()
+      ) && incoming().updatedAt == request.time;
+    }
+
+    // Drivers
+    match /drivers/{driverId} {
+      allow read: if isOwner(driverId) || isAdmin() || (
+        // Allow public query for driverCode + password during device login
+        // Note: This is an architectural choice based on specific user request
+        request.query.limit <= 1 && 
+        request.query.filters.size() >= 2
+      );
+      allow create: if (isOwner(driverId) || isAdmin()) && isValidDriver(incoming()) && incoming().createdAt == request.time;
+      allow update: if (isOwner(driverId) || isAdmin()) && (
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'vehicleNumber', 'rcNumber', 'dlNumber', 'profileImage', 'rcImage', 'dlImage', 'lastLoginAt', 'status', 'bankDetails', 'deviceId', 'driverCode', 'password']) &&
+        (incoming().status == existing().status || isAdmin())
+      );
+
+      match /logs/{logId} {
+        allow create: if isOwner(driverId) && incoming().type in ['login', 'logout'] && incoming().timestamp == request.time;
+        allow read: if isOwner(driverId) || isAdmin();
+      }
+
+      match /locations/{locationId} {
+        allow create: if isOwner(driverId);
+        allow read: if isOwner(driverId) || isAdmin();
+      }
+    }
+
+    // Latest location
+    match /driverLocations/{driverId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(driverId) && isValidDriverLocation(incoming()) || isAdmin();
+    }
+
+    match /locationLogs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && incoming().driverId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /deviceScreens/{driverId} {
+      allow read: if isAdmin();
+      allow write: if isSignedIn() && (request.auth.uid == driverId || isAdmin());
+    }
+
+    match /plans/{planId} {
+      allow read: if isSignedIn();
+      allow write: if isStaff();
+    }
+
+    // Campaigns
+    match /campaigns/{campaignId} {
+      allow read: if isStaff() || (isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        request.auth.uid in resource.data.assignedDrivers
+      ));
+      
+      allow create: if isSignedIn() && (
+        (isStaff() && incoming().status == 'PENDING') ||
+        (incoming().status == 'PENDING' && incoming().createdBy == request.auth.uid)
+      );
+      
+      allow update: if isAdmin() && (
+        // Admin can approve/reject or assign drivers
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'approvedBy', 'assignedDrivers', 'title', 'mediaUrl', 'mediaType']) &&
+        (incoming().status != existing().status ? incoming().approvedBy == request.auth.uid : true)
+      );
+      
+      allow delete: if isAdmin();
+
+      match /media/{mediaId} {
+        allow read: if isSignedIn();
+        allow write: if isStaff();
+      }
+    }
+
+    // Campaign Assignments
+    match /campaignAssignments/{assignmentId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource == null || resource.data.driverId == request.auth.uid));
+      allow create: if isAdmin();
+      allow update: if (isAdmin() || (isSignedIn() && existing().driverId == request.auth.uid)) && (
+        incoming().driverId == existing().driverId &&
+        incoming().campaignId == existing().campaignId &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+        incoming().status in ['assigned', 'approved', 'running', 'completed']
+      );
+    }
+
+    // Driver Payouts (Old & New)
+    match /driverPayouts/{payoutId} {
+      allow read: if isAdmin() || existing().driverId == request.auth.uid;
+      allow write: if isAdmin();
+    }
+    match /payouts/{payoutId} {
+      allow read: if isAdmin() || existing().driverId == request.auth.uid;
+      allow write: if isAdmin();
+    }
+
+    // Driver Earnings & Payments Ledger
+    match /driverPayments/{paymentId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource == null || resource.data.driverId == request.auth.uid));
+      allow create: if isAdmin() || (
+        isSignedIn() && 
+        incoming().driverId == request.auth.uid && 
+        incoming().type == 'earning' &&
+        incoming().status == 'success' &&
+        incoming().createdAt == request.time
+      ); 
+      allow update: if false; 
+    }
+
+    // Withdrawal Requests
+    match /withdrawRequests/{requestId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource == null || resource.data.driverId == request.auth.uid));
+      allow create: if isSignedIn() && incoming().driverId == request.auth.uid && incoming().status == 'pending';
+      allow update: if isAdmin(); // Only admin can approve/reject
+    }
+
+    // Support Tickets
+    match /supportTickets/{ticketId} {
+      allow read: if isStaff() || (isSignedIn() && existing().driverId == request.auth.uid);
+      allow create: if isSignedIn() && isValidSupportTicket(incoming());
+      allow update: if isStaff() || (isSignedIn() && existing().driverId == request.auth.uid && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'unreadCount', 'status'])
+      ));
+
+      match /messages/{messageId} {
+        allow read: if isStaff() || (isSignedIn() && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid);
+        allow create: if (isStaff() || (isSignedIn() && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid)) && isValidChatMessage(incoming());
+      }
+    }
+  }
+}

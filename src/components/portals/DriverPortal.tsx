@@ -1,9 +1,187 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { DollarSign, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { auth } from '@/lib/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { firebaseService, AdCampaign, DriverAssignment, SupportTicket, ChatMessage } from '@/services/firebaseService';
+import { apiService } from '@/services/apiService';
+import { offlineStorageService } from '@/services/offlineStorageService';
+import StrictVerificationSystem from '@/components/common/StrictVerificationSystem';
+import { UserRole } from '@/types';
 
-export default function DriverPortal() {
+interface DriverPortalProps {
+  onLogout: () => void;
+}
+
+export default function DriverPortal({ onLogout }: DriverPortalProps) {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [lang, setLang] = useState<'EN' | 'HI' | 'KN' | 'TA' | 'TE' | 'MR' | 'ML' | 'BN' | 'GU' | 'PA'>('EN');
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const [driverProfile, setDriverProfile] = useState<any>(null);
+  const status = (driverProfile?.status === 'active' || driverProfile?.status === 'ACTIVE') ? 'ACTIVE' : 'OFFLINE';
+  const [activeTab, setActiveTab] = useState<'EARNINGS' | 'WITHDRAW'>('EARNINGS');
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
+  const [assignedCampaigns, setAssignedCampaigns] = useState<AdCampaign[]>([]);
+  const [assignments, setAssignments] = useState<DriverAssignment[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [withdrawRequests, setWithdrawRequests] = useState<any[]>([]);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [bankDetails, setBankDetails] = useState<any>(null);
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [withdrawUpiId, setWithdrawUpiId] = useState('');
+  const [showVerificationRequired, setShowVerificationRequired] = useState(false);
+  const [isLocallyVerified, setIsLocallyVerified] = useState(false);
+
+  const totalEarnings = payments
+    .filter(p => p.type === 'earning')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  const totalWithdrawn = payments
+    .filter(p => p.type === 'withdrawal')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  const pendingWithdrawalAmount = withdrawRequests
+    .filter(r => r.status === 'pending')
+    .reduce((sum, r) => sum + (r.amount || 0), 0);
+
+  const availableBalance = totalEarnings - totalWithdrawn - pendingWithdrawalAmount;
+
+  const driverCampaigns = assignedCampaigns.filter(c => 
+    assignments.some(a => a.campaignId === c.id)
+  );
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setLoading(false);
+      
+      if (u) {
+        setUser(u);
+          const profile = await firebaseService.getDriverProfile(u.uid);
+          if (profile) {
+            if (!profile.driverCode || !profile.password) {
+              const genCode = `DRV-${u.uid.slice(-4).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
+              const genPass = Math.random().toString(36).slice(-8);
+              await firebaseService.updateDriverProfile(u.uid, {
+                driverCode: genCode,
+                password: genPass
+              });
+              setDriverProfile({ ...profile, driverCode: genCode, password: genPass });
+            } else {
+              setDriverProfile(profile);
+            }
+            if (profile.bankDetails) setBankDetails(profile.bankDetails);
+          } else {
+            // New driver registration in production
+            const newProfile = {
+              uid: u.uid,
+              name: u.displayName || 'New Driver',
+              email: u.email || '',
+              phone: u.phoneNumber || '',
+              status: 'pending_verification' as const,
+              driverCode: `DRV-${u.uid.slice(-6).toUpperCase()}`,
+              password: Math.random().toString(36).slice(-8), 
+              createdAt: new Date().toISOString()
+            };
+            await firebaseService.saveDriverProfile(newProfile as any);
+            setDriverProfile(newProfile);
+          }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real Geolocation: Track live location with high accuracy
+  useEffect(() => {
+    if (!user || status !== 'ACTIVE') return;
+
+    const updateLocation = (lat: number, lng: number, speed: number | null) => {
+      firebaseService.updateDriverLocation(user.uid, {
+        lat,
+        lng,
+        speed: speed || 0, // No random speed fallback
+        timestamp: new Date().toISOString(),
+        activeCampaignId: driverCampaigns[0]?.id || null,
+        isOnline: true
+      });
+    };
+
+    let watchId: number | null = null;
+    
+    if ("geolocation" in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          updateLocation(
+            position.coords.latitude, 
+            position.coords.longitude, 
+            position.coords.speed !== null ? position.coords.speed * 3.6 : null // m/s to km/h
+          );
+        },
+        (error) => {
+          console.warn("Geolocation watch error:", error);
+          // Only update if we have a known position, no random fallback
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+      );
+    } else {
+      console.warn("Geolocation not supported by this browser.");
+    }
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [user, status, driverCampaigns]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubAssignments = firebaseService.subscribeToDriverAssignments(user.uid, (data) => {
+      setAssignments(data);
+    });
+
+    const unsubCampaigns = firebaseService.subscribeToActiveAssignedCampaigns(user.uid, (data) => {
+      setAssignedCampaigns(data);
+    });
+
+    const unsubPayments = firebaseService.subscribeToDriverPayments(user.uid, (data) => {
+      setPayments(data);
+    });
+
+    const unsubWithdraws = firebaseService.subscribeToWithdrawRequests((data) => {
+      setWithdrawRequests(data);
+    }, user.uid);
+
+    const unsubTickets = firebaseService.subscribeToSupportTickets(user.uid, setSupportTickets);
+
+    return () => {
+      unsubAssignments();
+      unsubCampaigns();
+      unsubPayments();
+      unsubWithdraws();
+      unsubTickets();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!activeTicketId) {
+      setChatMessages([]);
+      return;
+    }
+    firebaseService.markTicketAsRead(activeTicketId);
+    const unsubscribe = firebaseService.subscribeToMessages(activeTicketId, setChatMessages);
+    return () => unsubscribe();
+  }, [activeTicketId]);
+
+  const currentVehicleNo = driverProfile?.vehicleNumber || 'PROVISIONING...';
+
   const languages = [
     { code: 'EN', name: 'English' },
     { code: 'HI', name: 'हिंदी (Hindi)' },
@@ -17,554 +195,432 @@ export default function DriverPortal() {
     { code: 'PA', name: 'ਪੰਜਾਬੀ (Punjabi)' }
   ] as const;
 
-  type LangCode = typeof languages[number]['code'];
-
-  const [lang, setLang] = useState<LangCode>('EN');
-  const [showLangPicker, setShowLangPicker] = useState(false);
-  const [status, setStatus] = useState<'ACTIVE' | 'OFFLINE'>('ACTIVE');
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [showSupport, setShowSupport] = useState(false);
-  const [showDevice, setShowDevice] = useState(false);
-
-  const t: Record<LangCode, any> = {
+  const t: any = {
     EN: {
       earnings: 'Earnings',
-      today: 'Today',
       rides: 'Live Ads Run',
       repair: 'Report issue',
       status: 'Current Status',
       active: 'Online',
       offline: 'Offline',
-      welcome: 'Welcome, Manju',
-      news: 'New Ad: National Brand campaign starts tomorrow!',
+      welcome: 'Welcome, Driver',
       map: 'Ad Hotspots',
       withdraw: 'Withdraw Cash',
       balance: 'Available Balance',
-      stopSession: 'STOP SESSION',
-      startSession: 'START SESSION',
       trending: '↑ Trending Up',
       cap: "Today's Cap",
-      supportDesc: "Requests processed within 48 hours directly to your linked bank account.",
+      supportDesc: "Requests processed within 48 hours to bank.",
       instantSupport: "Instant Support Connect",
-      hwDiagnostics: "Hardware diagnostics",
-      devManager: "Device Manager",
+      hwStatus: "Hardware Status",
       raiseWithdraw: "Raise Withdrawal",
       enterAmount: "Enter Amount",
       linkedPayout: "Linked Payout Method",
       confirmOtp: "Confirm via OTP",
-      bankNote: "Payment will hit your bank account within 48 hours.",
+      bankNote: "Payment within 48 hours.",
       reportIssue: "Report Issue",
-      issueDesc: "Please describe the problem you are facing with the device or mapping.",
-      submitTicket: "Submit Support Ticket",
-      hwStatus: "Hardware Status",
-      diagnostics: "Run Self-Diagnostics",
-      selectLanguage: "Select Language"
-    },
-    HI: {
-      earnings: 'कमाई',
-      today: 'आज',
-      rides: 'चल रहे विज्ञापन',
-      repair: 'समस्या की रिपोर्ट करें',
-      status: 'वर्तमान स्थिति',
-      active: 'ऑनलाइन',
-      offline: 'ऑफलाइन',
-      welcome: 'स्वागत है, मंजू',
-      news: 'नया विज्ञापन: राष्ट्रीय ब्रांड अभियान कल से शुरू होगा!',
-      withdraw: 'नकद निकालें',
-      balance: 'कुल राशि',
-      stopSession: 'सत्र रोकें',
-      startSession: 'सत्र शुरू करें',
-      trending: '↑ ऊपर जा रहा है',
-      cap: 'आज की सीमा',
-      instantSupport: 'त्वरित सहायता',
-      devManager: 'डिवाइस मैनेजर',
-      hwStatus: 'हार्डवेयर स्थिति',
-      diagnostics: 'स्वयं-जांच चलाएं',
-      selectLanguage: 'भाषा चुनें'
-    },
-    KN: {
-      earnings: 'ಸಂಪಾದನೆ (Earnings)',
-      today: 'ಇಂದು',
-      rides: 'ಚಾಲನೆಯಲ್ಲಿರುವ ಜಾಹೀರಾತುಗಳು',
-      repair: 'ದೂರು ಸಲ್ಲಿಸಿ (Report issue)',
-      status: 'ಪ್ರಸ್ತುತ ಸ್ಥಿತಿ',
-      active: 'ಆನ್‌ಲೈನ್',
-      offline: 'ಆಫ್‌ಲೈನ್',
-      welcome: 'ನಮಸ್ಕಾರ, ಮಂಜು',
-      news: 'ಹೊಸ ಜಾಹೀರಾತು: ಹಾಸನ ಕಾಫಿ ಹಬ್ಬ ನಾಳೆಯಿಂದ!',
-      withdraw: 'ಹಣ ಹಿಂಪಡೆಯಿರಿ',
-      balance: 'ಲಭ್ಯವಿರುವ ಹಣ',
-      stopSession: 'ಸೆಷನ್ ನಿಲ್ಲಿಸಿ',
-      startSession: 'ಸೆಷನ್ ಪ್ರಾರಂಬಿಸಿ',
-      trending: '↑ ಏರಿಕೆ ಪ್ರವೃತ್ತಿ',
-      cap: 'ಇಂದಿನ ಮಿತಿ',
-      instantSupport: 'ತ್ವರಿತ ಬೆಂಬಲ',
-      devManager: 'ಸಾಧನ ನಿರ್ವಾಹಕ',
-      hwStatus: 'ಹಾರ್ಡ್ವೇರ್ ಸ್ಥಿತಿ',
-      diagnostics: 'ಸ್ವಯಂ-ರೋಗನಿರ್ಣಯ ಚಲಾಯಿಸಿ',
-      selectLanguage: 'ಭಾಷೆಯನ್ನು ಆಯ್ಕೆ ಮಾಡಿ'
-    },
-    TA: {
-      earnings: 'வருமானம்',
-      today: 'இன்று',
-      rides: 'நேரடி விளம்பரங்கள்',
-      repair: 'சிக்கலைப் புகாரளிக்கவும்',
-      status: 'தற்போதைய நிலை',
-      active: 'ஆன்லைன்',
-      offline: 'ஆஃப்லைன்',
-      welcome: 'வரவேற்கிறோம், மஞ்சு',
-      news: 'புதிய விளம்பரம்: தேசிய பிராண்ட் பிரச்சாரம் நாளை தொடங்குகிறது!',
-      withdraw: 'பணம் எடு',
-      balance: 'இருப்பு',
-      stopSession: 'அமர்வை நிறுத்து',
-      startSession: 'அமர்வைத் தொடங்கு',
-      trending: '↑ டிரெண்டிங்',
-      cap: 'இன்றைய வரம்பு',
-      instantSupport: 'உடனடி ஆதரவு',
-      devManager: 'சாதன மேலாளர்',
-      hwStatus: 'வன்பொருள் நிலை',
-      diagnostics: 'சுய-கண்டறிதலை இயக்கு',
-      selectLanguage: 'மொழியைத் தேர்ந்தெடுக்கவும்'
-    },
-    TE: {
-      earnings: 'సంపాదన',
-      today: 'నేడు',
-      rides: 'లైవ్ ప్రకటనలు',
-      repair: 'సమస్యను నివేదించండి',
-      status: 'ప్రస్తుత స్థితి',
-      active: 'ఆన్‌లైన్',
-      offline: 'ఆఫ్‌లైన్',
-      welcome: 'స్వాగతం, మంజు',
-      news: 'కొత్త ప్రకటన: జాతీయ బ్రాండ్ ప్రచారం రేపు ప్రారంభమవుతుంది!',
-      withdraw: 'నగదు విత్‌డ్రా',
-      balance: 'అందుబాటులో ఉన్న నిల్వ',
-      stopSession: 'సెషన్ ఆపు',
-      startSession: 'సెషన్ ప్రారంభించు',
-      trending: '↑ ట్రెండింగ్',
-      cap: 'నేటి క్యాప్',
-      instantSupport: 'తక్షణ మద్దతు',
-      devManager: 'పరికర నిర్వాహకుడు',
-      hwStatus: 'హార్డ్‌వేర్ స్థితి',
-      diagnostics: 'స్వీయ నిర్ధారణను రన్ చేయండి',
-      selectLanguage: 'భాషను ఎంచుకోండి'
-    },
-    MR: {
-      earnings: 'कमाई',
-      today: 'आज',
-      rides: 'लाइव्ह जाहिराती',
-      repair: 'समस्या नोंदवा',
-      status: 'सध्याची स्थिती',
-      active: 'ऑनलाइन',
-      offline: 'ऑफलाइन',
-      welcome: 'स्वागत आहे, मंजू',
-      news: 'नवीन जाहिरात: राष्ट्रीय ब्रँड मोहीम उद्यापासून सुरू होईल!',
-      withdraw: 'पैसे काढा',
-      balance: 'उपलब्ध शिल्लक',
-      stopSession: 'सत्र थांबवा',
-      startSession: 'सत्र सुरू करा',
-      trending: '↑ ट्रेंडिंग',
-      cap: 'आजची मर्यादा',
-      instantSupport: 'त्वरित समर्थन',
-      devManager: 'डिव्हाइस व्यवस्थापक',
-      hwStatus: 'हार्डवेअर स्थिती',
-      diagnostics: 'स्वयं-निदान चालवा',
-      selectLanguage: 'भाषा निवडा'
-    },
-    ML: {
-      earnings: 'സമ്പാദ്യം',
-      today: 'ഇന്ന്',
-      rides: 'തത്സമയ പരസ്യങ്ങൾ',
-      repair: 'പ്രശ്നം റിപ്പോർട്ട് ചെയ്യുക',
-      status: 'നിലവിലെ നില',
-      active: 'ഓൺലൈൻ',
-      offline: 'ഓഫ്‌ലൈൻ',
-      welcome: 'സ്വാഗതം, മഞ്ജു',
-      news: 'പുതിയ പരസ്യം: ദേശീയ ബ്രാൻഡ് കാമ്പയിൻ നാളെ ആരംഭിക്കുന്നു!',
-      withdraw: 'പണം പിൻവലിക്കുക',
-      balance: 'ലഭ്യമായ ബാലൻസ്',
-      stopSession: 'സെഷൻ നിർത്തുക',
-      startSession: 'സെഷൻ തുടങ്ങുക',
-      trending: '↑ മുകളിലേക്ക്',
-      cap: 'ഇന്നത്തെ പരിധി',
-      instantSupport: 'ഉടനടി പിന്തുണ',
-      devManager: 'ഉപകരണ മാനേജർ',
-      hwStatus: 'ഹാർഡ്‌വെയർ നില',
-      diagnostics: 'സ്വയം രോഗനിർണ്ണയം നടത്തുക',
-      selectLanguage: 'ഭാഷ തിരഞ്ഞെടുക്കുക'
-    },
-    BN: {
-      earnings: 'উপার্জন',
-      today: 'আজ',
-      rides: 'লাইভ বিজ্ঞাপন',
-      repair: 'সমস্যা রিপোর্ট করুন',
-      status: 'বর্তমান অবস্থা',
-      active: 'অনলাইন',
-      offline: 'অফলাইন',
-      welcome: 'স্বাগতম, মঞ্জু',
-      news: 'নতুন বিজ্ঞাপন: জাতীয় ব্র্যান্ড অভিযান আগামীকাল শুরু হবে!',
-      withdraw: 'টাকা উত্তোলন',
-      balance: 'উপলব্ধ ব্যালেন্স',
-      stopSession: 'সেশন বন্ধ করুন',
-      startSession: 'সেশন শুরু করুন',
-      trending: '↑ ঊর্ধ্বমুখী',
-      cap: 'আজকের সীমা',
-      instantSupport: 'তাত্ক্ষণিক সমর্থন',
-      devManager: 'ডিভাইস ম্যানেজার',
-      hwStatus: 'হার্ডওয়্যার স্থিতি',
-      diagnostics: 'সেলফ-ডায়াগনস্টিক চালান',
-      selectLanguage: 'ভাষা নির্বাচন করুন'
-    },
-    GU: {
-      earnings: 'કમાણી',
-      today: 'આજે',
-      rides: 'લાઇવ જાહેરાતો',
-      repair: 'સમસ્યાની જાણ કરો',
-      status: 'વર્તમાન સ્થિતિ',
-      active: 'ઓનલાઇન',
-      offline: 'ઓફલાઇન',
-      welcome: 'સ્વાગત છે, મંજુ',
-      news: 'નવી જાહેરાત: રાષ્ટ્રીય બ્રાન્ડ અભિયાન આવતીકાલથી શરૂ થશે!',
-      withdraw: 'રોકડ ઉપાડો',
-      balance: 'ઉપલબ્ધ બેલેન્સ',
-      stopSession: 'સત્ર બંધ કરો',
-      startSession: 'સત્ર શરૂ કરો',
-      trending: '↑ ઉપર જાય છે',
-      cap: 'આજની મર્યાદા',
-      instantSupport: 'ત્વરિત સપોર્ટ',
-      devManager: 'ડિવાઇસ મેનેજર',
-      hwStatus: 'હાર્ડવેર સ્થિતિ',
-      diagnostics: 'સેલ્ફ-ડાયગ્નોસ્ટિક ચલાવો',
-      selectLanguage: 'ભાષા પસંદ કરો'
-    },
-    PA: {
-      earnings: 'ਕਮਾਈ',
-      today: 'ਅੱਜ',
-      rides: 'ਲਾਈਵ ਵਿਗਿਆਪਨ',
-      repair: 'ਸਮੱਸਿਆ ਦੀ ਰਿਪੋਰਟ ਕਰੋ',
-      status: 'ਮੌਜੂਦਾ ਸਥਿਤੀ',
-      active: 'ਆਨਲਾਈਨ',
-      offline: 'ਆਫਲਾਈਨ',
-      welcome: 'ਜੀ ਆਇਆਂ ਨੂੰ, ਮੰਜੂ',
-      news: 'ਨਵਾਂ ਵਿਗਿਆਪਨ: ਰਾਸ਼ਟਰੀ ਬ੍ਰਾਂਡ ਮੁਹਿੰਮ ਕੱਲ੍ਹ ਤੋਂ ਸ਼ੁਰੂ ਹੋਵੇਗੀ!',
-      withdraw: 'ਨਕਦ ਕਢਵਾਓ',
-      balance: 'ਉਪਲਬਧ ਬਕਾਇਆ',
-      stopSession: 'ਸੈਸ਼ਨ ਰੋਕੋ',
-      startSession: 'ਸੈਸ਼ਨ ਸ਼ੁਰੂ ਕਰੋ',
-      trending: '↑ ਉੱਪਰ ਜਾ ਰਿਹਾ ਹੈ',
-      cap: 'ਅੱਜ ਦੀ ਸੀਮਾ',
-      instantSupport: 'ਤੁਰੰਤ ਸਹਾਇਤਾ',
-      devManager: 'ਡਿਵਾਈਸ ਮੈਨੇਜਰ',
-      hwStatus: 'ਹਾਰਡਵੇਅਰ ਸਥਿતી',
-      diagnostics: 'ਸਵੈ-ਜਾਂਚ ਚਲਾਓ',
-      selectLanguage: 'ਭਾਸ਼ਾ ਚੁਣੋ'
+      issueDesc: "Describe the device problem.",
+      submitTicket: "Submit Ticket",
+      selectLanguage: "Select Language",
+      highDensity: "High Ad Density",
+      settings: "Configuration"
     }
   };
 
+
+  const handleSaveBank = async (details: any) => {
+    if (!user) return;
+    try {
+      await firebaseService.updateDriverProfile(user.uid, { bankDetails: details });
+      setBankDetails(details);
+      setShowBankModal(false);
+      alert("Bank Details Linked Successfully!");
+    } catch (e) {
+      alert("Failed to save bank details.");
+    }
+  };
+
+  useEffect(() => {
+    const checkVerification = async () => {
+      if (!user) return;
+      const meta = await offlineStorageService.getMeta(user.uid);
+      const isDone = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded';
+      setIsLocallyVerified(isDone);
+    };
+    checkVerification();
+  }, [user]);
+
+  const handleWithdrawClick = () => {
+    if (!isLocallyVerified) {
+      setShowVerificationRequired(true);
+      return;
+    }
+    // We now prioritize UPI ID for withdrawals as requested
+    setShowWithdraw(true);
+  };
+
+  const handleWithdrawAction = async (amount: number, upiId: string) => {
+    if (!user) return;
+    if (amount > availableBalance) {
+      alert("Insufficient Balance!");
+      return;
+    }
+    if (!upiId || !upiId.includes('@')) {
+      alert("Please enter a valid UPI ID (e.g. yourname@upi)");
+      return;
+    }
+    try {
+      // Create the withdrawal request
+      await firebaseService.requestWithdrawal({
+        driverId: user.uid,
+        amount,
+        upiId: upiId
+      });
+
+      // Also ensure this UPI ID is stored in the driver profile for future use
+      if (upiId !== driverProfile?.upiId) {
+        await firebaseService.updateDriverProfile(user.uid, { upiId });
+        setDriverProfile(prev => ({ ...prev, upiId }));
+      }
+
+      alert("Withdrawal Request Raised! Amount will be credited to your UPI ID within 48 hours.");
+      setShowWithdraw(false);
+    } catch (e) {
+      alert("Failed to raise withdrawal request.");
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!activeTicketId || !newMessage.trim() || !user) return;
+    try {
+      await firebaseService.sendChatMessage(activeTicketId, {
+        senderId: user.uid,
+        senderName: user.displayName || 'Driver',
+        senderRole: 'driver',
+        text: newMessage.trim()
+      });
+      setNewMessage('');
+    } catch (e) {
+      console.error("Chat error:", e);
+    }
+  };
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'WITHDRAW':
+        return (
+          <div className="space-y-6">
+            <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-white/5 shadow-2xl shadow-slate-900/20 space-y-6 overflow-hidden relative">
+              <div className="absolute -right-4 -top-4 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full" />
+              <div className="flex items-center justify-between relative z-10">
+                  <div>
+                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Available Balance</p>
+                    <h3 className="text-4xl font-black text-white tracking-tighter italic">₹{(availableBalance || 0).toLocaleString()}</h3>
+                  </div>
+                  <button onClick={handleWithdrawClick} className="w-14 h-14 bg-amber-500 text-slate-900 rounded-[1.25rem] flex items-center justify-center hover:bg-amber-400 transition-all shadow-xl shadow-amber-500/10">
+                    <ArrowDownCircle size={28} />
+                  </button>
+              </div>
+              <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/10 relative z-10 backdrop-blur-sm">
+                  <Info size={16} className="text-amber-500 shrink-0" />
+                  <p className="text-[10px] font-bold uppercase text-slate-400 leading-tight tracking-wide">Pending Settlements: ₹{(pendingWithdrawalAmount || 0).toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50">
+               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Payment History</h3>
+               <div className="space-y-3">
+                  {payments.slice(0, 8).map((p, i) => (
+                    <div key={p.id || i} className="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
+                      <div>
+                        <p className={cn("text-xs font-black", p.type === 'earning' ? "text-green-600" : "text-amber-600")}>
+                          {p.type === 'earning' ? '+' : '-'}₹{(p.amount || 0).toLocaleString()}
+                        </p>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">
+                          {p.type === 'earning' ? 'Job Completion' : 'Withdrawal'}
+                        </p>
+                      </div>
+                      <span className={cn(
+                        "text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md",
+                        p.status === 'success' ? "text-green-500 bg-green-50" : "text-amber-500 bg-amber-50"
+                      )}>
+                        {p.status}
+                      </span>
+                    </div>
+                  ))}
+                  {payments.length === 0 && (
+                    <p className="text-[10px] text-center text-slate-300 font-bold uppercase py-4 tracking-widest">No wallet activity</p>
+                  )}
+               </div>
+            </div>
+          </div>
+        );
+      default:
+        return (
+          <>
+            <div className="bg-white p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-slate-200/50 border border-slate-100">
+              <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Fleet Presence Status</p>
+                  <div className="flex items-center gap-2">
+                    <div className={cn("w-3 h-3 rounded-full transition-all duration-500", status === 'ACTIVE' ? "bg-green-500 shadow-[0_0_12px_#22c55e]" : "bg-slate-300")} />
+                    <span className="font-black text-slate-900 text-sm tracking-tight italic uppercase">{status === 'ACTIVE' ? 'Live on Network' : 'Disconnected'}</span>
+                  </div>
+              </div>
+              <div className="hidden sm:block">
+                 <p className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.2em] italic">Automatic Sync Active</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-10">
+              <div className="bg-amber-500 p-8 rounded-[2.5rem] text-slate-900 shadow-2xl shadow-amber-500/20 space-y-6 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <IndianRupee size={80} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-amber-900 uppercase tracking-[0.2em] mb-2">Total Earnings</p>
+                    <h3 className="text-5xl font-black tracking-tighter italic">₹{(totalEarnings || 0).toLocaleString()}</h3>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="bg-white/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest text-amber-900">
+                      Verified Account
+                    </div>
+                    <div className="flex-1 border-t border-amber-900/10" />
+                  </div>
+              </div>
+
+              {/* TERMINAL HUB SECTION - MOVED FOR PROMINENCE */}
+              <div className="bg-[#0F172A] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl shadow-slate-900/40 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+                    <Smartphone size={120} />
+                  </div>
+                  <div className="relative z-10 space-y-4">
+                    <div className="flex items-center justify-between">
+                       <div>
+                         <h3 className="text-lg font-black text-white italic tracking-tighter uppercase leading-none">Terminal <span className="text-amber-500">Hub</span></h3>
+                         <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">Managed Ad-Display Module</p>
+                       </div>
+                       <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                          <span className="text-[8px] font-black text-green-500 uppercase tracking-widest">Provisioned</span>
+                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pb-2">
+                       <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                          <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Terminal ID</p>
+                          <p className="text-xs font-mono font-black text-amber-500">{driverProfile?.driverCode || 'DRV-CORE-9011'}</p>
+                       </div>
+                       <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                          <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Access Key</p>
+                          <p className="text-xs font-mono font-black text-white">••••••</p>
+                       </div>
+                    </div>
+
+                    <div className="bg-white/5 p-4 rounded-xl border border-white/10 flex items-center justify-center gap-3">
+                       <ShieldCheck size={14} className="text-amber-500" />
+                       <p className="text-[7px] text-center text-slate-400 font-bold uppercase tracking-[0.2em] leading-relaxed">Auto-Syncing with Hardware Terminal</p>
+                    </div>
+                  </div>
+              </div>
+
+              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Balance</p>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tight italic">₹{(availableBalance || 0).toLocaleString()}</h3>
+                    </div>
+                    <button 
+                      onClick={() => setActiveTab('WITHDRAW')}
+                      className="bg-slate-900 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-transform"
+                    >
+                      Withdraw Money
+                    </button>
+                  </div>
+              </div>
+
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <h3 className="text-[10px] font-black italic text-slate-900 uppercase tracking-widest">Current Tasks ({assignments.length})</h3>
+                <span className="text-[8px] font-bold text-slate-400 uppercase">Live Updates</span>
+              </div>
+              
+              {assignments.map((task, idx) => (
+                <div key={task.id || idx} className="p-5 rounded-3xl flex items-center gap-4 bg-white shadow-sm border border-slate-100 hover:border-amber-200 transition-colors">
+                  <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 border border-slate-100">
+                    <CheckCircle2 size={24} className={task.status === 'completed' ? "text-green-500" : "text-slate-200"} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight truncate italic">Job Reference: {task.id?.slice(-6) || 'TASK-' + idx}</h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={cn(
+                          "text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md",
+                          task.status === 'completed' ? "bg-green-50 text-green-500" : "bg-amber-50 text-amber-500"
+                        )}>
+                          {task.status}
+                        </span>
+                        <span className="text-[8px] text-slate-300 font-bold">•</span>
+                        <span className="text-[8px] text-slate-400 font-bold uppercase">Earn: ₹{task.earnings}</span>
+                      </div>
+                  </div>
+                  {task.status !== 'completed' && (
+                    <button 
+                      onClick={async () => {
+                        if (confirm("Mark this task as completed?")) {
+                          await firebaseService.updateAssignmentStatus(task.id!, 'completed', task.earnings, task.campaignId);
+                        }
+                      }}
+                      className="bg-amber-50 text-amber-600 p-2 rounded-xl"
+                    >
+                      <CheckCircle2 size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              
+              {assignments.length === 0 && (
+                <div className="p-12 text-center bg-white rounded-[2rem] border border-dashed border-slate-200">
+                  <Globe size={32} className="mx-auto text-slate-200 mb-3 animate-spin-slow" />
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Finding nearby jobs...</p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <button onClick={() => setShowSupport(true)} className="w-full bg-white p-5 rounded-3xl flex items-center justify-between border border-slate-100 shadow-sm active:scale-98 transition-transform">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-500 border border-red-100"><AlertTriangle size={18} /></div>
+                    <div className="text-left"><h4 className="font-bold text-slate-900 text-sm italic">System Issue</h4></div>
+                  </div>
+                  <ChevronRight size={16} className="text-slate-300" />
+              </button>
+            </div>
+          </>
+        );
+    }
+  };
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-black text-slate-300 uppercase tracking-widest h-screen">Loading System...</div>;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-24 font-sans">
-      {/* Driver Header */}
       <header className="bg-white border-b border-slate-100 p-5 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-4">
           <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 font-bold overflow-hidden border border-slate-200">
-             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Manju" alt="Avatar" />
+             <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid || 'manju'}`} alt="Avatar" />
           </div>
           <div>
-            <h2 className="font-bold text-base text-slate-900 leading-tight">{t[lang].welcome}</h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">HSA-RICK-4822</p>
+            <h2 className="font-bold text-base text-slate-900 leading-tight">Welcome, {user?.displayName?.split(' ')[0] || 'Driver'}</h2>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{currentVehicleNo}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setShowLangPicker(true)}
-            className="px-3 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-[10px] font-bold text-slate-600 hover:bg-slate-100 transition-all border border-slate-100 gap-2"
-          >
-            <Globe size={16} />
-            {languages.find(l => l.code === lang)?.name.split(' ')[0]}
-          </button>
-          <button className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-600 border border-slate-100 relative">
-             <Bell size={18} />
-             <span className="absolute top-2.5 right-2.5 w-1.5 h-1.5 bg-amber-500 rounded-full border border-white" />
-          </button>
+        <div className="flex items-center gap-2">
+           <button onClick={() => setShowLangPicker(true)} className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-600 border border-slate-100"><Globe size={18} /></button>
+           <button 
+             onClick={onLogout}
+             className="w-10 h-10 bg-red-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20 hover:bg-red-600 transition-all"
+             title="Logout"
+           >
+              <LogOut size={18} />
+           </button>
         </div>
       </header>
 
-      <main className="p-6 space-y-6">
-        {/* Status Hub */}
-        <div className="glass-card p-6 rounded-3xl flex items-center justify-between shadow-sm">
-           <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t[lang].status}</p>
-              <div className="flex items-center gap-2">
-                 <div className={cn("w-2 h-2 rounded-full", status === 'ACTIVE' ? "bg-green-500 shadow-[0_0_8px_#22c55e]" : "bg-slate-400")} />
-                 <span className="font-bold text-slate-900 text-sm tracking-tight">{status === 'ACTIVE' ? t[lang].active : t[lang].offline}</span>
-              </div>
-           </div>
-           <button 
-            onClick={() => setStatus(status === 'ACTIVE' ? 'OFFLINE' : 'ACTIVE')}
-            className={cn("px-5 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all border", 
-              status === 'ACTIVE' ? "bg-slate-50 text-slate-400 border-slate-100" : "bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-200"
-            )}
-           >
-              {status === 'ACTIVE' ? t[lang].stopSession : t[lang].startSession}
-           </button>
-        </div>
+      {/* Global Floating Back Button - Visible only in sub-views and not when verification is active */}
+      <AnimatePresence>
+        {(activeTab === 'WITHDRAW' || showWithdraw || showSupport) && !showVerificationRequired && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            onClick={() => {
+              if (showWithdraw) setShowWithdraw(false);
+              else if (showSupport) setShowSupport(false);
+              else setActiveTab('EARNINGS');
+            }}
+            className="fixed top-20 left-6 z-[80] w-12 h-12 bg-white/80 backdrop-blur-md rounded-full shadow-lg border border-slate-200 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-95"
+          >
+            <ChevronRight size={24} className="rotate-180" />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
-        {/* Real-time Earnings Meter */}
-        <div className="grid grid-cols-2 gap-4">
-           <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-4">
-              <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-amber-500">
-                 <DollarSign size={20} />
-              </div>
-              <div>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">{t[lang].earnings}</p>
-                 <h3 className="text-2xl font-bold tracking-tight leading-none mb-1">₹842</h3>
-                 <p className="text-[8px] text-green-400 font-bold tracking-widest uppercase">{t[lang].trending}</p>
-              </div>
-           </div>
-           <div className="glass-card p-6 rounded-3xl space-y-4 shadow-sm">
-              <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-900 border border-slate-100">
-                 <BarChart2 size={20} />
-              </div>
-              <div>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">{t[lang].rides}</p>
-                 <h3 className="text-2xl font-bold tracking-tight leading-none mb-1">12</h3>
-                 <p className="text-[8px] text-slate-400 font-bold tracking-widest uppercase">{t[lang].cap}</p>
-              </div>
-           </div>
-        </div>
-
-        {/* Wallet & Withdrawal Section */}
-        <div className="glass-card p-6 rounded-3xl border border-amber-100 bg-amber-50/30 space-y-5">
-           <div className="flex items-center justify-between">
-              <div>
-                 <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mb-1">{t[lang].balance}</p>
-                 <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic">₹3,450.00</h3>
-              </div>
-              <button 
-                onClick={() => setShowWithdraw(true)}
-                className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
-              >
-                 <ArrowDownCircle size={24} />
-              </button>
-           </div>
-           <div className="flex items-center gap-2 p-3 bg-white/50 rounded-xl border border-amber-100">
-              <Info size={14} className="text-amber-500 shrink-0" />
-              <p className="text-[9px] font-bold uppercase text-slate-500 leading-tight">{t[lang].supportDesc}</p>
-           </div>
-        </div>
-
-        {/* Maintenance / Support */}
-        <div className="space-y-4">
-           <button 
-            onClick={() => setShowSupport(true)}
-            className="w-full group glass-card p-5 rounded-3xl flex items-center justify-between hover:bg-slate-50 transition-all shadow-sm"
-           >
-              <div className="flex items-center gap-4">
-                 <div className="w-11 h-11 bg-red-50 rounded-xl flex items-center justify-center text-red-500 border border-red-100">
-                    <AlertTriangle size={20} />
-                 </div>
-                 <div className="text-left">
-                    <h4 className="font-bold text-slate-900 text-sm italic">{t[lang].repair}</h4>
-                    <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{t[lang].instantSupport}</p>
-                 </div>
-              </div>
-              <ChevronRight size={18} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
-           </button>
-           
-           <button 
-            onClick={() => setShowDevice(true)}
-            className="w-full glass-card p-5 rounded-3xl flex items-center justify-between hover:bg-slate-50 transition-all shadow-sm"
-           >
-              <div className="flex items-center gap-4">
-                 <div className="w-11 h-11 bg-slate-50 rounded-xl flex items-center justify-center text-slate-900 border border-slate-100">
-                    <Settings size={20} />
-                 </div>
-                 <div className="text-left">
-                    <h4 className="font-bold text-slate-900 text-sm italic">{t[lang].devManager}</h4>
-                    <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{t[lang].hwDiagnostics}</p>
-                 </div>
-              </div>
-              <ChevronRight size={18} className="text-slate-200" />
-           </button>
-        </div>
+      <main className="p-8 space-y-10 max-w-4xl mx-auto">
+        {renderContent()}
       </main>
 
-      {/* Withdrawal Modal */}
       <AnimatePresence>
         {showWithdraw && (
-          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
-             <motion.div 
-               initial={{ opacity: 0 }}
-               animate={{ opacity: 1 }}
-               exit={{ opacity: 0 }}
-               onClick={() => setShowWithdraw(false)}
-               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-             />
-             <motion.div 
-               initial={{ y: '100%' }}
-               animate={{ y: 0 }}
-               exit={{ y: '100%' }}
-               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-               className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl space-y-8"
-             >
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowWithdraw(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
+             <motion.div initial={{ y: '100% '}} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] p-8 shadow-2xl space-y-8">
                 <div className="flex justify-between items-start">
-                   <div>
-                      <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">{t[lang].raiseWithdraw}</h3>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{t[lang].balance}: ₹3,450</p>
+                   <div className="flex flex-col">
+                      <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">Withdraw Funds</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 italic">Enter Payout Credentials</p>
                    </div>
-                   <button onClick={() => setShowWithdraw(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-colors">
-                      <X size={20} />
-                   </button>
+                   <button onClick={() => setShowWithdraw(false)} className="p-3 bg-slate-100 rounded-2xl text-slate-400 hover:bg-slate-200 transition-colors"><X size={20} /></button>
                 </div>
-
                 <div className="space-y-6">
-                   <div className="space-y-2">
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">{t[lang].enterAmount}</label>
-                      <div className="relative">
-                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
-                         <input 
-                           type="number" 
-                           placeholder="0.00" 
-                           className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-8 pr-4 font-bold text-lg focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                         />
+                   <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Available for Payout</p>
+                        <p className="text-xl font-black text-slate-900 italic">₹{availableBalance.toLocaleString()}</p>
+                      </div>
+                      <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center text-green-500">
+                        <CheckCircle2 size={24} />
                       </div>
                    </div>
-
-                   <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t[lang].linkedPayout}</p>
-                      <div className="flex items-center justify-between">
-                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-900 border border-slate-200">
-                               <Landmark size={20} />
-                            </div>
-                            <div>
-                               <p className="text-xs font-bold text-slate-900">SBI Commercial Bank</p>
-                               <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase">XXXX-XXXX-4822</p>
-                            </div>
-                         </div>
-                         <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-white">
-                            <CheckIcon size={12} strokeWidth={4} />
-                         </div>
-                      </div>
+                   <div className="space-y-4">
+                     <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Transfer Amount</label>
+                        <div className="relative">
+                          <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">₹</span>
+                          <input id="withdraw-amount" type="number" defaultValue={availableBalance} className="w-full bg-white border-2 border-slate-100 rounded-2xl py-5 pl-12 pr-6 font-black text-xl focus:border-amber-500 focus:outline-none transition-all shadow-sm" />
+                        </div>
+                     </div>
+                     <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Your UPI ID (Permanent Store)</label>
+                        <input 
+                          value={withdrawUpiId || driverProfile?.upiId || ''}
+                          onChange={(e) => setWithdrawUpiId(e.target.value)}
+                          placeholder="e.g. phone-number@ybl" 
+                          className="w-full bg-white border-2 border-slate-100 rounded-2xl py-5 px-6 font-black text-sm focus:border-amber-500 focus:outline-none transition-all shadow-sm" 
+                        />
+                     </div>
                    </div>
-
-                   <div className="space-y-4 pt-4">
-                      <button className="w-full py-5 bg-slate-900 text-white rounded-2xl font-bold text-[11px] uppercase tracking-widest shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
-                         <Smartphone size={18} /> {t[lang].confirmOtp}
-                      </button>
-                      <p className="text-center text-[10px] text-amber-600 font-bold uppercase tracking-tight italic">
-                         {t[lang].bankNote}
+                   <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 flex items-start gap-3">
+                      <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-[9px] font-bold uppercase text-amber-900 leading-relaxed tracking-wide">
+                        The entered UPI ID will be saved to your profile and used for all future payouts. Funds typically arrive within 48 hours.
                       </p>
                    </div>
+                   <button 
+                    onClick={() => {
+                      const amtInput = document.getElementById('withdraw-amount') as HTMLInputElement;
+                      const amt = parseFloat(amtInput?.value || '0');
+                      const upiToUse = withdrawUpiId || driverProfile?.upiId || '';
+                      if (amt > 0) handleWithdrawAction(amt, upiToUse);
+                    }}
+                    className="w-full py-6 bg-slate-950 text-amber-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 active:scale-95 transition-all"
+                   >
+                     Initialize Secure Payout
+                   </button>
                 </div>
              </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Support Issue Modal */}
-      <AnimatePresence>
-        {showSupport && (
-          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
-             <motion.div 
-               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-               onClick={() => setShowSupport(false)}
-               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-             />
-             <motion.div 
-               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-               className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl space-y-8"
-             >
-                <div className="flex justify-between items-start">
-                   <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">{t[lang].reportIssue}</h3>
-                   <button onClick={() => setShowSupport(false)} className="p-2 bg-slate-100 rounded-full text-slate-400"><X size={20}/></button>
-                </div>
-                <div className="space-y-4">
-                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">{t[lang].issueDesc}</p>
-                   <textarea 
-                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-bold focus:ring-1 focus:ring-amber-500 min-h-[120px]"
-                     placeholder="Hardware issue, Ad not playing, etc."
-                   />
-                   <button className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold text-[10px] uppercase tracking-[0.2em]">{t[lang].submitTicket}</button>
-                </div>
-             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Device Manager Modal */}
-      <AnimatePresence>
-        {showDevice && (
-          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
-             <motion.div 
-               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-               onClick={() => setShowDevice(false)}
-               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-             />
-             <motion.div 
-               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-               className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl space-y-6"
-             >
-                <div className="flex justify-between items-start">
-                   <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">{t[lang].hwStatus}</h3>
-                   <button onClick={() => setShowDevice(false)} className="p-2 bg-slate-100 rounded-full text-slate-400"><X size={20}/></button>
-                </div>
-                <div className="space-y-4">
-                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Main Display</span>
-                      <span className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Connected</span>
-                   </div>
-                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">GPS Module</span>
-                      <span className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Active (4 Sat)</span>
-                   </div>
-                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">LTE Signal</span>
-                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Weak Signal</span>
-                   </div>
-                   <button className="w-full py-4 bg-amber-500 text-slate-900 rounded-xl font-bold text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-amber-500/10 hover:bg-amber-600 transition-all">{t[lang].diagnostics}</button>
-                </div>
-             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Language Picker Modal */}
+      {/* Support and Device modals can be added back if needed, keeping it slim for now to fix build */}
       <AnimatePresence>
         {showLangPicker && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowLangPicker(false)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl space-y-6"
-            >
-              <div className="flex justify-between items-center">
-                 <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter">{t[lang].selectLanguage}</h3>
-                 <button onClick={() => setShowLangPicker(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 group hover:text-slate-900 transition-colors">
-                    <X size={20} />
-                 </button>
-              </div>
-
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowLangPicker(false)} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl">
+              <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter mb-6">Select Language</h3>
               <div className="grid grid-cols-2 gap-3">
                  {languages.map((l) => (
-                   <button 
-                    key={l.code}
-                    onClick={() => {
-                      setLang(l.code);
-                      setShowLangPicker(false);
-                    }}
-                    className={cn(
-                      "p-4 rounded-2xl border text-sm font-bold tracking-tight transition-all text-left",
-                      lang === l.code ? "bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-200" : "bg-slate-50 text-slate-600 border-slate-100 hover:bg-slate-100"
-                    )}
-                   >
-                      {l.name}
-                   </button>
+                   <button key={l.code} onClick={() => { setLang(l.code); setShowLangPicker(false); }} className={cn("p-4 rounded-2xl border text-sm font-bold transition-all", lang === l.code ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-600 border-slate-100")}>{l.name}</button>
                  ))}
               </div>
             </motion.div>
@@ -572,19 +628,174 @@ export default function DriverPortal() {
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-32 -right-4 pointer-events-none opacity-20">
-        <motion.div
-           animate={{ x: [-20, 20, -20] }}
-           transition={{ duration: 10, repeat: Infinity }}
-        >
-          🛺
-        </motion.div>
-      </div>
+      <AnimatePresence>
+        {showBankModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowBankModal(false)} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter">Bank Linkage</h3>
+                <button onClick={() => setShowBankModal(false)}><X size={20} /></button>
+              </div>
+              <div className="space-y-4">
+                <input placeholder="Account Holder Name" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold" id="bank-holder" />
+                <input placeholder="Account Number" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold" id="bank-acc" />
+                <input placeholder="IFSC Code" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold uppercase" id="bank-ifsc" />
+                <button 
+                  onClick={() => {
+                    const holder = (document.getElementById('bank-holder') as HTMLInputElement).value;
+                    const acc = (document.getElementById('bank-acc') as HTMLInputElement).value;
+                    const ifsc = (document.getElementById('bank-ifsc') as HTMLInputElement).value;
+                    handleSaveBank({ accountHolder: holder, accountNumber: acc, ifscCode: ifsc, bankName: 'SBI', isVerified: true });
+                  }}
+                  className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase"
+                >
+                  Link Bank Account
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
+      <AnimatePresence>
+        {activeTicketId && (
+          <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setActiveTicketId(null)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+              <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                   <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-900">
+                      <MessageSquare size={20} />
+                   </div>
+                   <div>
+                      <h3 className="text-sm font-black italic uppercase tracking-widest">{supportTickets.find(t => t.id === activeTicketId)?.title || 'Support Chat'}</h3>
+                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Active System Support</p>
+                   </div>
+                </div>
+                <button onClick={() => setActiveTicketId(null)} className="p-2 bg-white/10 rounded-xl text-white/60"><X size={20} /></button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {chatMessages.map((msg) => (
+                  <div key={msg.id} className={cn("flex flex-col max-w-[80%]", msg.senderId === user?.uid ? "ml-auto items-end" : "mr-auto items-start")}>
+                    <div className={cn(
+                      "p-4 rounded-2xl text-[13px] font-medium leading-relaxed shadow-sm",
+                      msg.senderId === user?.uid ? "bg-slate-900 text-white rounded-tr-none" : "bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200"
+                    )}>
+                      {msg.text}
+                    </div>
+                    <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-widest">
+                       {msg.senderName} • {msg.timestamp ? new Date(msg.timestamp.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Sending...'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-6 border-t border-slate-100 flex items-center gap-3 bg-white">
+                <input 
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  placeholder="Type your message..." 
+                  className="flex-1 bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 font-medium text-sm focus:border-slate-900 focus:outline-none transition-all shadow-inner"
+                />
+                <button 
+                  onClick={handleSendMessage}
+                  disabled={!newMessage.trim()}
+                  className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center transition-all disabled:opacity-50 active:scale-90"
+                >
+                  <Send size={18} />
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSupport && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowSupport(false)} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter">Support Hub</h3>
+                <button onClick={() => setShowSupport(false)}><X size={20} /></button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                   {supportTickets.map((ticket) => (
+                     <button 
+                        key={ticket.id} 
+                        onClick={() => { setActiveTicketId(ticket.id!); setShowSupport(false); }}
+                        className="w-full p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-100 flex items-center justify-between transition-colors text-left"
+                     >
+                        <div>
+                           <p className="text-[10px] font-black text-slate-900 uppercase italic leading-none">{ticket.title}</p>
+                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 line-clamp-1">{ticket.lastMessage || ticket.description}</p>
+                        </div>
+                        <ChevronRight size={14} className="text-slate-300" />
+                     </button>
+                   ))}
+                   {supportTickets.length === 0 && (
+                     <p className="text-[10px] text-center text-slate-300 font-bold uppercase py-4">No active conversations</p>
+                   )}
+                </div>
+
+                <div className="pt-4 border-t border-slate-100">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 italic">Initiate New Conversation</p>
+                  <textarea placeholder="e.g. Ad screen flicker, payment delay..." className="w-full p-4 bg-slate-50 border rounded-2xl font-medium min-h-[100px] text-sm" id="support-desc" />
+                  <button 
+                    onClick={async () => {
+                      const desc = (document.getElementById('support-desc') as HTMLTextAreaElement).value;
+                      if (!user || !desc.trim()) return;
+                      await firebaseService.createSupportTicket({
+                        driverId: user.uid,
+                        driverName: user.displayName || 'Driver',
+                        title: "System Issue " + new Date().toLocaleDateString(),
+                        description: desc
+                      });
+                      (document.getElementById('support-desc') as HTMLTextAreaElement).value = '';
+                    }}
+                    className="w-full mt-4 py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-xl transition-all active:scale-95"
+                  >
+                    Start New Chat
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showVerificationRequired && user && (
+          <StrictVerificationSystem 
+            uid={user.uid} 
+            onComplete={() => {
+              setIsLocallyVerified(true);
+              setShowVerificationRequired(false);
+              setShowWithdraw(true); // Auto-open withdrawal after verification
+            }} 
+            onLogout={() => setShowVerificationRequired(false)} 
+          />
+        )}
+      </AnimatePresence>
+
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/80 backdrop-blur-xl border border-white/20 p-3 rounded-[2.5rem] z-[90] flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.1)]">
+         <button onClick={() => setActiveTab('EARNINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'EARNINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
+            <BarChart2 size={20} />
+            {activeTab === 'EARNINGS' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Status</span>}
+         </button>
+         <button onClick={() => setActiveTab('WITHDRAW')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'WITHDRAW' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
+            <Wallet size={20} />
+            {activeTab === 'WITHDRAW' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Wallet</span>}
+         </button>
+      </footer>
     </div>
   );
 }
-
-const CheckIcon = ({ size, strokeWidth }: { size: number, strokeWidth: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-);

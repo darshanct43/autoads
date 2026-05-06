@@ -1,9 +1,9 @@
-export type UserRole = 'CUSTOMER' | 'DRIVER' | 'ADMIN' | 'STAFF';
+export type UserRole = 'CUSTOMER' | 'DRIVER' | 'ADMIN' | 'SUPPORT' | 'STAFF' | 'DEVICE';
 
 export interface User {
   id: string;
   name: string;
-  phoneNumber: string;
+  email: string;
   role: UserRole;
   avatar?: string;
 }
@@ -11,12 +11,14 @@ export interface User {
 export interface AdCampaign {
   id: string;
   title: string;
-  status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'REJECTED';
-  budget: number;
-  area: string;
-  views: number;
-  duration: number; // in days
-  type: 'VIDEO' | 'IMAGE';
+  clientName?: string;
+  mediaUrl: string;
+  mediaType: 'VIDEO' | 'IMAGE';
+  status: 'PENDING' | 'ACTIVE' | 'REJECTED';
+  createdBy: string; // User ID
+  approvedBy?: string; // Admin User ID
+  assignedDrivers: string[]; // Driver IDs
+  createdAt: string;
 }
 
 export interface AutoDevice {

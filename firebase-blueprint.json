@@ -1,0 +1,350 @@
+{
+  "entities": {
+    "driver": {
+      "title": "Driver",
+      "description": "A vehicle driver in the network",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "driverCode": { "type": "string", "description": "Unique driver ID (DRV-0000 format)" },
+        "password": { "type": "string", "description": "Login password for device" },
+        "deviceId": { "type": "string", "description": "Unique ID of the locked device" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "rcNumber": { "type": "string" },
+        "dlNumber": { "type": "string" },
+        "profileImage": { "type": "string" },
+        "rcUrl": { "type": "string" },
+        "dlUrl": { "type": "string" },
+        "aadharUrl": { "type": "string" },
+        "selfieUrl": { "type": "string" },
+        "synced": { "type": "boolean" },
+        "bio": { "type": "string" },
+        "bankDetails": {
+          "type": "object",
+          "properties": {
+            "accountHolder": { "type": "string" },
+            "accountNumber": { "type": "string" },
+            "ifscCode": { "type": "string" },
+            "bankName": { "type": "string" },
+            "isVerified": { "type": "boolean" }
+          }
+        },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "isVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastLoginAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "phone", "vehicleNumber", "rcNumber", "dlNumber", "status"]
+    },
+    "driverLog": {
+      "title": "Driver Log",
+      "description": "Login/Logout logs for a driver",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["login", "logout"] },
+        "deviceId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "timestamp"]
+    },
+    "campaign": {
+      "title": "Campaign",
+      "description": "A media campaign uploaded by a client or staff",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["IMAGE", "VIDEO"] },
+        "status": { "type": "string", "enum": ["PENDING", "ACTIVE", "REJECTED"] },
+        "durationDays": { "type": "number", "description": "Number of days the campaign will run" },
+        "hoursPerDay": { "type": "number", "description": "Hours per day for playback" },
+        "maxAutos": { "type": "number", "description": "Number of vehicles assigned" },
+        "targetArea": { "type": "string" },
+        "createdBy": { "type": "string", "description": "UID of the creator" },
+        "approvedBy": { "type": "string", "description": "UID of the approving admin" },
+        "assignedDrivers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "mediaUrl", "mediaType", "status", "createdBy", "createdAt"]
+    },
+    "campaignMedia": {
+      "title": "Campaign Media",
+      "description": "Images or videos associated with a campaign",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["image", "video"] },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "url", "createdAt"]
+    },
+    "campaignPayment": {
+      "title": "Campaign Payment",
+      "description": "Payments received for a campaign",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "paymentId": { "type": "string" },
+        "method": { "type": "string", "enum": ["UPI", "card", "netbanking"] },
+        "status": { "type": "string", "enum": ["paid", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "paymentId", "status", "createdAt"]
+    },
+    "campaignAssignment": {
+      "title": "Campaign Assignment",
+      "description": "Assignment of a driver to a campaign",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "status": { "type": "string", "enum": ["assigned", "approved", "running", "completed"] },
+        "earnings": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "campaignId", "status", "createdAt"]
+    },
+    "driverPayout": {
+      "title": "Driver Payout",
+      "description": "Payout record for a driver",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string", "enum": ["cash", "manual_transfer"] },
+        "status": { "type": "string", "enum": ["pending", "paid", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "amount", "status", "createdAt"]
+    },
+    "driverPayment": {
+      "title": "Driver Payment",
+      "description": "Earnings and withdrawals ledger for drivers",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string" },
+        "driverId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["earning", "withdrawal"] },
+        "status": { "type": "string", "enum": ["pending", "success", "failed"] },
+        "paymentMethod": { "type": "string" },
+        "upiApp": { "type": "string" },
+        "upiTransactionId": { "type": "string" },
+        "screenshotUrl": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "amount", "type", "status"]
+    },
+    "withdrawRequest": {
+      "title": "Withdrawal Request",
+      "description": "Driver request to withdraw earnings via UPI",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "driverId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "upiId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "processedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "amount", "status", "upiId"]
+    },
+    "payout": {
+      "title": "Payout",
+      "description": "Outgoing money to drivers",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "paid"] },
+        "requestDate": { "type": "string", "format": "date-time" },
+        "paidDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "amount", "status", "requestDate"]
+    },
+    "supportTicket": {
+      "title": "Support Ticket",
+      "description": "Issue reported by a driver",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "title", "description", "status", "createdAt"]
+    },
+    "user": {
+      "title": "User",
+      "description": "A user profile record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["DRIVER", "CUSTOMER", "STAFF", "SUPPORT", "ADMIN"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "phone", "role"]
+    },
+    "driverLocation": {
+      "title": "Driver Location",
+      "description": "Live GPS tracking for ad coverage reporting",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "speed": { "type": "number" },
+        "heading": { "type": "number" },
+        "isOnline": { "type": "boolean" },
+        "activeCampaignId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "lat", "lng", "updatedAt"]
+    }
+  },
+    "plans": {
+      "title": "Pricing Plans",
+      "description": "Subscription and ad deployment plans",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "deviceScreen": {
+      "title": "Device Screen",
+      "description": "Snapshot of the device screen for remote monitoring",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["playing", "error", "idle"] }
+      }
+    }
+  },
+  "firestore": {
+    "/deviceScreens/{driverId}": {
+      "schema": "deviceScreen",
+      "description": "Real-time device screen snapshots"
+    },
+    "/plans/{planId}": {
+      "schema": "plans",
+      "description": "Public pricing catalog"
+    },
+    "/drivers/{driverId}": {
+      "schema": "driver",
+      "description": "Driver profiles"
+    },
+    "/drivers/{driverId}/locations/{locationId}": {
+      "schema": "driverLocation",
+      "description": "Historical GPS logs for ad coverage verification"
+    },
+    "/driverLocations/{driverId}": {
+      "schema": "driverLocation",
+      "description": "Latest known position of drivers"
+    },
+    "/drivers/{driverId}/logs/{logId}": {
+      "schema": "driverLog",
+      "description": "Driver activity logs"
+    },
+    "/campaigns/{campaignId}": {
+      "schema": "campaign",
+      "description": "Media campaigns"
+    },
+    "/campaigns/{campaignId}/media/{mediaId}": {
+      "schema": "campaignMedia",
+      "description": "Campaign media assets"
+    },
+    "/campaigns/{campaignId}/payments/{paymentId}": {
+      "schema": "campaignPayment",
+      "description": "Campaign client payments"
+    },
+    "/campaignAssignments/{assignmentId}": {
+      "schema": "campaignAssignment",
+      "description": "Driver campaign assignments"
+    },
+    "/driverPayouts/{payoutId}": {
+      "schema": "driverPayout",
+      "description": "Driver earnings payouts"
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": "supportTicket",
+      "description": "Support query tickets"
+    },
+    "/withdrawRequests/{requestId}": {
+      "schema": "withdrawRequest",
+      "description": "Driver withdrawal requests"
+    },
+    "/driverPayments/{paymentId}": {
+      "schema": "driverPayment",
+      "description": "Ledger of driver earnings and payments"
+    },
+    "/campaignPayments/{paymentId}": {
+      "schema": "campaignPayment",
+      "description": "Client ad payments"
+    },
+    "/payouts/{payoutId}": {
+      "schema": "payout",
+      "description": "Driver earning payouts"
+    },
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "System user records"
+    },
+    "/publicNotices/{noticeId}": {
+      "schema": {
+        "title": "Public Notice",
+        "description": "Broadcast notices for drivers",
+        "type": "object",
+        "properties": {
+          "offer": { "type": "string" },
+          "autoCount": { "type": "string" },
+          "targetRegion": { "type": "string" },
+          "media": { "type": "string" },
+          "mediaType": { "type": "string" },
+          "timestamp": { "type": "string" }
+        }
+      },
+      "description": "Network-wide broadcast signals"
+    },
+    "/incentiveOffers/{offerId}": {
+      "schema": {
+        "title": "Incentive Offer",
+        "description": "Targeted offers for specific drivers",
+        "type": "object",
+        "properties": {
+          "driverId": { "type": "string" },
+          "offer": { "type": "string" },
+          "status": { "type": "string" },
+          "createdAt": { "type": "string" }
+        }
+      },
+      "description": "Individual driver incentive signals"
+    },
+    "/payments/{paymentId}": {
+      "schema": "campaignPayment",
+      "description": "Global payment tracking"
+    }
+  }
+}
