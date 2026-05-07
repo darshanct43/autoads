@@ -87,7 +87,7 @@ export default function BrandIntroduction({ onComplete }: BrandIntroductionProps
           >
             
             <img 
-              src="/mayaan_logo.jpeg" 
+              src={`${import.meta.env.BASE_URL}mayaan_logo.jpeg`} 
               alt="Mayaan Logo" 
               className="w-full h-auto object-contain relative z-10 drop-shadow-[0_20px_60px_rgba(0,0,0,0.6)] scale-110" 
             />

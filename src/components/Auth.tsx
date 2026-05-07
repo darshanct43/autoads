@@ -440,7 +440,7 @@ export default function Auth({ onLogin }: AuthProps) {
            <div className="absolute right-0 top-0 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full" />
            <div className="flex items-center gap-4 md:gap-6 mb-2 relative z-10">
               <div className="h-16 md:h-20 flex items-center justify-center relative z-10">
-                <img src="/mayaan_logo.jpeg" alt="Mayaan" className="h-full w-auto object-contain drop-shadow-lg" />
+                <img src={`${import.meta.env.BASE_URL}mayaan_logo.jpeg`} alt="Mayaan" className="h-full w-auto object-contain drop-shadow-lg" />
               </div>
              <div>
                <h2 className="text-2xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500 leading-none">
