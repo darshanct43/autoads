@@ -406,14 +406,10 @@ export default function Auth({ onLogin }: AuthProps) {
       setAuthEmail(phoneBasedEmail);
       setUserName(`User ${phone}`);
 
-          try {
-        const res = await apiService.sendOTP(`+91${phone}`);
-        if (res.status === 'pending') {
-          setRole(selectedRole);
-          setAuthMode('OTP');
-        } else {
-          setError('System connection error. Please try again.');
-        }
+      try {
+        await apiService.sendOTP(`+91${phone}`);
+        setRole(selectedRole);
+        setAuthMode('OTP');
       } catch (otpErr: any) {
         // Fallback for development/sandbox environments
         setRole(selectedRole);
