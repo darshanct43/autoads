@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "in.autoads.driver.app-merged_res-44:/layout_activity_main.xml.flat",
+        "source": "in.autoads.driver.app-main-46:/layout/activity_main.xml"
+    },
+    {
+        "merged": "in.autoads.driver.app-merged_res-44:/layout_activity_live_tracking.xml.flat",
+        "source": "in.autoads.driver.app-main-46:/layout/activity_live_tracking.xml"
+    },
+    {
+        "merged": "in.autoads.driver.app-merged_res-44:/layout_activity_verification.xml.flat",
+        "source": "in.autoads.driver.app-main-46:/layout/activity_verification.xml"
+    },
+    {
+        "merged": "in.autoads.driver.app-merged_res-44:/layout_activity_login.xml.flat",
+        "source": "in.autoads.driver.app-main-46:/layout/activity_login.xml"
+    }
+]

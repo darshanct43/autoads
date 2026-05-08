@@ -1,0 +1,28 @@
+R_DEF: Internal format may change without notice
+local
+id adVideoView
+id dlNumberInput
+id driverCodeInput
+id loginButton
+id mapView
+id passwordInput
+id pickDlImageButton
+id pickRcImageButton
+id rcNumberInput
+id submitButton
+id tvCoords
+id tvSpeed
+layout activity_live_tracking
+layout activity_login
+layout activity_main
+layout activity_verification
+string app_name
+string default_web_client_id
+string gcm_defaultSenderId
+string google_api_key
+string google_app_id
+string google_crash_reporting_api_key
+string google_storage_bucket
+string project_id
+style Theme.AutoAds
+style Theme.AutoAds.FullScreen
