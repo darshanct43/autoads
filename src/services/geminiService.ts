@@ -1,9 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const ai = new GoogleGenAI({
-  apiKey: import.meta.env.VITE_GEMINI_API_KEY
-})
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
+export const genAI = new GoogleGenerativeAI(apiKey);
+
+export default genAI;
 export const geminiService = {
   async chat(message: string, history: { role: 'user' | 'model', parts: { text: string }[] }[] = [], language = 'English') {
     try {
