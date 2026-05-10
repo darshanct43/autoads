@@ -1042,7 +1042,7 @@ export default function AdminPortal({
             title="Terminal Management"
           >
             <Terminal size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Terminal</span>
             {activeTab === "TERMINAL_HUB" && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
             )}
@@ -1115,22 +1115,6 @@ export default function AdminPortal({
             )}
           </button>
           <button
-            onClick={() => setActiveTab("TERMINAL_HUB")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "TERMINAL_HUB"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Terminal Management"
-          >
-            <Terminal size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
-            {activeTab === "TERMINAL_HUB" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
             onClick={() => setActiveTab("FLEET")}
             className={cn(
               "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
@@ -1143,22 +1127,6 @@ export default function AdminPortal({
             <Truck size={20} />
             <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "FLEET" && "opacity-100")}>Fleet</span>
             {activeTab === "FLEET" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("TERMINAL_HUB")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "TERMINAL_HUB"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Terminal Management"
-          >
-            <Terminal size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
-            {activeTab === "TERMINAL_HUB" && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
             )}
           </button>
@@ -1259,6 +1227,17 @@ export default function AdminPortal({
           {liveScreensCount > 0 && (
             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab("TERMINAL_HUB")}
+          className={cn(
+            "p-2 rounded-xl transition-all",
+            activeTab === "TERMINAL_HUB"
+              ? "bg-amber-500 text-slate-950"
+              : "text-slate-500",
+          )}
+        >
+          <Terminal size={20} />
         </button>
         <button
           onClick={() => setActiveTab("FLEET")}

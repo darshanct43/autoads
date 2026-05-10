@@ -1,46 +1,42 @@
-# Ignore everything by default
-*
+# Build and Environment
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.*.local
 
-# Allow directories
-!src/
-!src/**
-!public/
-!public/**
+# IDE and System Files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
 
-# Allow specific configuration and source files in root
-!.gitignore
-!.env.example
-!package.json
-!package-lock.json
-!vite.config.ts
-!tsconfig.json
-!eslint.config.js
-!index.html
-!metadata.json
-!server.ts
-!firebase-applet-config.json
-!firebase-blueprint.json
-!firestore.rules
-!storage.rules
-!security_spec.md
-
-# Explicitly ignore common mobile/junk folders if they leak 
+# Mobile/Android/Flutter Junk (Previously leaked)
 android/
 ios/
 flutter/
 .gradle/
-.idea/
-.vscode/
-
-# Ignore standard build/temp folders even if unignored by wildcard
-node_modules/
-dist/
-uploads/
-build/
-*.zip
-*.log
 *.kt
 *.java
 *.gradle
 *.xml
 *.properties
+local.properties
+.cxx/
+capture/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Temporary files
+*.zip
+*.tar.gz
+*.rar
+tmp/
+temp/
