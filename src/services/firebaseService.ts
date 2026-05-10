@@ -11,8 +11,6 @@ import {
   Timestamp,
   setDoc,
   getDoc,
-  getDocFromServer,
-  getDocsFromServer,
   writeBatch,
   orderBy,
   deleteDoc,
@@ -33,6 +31,9 @@ export interface Driver {
   dlNumber?: string;
   aadharNumber?: string;
   deviceId?: string;
+  terminalId?: string;
+  accessKey?: string;
+  provisionStatus?: 'IDLE' | 'PROVISIONED' | 'ACTIVE';
   driverCode?: string;
   password?: string;
   gpsId?: string;
@@ -48,6 +49,15 @@ export interface Driver {
   aadharPhoto?: string;
   rcPhoto?: string;
   dlPhoto?: string;
+  panPhoto?: string;
+  insurancePhoto?: string;
+  selfiePhoto?: string;
+  bankDetails?: {
+    accountNumber: string;
+    ifscCode: string;
+    bankName: string;
+    holderName: string;
+  };
 }
 
 export interface AdCampaign {
@@ -57,15 +67,21 @@ export interface AdCampaign {
   description?: string;
   mediaUrl: string;
   mediaType: 'VIDEO' | 'IMAGE';
-  status: 'PENDING' | 'ACTIVE' | 'REJECTED';
+  status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE';
   durationDays?: number;
   hoursPerDay?: number;
   maxAutos?: number;
   targetArea?: string;
+  targetCity?: string;
+  targetState?: string;
   createdBy: string;
   approvedBy?: string;
   assignedDrivers: string[];
   createdAt: any;
+  timestamp?: any;
+  devices?: number;
+  type?: string;
+  videoThumbnail?: string;
 }
 
 export interface UserProfile {
@@ -231,6 +247,7 @@ export interface Payment {
   status: 'SUCCESS' | 'FAILED' | 'PENDING' | 'success' | 'failed' | 'pending' | 'PENDING_ADMIN_VERIFY';
   customerId: string;
   campaignId: string;
+  driverId?: string;
   createdAt: any;
 }
 
@@ -374,6 +391,72 @@ export const firebaseService = {
     }
   },
 
+  // Plan Proposals Logic
+  async proposePlanChange(planId: string, newPrice: number, proposedBy: string) {
+    try {
+      const proposal = {
+        planId,
+        newPrice,
+        proposedBy,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      };
+      return await addDoc(collection(db, 'planProposals'), proposal);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'planProposals');
+      throw e;
+    }
+  },
+
+  async getPlanProposals() {
+    try {
+      const snap = await getDocs(query(collection(db, 'planProposals'), where('status', '==', 'pending')));
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'planProposals');
+      throw e;
+    }
+  },
+
+  async approvePlanProposal(proposalId: string, planId: string, newPrice: number) {
+    try {
+      const batch = writeBatch(db);
+      
+      // Update the plan
+      const planRef = doc(db, 'plans', planId);
+      batch.update(planRef, {
+        price: newPrice,
+        updatedAt: serverTimestamp()
+      });
+
+      // Update the proposal status
+      const proposalRef = doc(db, 'planProposals', proposalId);
+      batch.update(proposalRef, {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: auth.currentUser?.uid
+      });
+
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'planProposals');
+      throw e;
+    }
+  },
+
+  async rejectPlanProposal(proposalId: string) {
+    try {
+      await updateDoc(doc(db, 'planProposals', proposalId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+        rejectedBy: auth.currentUser?.uid
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'planProposals');
+      throw e;
+    }
+  },
+
   // --- NEW MULTI-ROLE CAMPAIGN METHODS ---
 
   async createCampaign(campaign: { title: string, mediaUrl?: string, mediaType?: 'VIDEO' | 'IMAGE', [key: string]: any }) {
@@ -432,6 +515,7 @@ export const firebaseService = {
         maxAutos: details.maxAutos,
         startDate: details.startDate || null,
         endDate: details.endDate || null,
+        assignedDrivers: details.assignedDrivers, // Ensure this is saved
         status: 'ACTIVE',
         approvedBy: auth.currentUser?.uid,
         updatedAt: serverTimestamp()
@@ -471,6 +555,153 @@ export const firebaseService = {
       console.log("[Notification] Support: Campaign has been rejected.");
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, 'campaigns');
+      throw e;
+    }
+  },
+
+  async adminApproveDriverAndProvisionTerminal(driverId: string, name: string) {
+    try {
+      const accessKey = Math.floor(100000 + Math.random() * 900000).toString();
+      const terminalId = `TRM-${name.split(' ')[0].toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      
+      const batch = writeBatch(db);
+      
+      // Update Driver
+      const driverRef = doc(db, 'drivers', driverId);
+      batch.update(driverRef, {
+        status: 'active',
+        isVerified: true,
+        terminalId,
+        accessKey,
+        provisionStatus: 'PROVISIONED',
+        updatedAt: serverTimestamp()
+      });
+
+      // Create Terminal Record
+      const terminalRef = doc(collection(db, 'terminals'), terminalId);
+      batch.set(terminalRef, {
+        id: terminalId,
+        driverId,
+        accessKey,
+        status: 'PROVISIONED',
+        createdAt: serverTimestamp(),
+        lastSync: null
+      });
+
+      await batch.commit();
+      return { terminalId, accessKey };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'drivers/terminals');
+      throw e;
+    }
+  },
+
+  async getTerminals() {
+    try {
+      const snap = await getDocs(collection(db, 'terminals'));
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'terminals');
+      throw e;
+    }
+  },
+
+  subscribeToTerminals(callback: (terminals: any[]) => void) {
+    const q = query(collection(db, 'terminals'), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(docs);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'terminals'));
+  },
+
+  subscribeToLiveStatus(callback: (status: any[]) => void) {
+    const q = query(collection(db, 'liveStatus'));
+    return onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(docs);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'liveStatus', true));
+  },
+
+  async recordDeviceLog(terminalId: string, log: any) {
+    try {
+      return await addDoc(collection(db, `terminals/${terminalId}/logs`), {
+        ...log,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, `terminals/${terminalId}/logs`);
+      throw e;
+    }
+  },
+
+  async updateLiveStatus(terminalId: string, status: any) {
+    try {
+      await setDoc(doc(db, 'liveStatus', terminalId), {
+        ...status,
+        terminalId,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'liveStatus');
+      throw e;
+    }
+  },
+
+  async revokeTerminal(terminalId: string, driverId: string) {
+    try {
+      const batch = writeBatch(db);
+      
+      const terminalRef = doc(db, 'terminals', terminalId);
+      batch.update(terminalRef, {
+        status: 'REVOKED',
+        revokedAt: serverTimestamp()
+      });
+
+      const driverRef = doc(db, 'drivers', driverId);
+      batch.update(driverRef, {
+        provisionStatus: 'IDLE',
+        terminalId: null,
+        accessKey: null,
+        deviceId: null
+      });
+
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'terminals/drivers');
+      throw e;
+    }
+  },
+
+  async activateTerminal(terminalId: string, accessKey: string, deviceInfo: any) {
+    try {
+      const terminalRef = doc(db, 'terminals', terminalId);
+      const snap = await getDoc(terminalRef);
+      
+      if (!snap.exists()) throw new Error("Terminal not found");
+      const data = snap.data();
+      
+      if (data.accessKey !== accessKey) throw new Error("Invalid access key");
+      if (data.status === 'ACTIVE' && data.deviceId && data.deviceId !== deviceInfo.deviceId) {
+        throw new Error("Terminal already active on another device");
+      }
+
+      await updateDoc(terminalRef, {
+        status: 'ACTIVE',
+        deviceId: deviceInfo.deviceId,
+        deviceName: deviceInfo.deviceName,
+        lastActivationAt: serverTimestamp(),
+        lastSync: serverTimestamp()
+      });
+
+      // Also update driver status
+      await updateDoc(doc(db, 'drivers', data.driverId), {
+        provisionStatus: 'ACTIVE',
+        deviceId: deviceInfo.deviceId
+      });
+
+      return data;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'terminals/activation');
       throw e;
     }
   },
@@ -611,6 +842,40 @@ export const firebaseService = {
     });
   },
 
+  async pairTerminal(terminalId: string, accessKey: string, driverId: string) {
+    const docRef = doc(db, 'terminals', terminalId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error('Terminal ID not found');
+    const data = snap.data();
+    if (data.accessKey !== accessKey) throw new Error('Invalid Access Key');
+    
+    await updateDoc(docRef, {
+      status: 'PAIRED',
+      driverId,
+      pairedAt: serverTimestamp(),
+      lastPulse: serverTimestamp()
+    });
+    return { id: snap.id, ...data };
+  },
+
+  async syncTerminalPulse(terminalId: string, metrics: any) {
+    const docRef = doc(db, 'terminals', terminalId);
+    await updateDoc(docRef, {
+      metrics,
+      lastPulse: serverTimestamp(),
+      onlineStatus: 'ONLINE'
+    });
+  },
+
+  subscribeToTerminalCommands(terminalId: string, callback: (terminal: any) => void) {
+    const docRef = doc(db, 'terminals', terminalId);
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        callback({ id: snapshot.id, ...snapshot.data() });
+      }
+    }, (error) => handleFirestoreError(error, OperationType.GET, `terminals/${terminalId}`));
+  },
+
   // Support Tickets
 
   async sendChatMessage(ticketId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>) {
@@ -686,10 +951,7 @@ export const firebaseService = {
 
   // Users
   async saveUserProfile(userId: string, name: string, phone: string, role: string, subscriptionTier: 'FREE' | 'PREMIUM' | 'ENTERPRISE' = 'FREE') {
-    console.log("[FirebaseService] Attempting to save user profile for:", userId);
-    console.log("[FirebaseService] Current Auth UID:", auth.currentUser?.uid);
-    console.log("[FirebaseService] Current Auth Email:", auth.currentUser?.email);
-    console.log("[FirebaseService] Rules should be wide open right now.");
+    console.log("[FirebaseService] Syncing user profile...");
     
     const userRef = doc(db, USERS_COLLECTION, userId);
     try {
@@ -715,21 +977,22 @@ export const firebaseService = {
     if (!userId) return null;
     const userRef = doc(db, USERS_COLLECTION, userId);
     try {
-      const snap = await getDocFromServer(userRef);
+      // Use standard getDoc instead of getDocFromServer to allow cache usage
+      const snap = await getDoc(userRef);
       if (snap.exists()) {
         return { id: snap.id, ...snap.data() } as any;
       }
       return null;
     } catch (e: any) {
-      console.warn("[FirebaseService] getUserProfile error:", e.message);
+      console.warn("[FirebaseService] getUserProfile failed (Resilient fallback):", e.message);
       return null;
     }
   },
 
-  async getDriverProfile(uid: string) {
+  async getDriverProfile(uid: string): Promise<Driver | null> {
     const docRef = doc(db, DRIVERS_COLLECTION, uid);
     const snap = await getDoc(docRef);
-    return snap.exists() ? snap.data() : null;
+    return snap.exists() ? { id: snap.id, ...snap.data() } as Driver : null;
   },
 
   async uploadDriverDocument(uid: string, type: 'RC' | 'DL' | 'PROFILE' | 'AADHAR', file: File, onProgress?: (percent: number) => void) {
@@ -1177,12 +1440,11 @@ export const firebaseService = {
   async getDrivers(): Promise<Driver[]> {
     const q = query(collection(db, 'drivers'), orderBy('createdAt', 'desc'));
     try {
-      const snap = await getDocsFromServer(q);
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, uid: d.id, ...d.data() } as any));
     } catch (e) {
       console.error("Fetch Error:", e);
-      const snap = await getDocs(q); // Fallback to standard getDocs
-      return snap.docs.map(d => ({ id: d.id, uid: d.id, ...d.data() } as any));
+      return [];
     }
   },
 
@@ -1328,7 +1590,9 @@ export const firebaseService = {
         'tracking',
         'stats',
         'active_payouts',
-        'admin_logs'
+        'admin_logs',
+        'terminals',
+        'liveStatus'
       ];
 
       for (const colName of topLevelCollections) {
@@ -1341,7 +1605,7 @@ export const firebaseService = {
           
           for (const docSnap of chunk) {
             // Safety for admin
-            if (colName === 'users' && (docSnap.data().email === 'darshanct43@gmail.com' || docSnap.data().uid === auth.currentUser?.uid)) {
+            if (colName === 'users' && (docSnap.data().email === 'admin@autoads.in' || docSnap.data().uid === auth.currentUser?.uid)) {
               continue;
             }
 
@@ -1393,12 +1657,19 @@ export const firebaseService = {
     }
   },
 
-  async uploadFileWithProgress(path: string, file: File | Blob, onProgress?: (percent: number) => void) {
+  async uploadFileWithProgress(path: string, file: File | Blob, onProgress?: (percent: number) => void, timeoutMs: number = 120000) {
     try {
       const storageRef = ref(storage, path);
       const uploadTask = uploadBytesResumable(storageRef, file);
       
-      return new Promise<string>((resolve, reject) => {
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => {
+          uploadTask.cancel();
+          reject(new Error("Uplink Timeout: Connection too slow. Operation aborted after 2 minutes."));
+        }, timeoutMs);
+      });
+
+      const uploadPromise = new Promise<string>((resolve, reject) => {
         uploadTask.on('state_changed', 
           (snapshot) => {
             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
@@ -1411,6 +1682,8 @@ export const firebaseService = {
           }
         );
       });
+
+      return await Promise.race([uploadPromise, timeoutPromise]);
     } catch (e) {
       console.error(`[FirebaseService] uploadFileWithProgress error:`, e);
       throw e;

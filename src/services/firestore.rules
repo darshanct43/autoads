@@ -137,8 +137,19 @@ service cloud.firestore {
 
     // Latest location
     match /driverLocations/{driverId} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == driverId);
       allow write: if isOwner(driverId) && isValidDriverLocation(incoming()) || isAdmin();
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource == null || resource.data.customerId == request.auth.uid));
+      allow create: if isSignedIn() && (
+        incoming().customerId == request.auth.uid &&
+        incoming().status in ['PENDING', 'PENDING_ADMIN_VERIFY']
+      );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /locationLogs/{logId} {

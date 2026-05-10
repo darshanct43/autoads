@@ -32,7 +32,7 @@ export default function AdminAssistant({ activeTab, systemContext }: AdminAssist
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([
     { 
       role: "assistant", 
-      content: `System online. I've synced with the latest network telemetry. How can I assist you today?` 
+      content: `System online. I've established a secure telemetry uplink with the network. How can I assist you today?` 
     }
   ]);
   const [input, setInput] = useState("");
@@ -61,7 +61,7 @@ export default function AdminAssistant({ activeTab, systemContext }: AdminAssist
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({apiKey: import.meta.env.VITE_GEMINI_API_KEY});
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
       
       const transactionsBrief = systemContext.transactions
         .slice(0, 8)
@@ -69,7 +69,7 @@ export default function AdminAssistant({ activeTab, systemContext }: AdminAssist
         .join("\n");
 
       const systemInstruction = `
-        You are "Darshan's AI Secretary". You managed the Auto Ads Global Network.
+        You are "Admin's AI Secretary". You managed the Auto Ads Global Network.
         
         CURRENT LOCATION: Admin is at ${activeTab}.
         
@@ -83,7 +83,7 @@ export default function AdminAssistant({ activeTab, systemContext }: AdminAssist
         ${transactionsBrief || "Activity is standard."}
         
         RULES:
-        1. Be CASUAL but EFFICIENT. Address him as "Darshan" frequently.
+        1. Be CASUAL but EFFICIENT. Address them as "Admin" frequently.
         2. EXTREMELY SHORT ANSWERS. One sentence if possible.
         3. If you don't have data, just say "Don't know" or "No data found".
         4. "Extract/Report"? Rapid fire summary of LIVE DATA.

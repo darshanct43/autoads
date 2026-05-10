@@ -14,7 +14,7 @@ import {
 import { cn } from "../lib/utils";
 
 // Initialize Gemini API
-const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY});
+const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
 
 interface Message {
   role: "user" | "model";
@@ -74,7 +74,7 @@ export function AiChat() {
     setError(null);
 
     try {
-      if (!import.meta.env.VITE_GEMINI_API_KEY){
+      if (!import.meta.env.VITE_GEMINI_API_KEY) {
         throw new Error("Gemini API key is not configured.");
       }
 

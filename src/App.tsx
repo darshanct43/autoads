@@ -16,8 +16,9 @@ import BrandIntroduction from './components/common/BrandIntroduction';
 import BrandPopup from './components/common/BrandPopup';
 import ChatBot from './components/common/ChatBot';
 import { AnimatePresence, motion } from 'motion/react';
-import { LogOut, Layout } from 'lucide-react';
+import { LogOut, Layout, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
@@ -29,23 +30,30 @@ import { offlineStorageService } from './services/offlineStorageService';
 export default function App() {
   const [role, setRole] = useState<UserRole | null>(() => {
     // Initial check for device simulator session
-    if (typeof window !== 'undefined' && localStorage.getItem('auto_ads_device_uid')) {
-      return 'DEVICE';
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('terminalId') || localStorage.getItem('auto_ads_terminal_id')) {
+        return 'DEVICE';
+      }
     }
     return null;
   });
   const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL'>(() => {
-    if (typeof window !== 'undefined' && localStorage.getItem('auto_ads_device_uid')) {
-      return 'PORTAL';
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('terminalId') || localStorage.getItem('auto_ads_terminal_id')) {
+        return 'PORTAL';
+      }
     }
     return 'BOOT';
   });
   const [authReady, setAuthReady] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isOfflineVerified, setIsOfflineVerified] = useState(false);
 
   const checkOfflineVerification = async () => {
-    const sessionUid = auth.currentUser?.uid || localStorage.getItem('auto_ads_device_uid');
+    const sessionUid = auth.currentUser?.uid || localStorage.getItem('auto_ads_terminal_id');
     if (sessionUid) {
       try {
         const meta = await offlineStorageService.getMeta(sessionUid);
@@ -83,7 +91,7 @@ export default function App() {
   useEffect(() => {
     // Watch for online status to trigger sync
     const handleOnline = () => {
-      const sessionUid = auth.currentUser?.uid || localStorage.getItem('auto_ads_device_uid');
+      const sessionUid = auth.currentUser?.uid || localStorage.getItem('auto_ads_terminal_id');
       if (sessionUid && isOfflineVerified) {
         offlineStorageService.syncDocuments(sessionUid);
       }
@@ -104,12 +112,12 @@ export default function App() {
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (user) => {
-      console.log("[App] Auth State Changed:", user ? "USER PRESENT" : "NO USER");
+      console.log("[App] Auth State Changed:", user ? `USER: ${user.email}` : "NO USER");
       
       await checkOfflineVerification();
       
       // Do not overwrite role if we are in Device Simulator mode
-      if (localStorage.getItem('auto_ads_device_uid')) {
+      if (localStorage.getItem('auto_ads_terminal_id')) {
         setRole('DEVICE');
         setSystemState('PORTAL');
         setAuthReady(true);
@@ -118,44 +126,45 @@ export default function App() {
       }
 
       if (user) {
+        setLoading(true);
         const emailLower = user.email?.toLowerCase() || '';
         
-        // Immediate Admin Lock-in for recognized accounts
-        if (emailLower === 'darshanct43@gmail.com') {
-          console.log("[App] Super Admin detected:", emailLower);
-          setRole('ADMIN');
-          setSystemState('PORTAL');
-          setAuthReady(true);
-          setIsInitializing(false);
-          return;
-        }
-
         try {
           const profile = await firebaseService.getUserProfile(user.uid);
           const driverProfile = await firebaseService.getDriverProfile(user.uid);
           
           let userRole: UserRole = 'CUSTOMER';
           
+          // Role Priority Resolution (Trust Firestore Profile First)
           if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
-            userRole = profile?.role as UserRole || 'ADMIN';
-          } else if (emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support') || emailLower.includes('staff') || emailLower.includes('agent')) {
+            userRole = 'ADMIN';
+          } else if (emailLower === 'vijayathrishu@gmail.com') {
             userRole = 'SUPPORT';
-          } else if (profile?.role === 'DRIVER' || driverProfile || emailLower.includes('driver')) {
+          } else if (profile?.role === 'ADMIN') {
+            userRole = 'ADMIN';
+          } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF') {
+            userRole = 'SUPPORT';
+          } else if (profile?.role === 'DRIVER') {
             userRole = 'DRIVER';
-          } else if (profile?.role === 'STAFF' || profile?.role === 'SUPPORT') {
-            userRole = profile?.role as UserRole;
+          } else if (emailLower.includes('support') || emailLower.includes('staff')) {
+            userRole = 'SUPPORT';
+          } else if (emailLower.includes('driver') || driverProfile) {
+            userRole = 'DRIVER';
+          } else if (profile?.role) {
+            userRole = profile.role as UserRole;
           }
+          
+          console.log("[App] Final Resolved Role:", userRole, "from profile:", profile?.role);
           
           // If driver profile is missing critical details, redirect to profile setup in Auth
           if (userRole === 'DRIVER' && !driverProfile) {
             console.log("[App] Driver record missing, redirecting to Auth setup");
-            setSystemState('AUTH');
             setRole(userRole);
-            return;
+            setSystemState('AUTH');
+          } else {
+            setRole(userRole);
+            setSystemState('PORTAL');
           }
-
-          setRole(userRole);
-          setSystemState('PORTAL');
         } catch (e) {
           console.warn("[App] Session recovery silent failure:", e);
           if (emailLower === 'admin@autoads.in') {
@@ -163,14 +172,18 @@ export default function App() {
             setSystemState('PORTAL');
           }
         }
+      } else {
+        setRole(null);
+        if (systemState === 'PORTAL') setSystemState('AUTH');
       }
       
       setAuthReady(true);
       setIsInitializing(false);
+      setLoading(false);
     });
 
     return () => unsub();
-  }, [systemState]);
+  }, []);
 
   const handleLogin = (selectedRole: UserRole) => {
     checkOfflineVerification();
@@ -184,7 +197,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      localStorage.removeItem('auto_ads_device_uid');
+      localStorage.removeItem('auto_ads_terminal_id');
       await signOut(auth);
       setRole(null);
       setSystemState('AUTH');
@@ -226,17 +239,23 @@ export default function App() {
             exit={{ opacity: 0, scale: 0.98 }}
             className="relative"
           >
-            {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-            {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
-            {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
-            {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-            {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
+            <ErrorBoundary componentName={`${role} Portal`}>
+              {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
+              {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
+              {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
+              {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
+              {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
+            </ErrorBoundary>
             
             {/* Brand Popup (Mayaan) */}
             <BrandPopup />
             
             {/* Global Features */}
-            {(role === 'CUSTOMER' || role === 'DRIVER') && <ChatBot />}
+            {(role === 'CUSTOMER' || role === 'DRIVER') && (
+              <ErrorBoundary componentName="ChatBot">
+                <ChatBot />
+              </ErrorBoundary>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

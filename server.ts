@@ -6,6 +6,8 @@ import * as admin from 'firebase-admin';
 import twilio from 'twilio';
 import fs from 'fs';
 import multer from 'multer';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +54,22 @@ function getAdmin() {
     }
   }
   return adminApp;
+}
+
+// Lazy Razorpay Initialization
+let rzp: any = null;
+function getRazorpay() {
+  if (!rzp) {
+    const keyId = process.env.VITE_RAZORPAY_KEY_ID;
+    const secret = process.env.RAZORPAY_SECRET;
+    if (keyId && secret) {
+      rzp = new Razorpay({
+        key_id: keyId,
+        key_secret: secret
+      });
+    }
+  }
+  return rzp;
 }
 
 // Configure Multer for local storage
@@ -136,6 +154,243 @@ async function startServer() {
       status: "ok", 
       message: "Ready"
     });
+  });
+
+  // Razorpay Webhook (Production Ready)
+  app.post("/api/razorpay/create-order", async (req, res) => {
+    const { amount, currency, notes } = req.body;
+    
+    try {
+      const razorpay = getRazorpay();
+      if (!razorpay) {
+        return res.status(500).json({ error: "Razorpay credentials not configured in backend." });
+      }
+
+      const order = await razorpay.orders.create({
+        amount: Math.round(amount * 100), // convert to paise
+        currency: currency || "INR",
+        notes: notes || {}
+      });
+
+      console.log(`[PAYMENT] Order Created: ${order.id} for ₹${amount}`);
+      res.json(order);
+    } catch (error: any) {
+      console.error("[PAYMENT] Order Creation Failed:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/razorpay/verify-payment", async (req, res) => {
+    const { 
+      razorpay_order_id, 
+      razorpay_payment_id, 
+      razorpay_signature,
+      campaignData,
+      planData,
+      uid
+    } = req.body;
+
+    const secret = process.env.RAZORPAY_SECRET;
+    if (!secret) {
+      return res.status(500).json({ error: "Razorpay Secret missing on server." });
+    }
+
+    const generated_signature = crypto
+      .createHmac("sha256", secret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (generated_signature !== razorpay_signature) {
+      console.error("[PAYMENT] Manual Verification Failed: Signature Mismatch");
+      return res.status(400).json({ error: "Invalid payment signature" });
+    }
+
+    console.log(`[PAYMENT] Verified Payment: ${razorpay_payment_id}`);
+
+    // Update Firestore after successful server-side verification
+    try {
+      const adminAppInstance = getAdmin();
+      if (adminAppInstance) {
+        const dbAdm = adminAppInstance.firestore();
+        
+        // 1. Create Campaign
+        const campaignRef = await dbAdm.collection('campaigns').add({
+          ...campaignData,
+          status: 'PAID', // Direct activation since verified
+          paymentStatus: 'PAID',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // 2. Record Payment
+        await dbAdm.collection('payments').add({
+          campaignId: campaignRef.id,
+          orderId: razorpay_order_id,
+          transactionId: razorpay_payment_id,
+          amount: planData.amount,
+          status: 'SUCCESS',
+          customerId: uid,
+          paymentMethod: 'razorpay',
+          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          gatewayResponse: { razorpay_payment_id, razorpay_order_id }
+        });
+
+        console.log(`[PAYMENT] Campaign ${campaignRef.id} activated after verification.`);
+        res.json({ status: "success", campaignId: campaignRef.id });
+      } else {
+        res.status(500).json({ error: "Admin SDK not available" });
+      }
+    } catch (error: any) {
+      console.error("[PAYMENT] Verification Post-Processing Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/razorpay/webhook", async (req, res) => {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers["x-razorpay-signature"] as string;
+
+    if (!secret || !signature) {
+      console.warn("[PAYMENT] Webhook arrived without secret/signature setup.");
+      return res.status(400).send("Webhook configuration missing");
+    }
+
+    const body = JSON.stringify(req.body);
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex");
+
+    if (expectedSignature !== signature) {
+      console.error("[PAYMENT] Invalid Webhook Signature.");
+      return res.status(400).send("invalid signature");
+    }
+
+    const event = req.body.event;
+    const payload = req.body.payload;
+    const webhookId = req.body.id || `wh_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+    console.log(`[PAYMENT] Received Webhook Event: ${event} (ID: ${webhookId})`);
+
+    try {
+      const adminAppInstance = getAdmin();
+      if (!adminAppInstance) {
+        return res.status(500).send("Admin SDK not ready");
+      }
+
+      const dbAdm = adminAppInstance.firestore();
+
+      // 1. Idempotency Check & Logging
+      const logRef = dbAdm.collection('webhookLogs').doc(webhookId);
+      const logSnap = await logRef.get();
+      if (logSnap.exists) {
+        console.log(`[PAYMENT] Webhook ${webhookId} already processed. Skipping.`);
+        return res.status(200).send("already processed");
+      }
+
+      await logRef.set({
+        event,
+        payload,
+        receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processed: false
+      });
+
+      // 2. Process Event Logic
+      if (event === "payment.captured" || event === "order.paid") {
+        const paymentEntity = event === "payment.captured" ? payload.payment.entity : payload.order.entity;
+        const paymentId = paymentEntity.id;
+        const orderId = paymentEntity.order_id || (event === "order.paid" ? paymentEntity.id : null);
+
+        // Try to find matching payment record
+        let paymentSnap = await dbAdm.collection('payments')
+          .where('transactionId', '==', paymentId)
+          .get();
+
+        if (paymentSnap.empty && orderId) {
+          paymentSnap = await dbAdm.collection('payments')
+            .where('orderId', '==', orderId)
+            .get();
+        }
+
+        if (!paymentSnap.empty) {
+          const paymentDoc = paymentSnap.docs[0];
+          const paymentData = paymentDoc.data();
+
+          // Avoid duplicate success processing
+          if (paymentData.status !== 'SUCCESS') {
+            await paymentDoc.ref.update({
+              status: 'SUCCESS',
+              verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+              gatewayOrderId: orderId,
+              gatewayResponse: paymentEntity
+            });
+
+            // Auto-Activate Campaign
+            if (paymentData.campaignId) {
+              console.log(`[PAYMENT] Auto-Activating Campaign: ${paymentData.campaignId}`);
+              await dbAdm.collection('campaigns').doc(paymentData.campaignId).update({
+                status: 'ACTIVE',
+                paymentStatus: 'PAID',
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          }
+        } else {
+          // Fallback: Create record for unknown captures
+          if (event === "payment.captured") {
+            await dbAdm.collection('payments').add({
+              transactionId: paymentId,
+              orderId: orderId,
+              amount: paymentEntity.amount / 100,
+              status: 'SUCCESS',
+              customerId: paymentEntity.email || 'webhook-origin',
+              verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+              gatewayResponse: paymentEntity,
+              source: 'webhook-discovery'
+            });
+          }
+        }
+      } else if (event === "payment.failed") {
+        const paymentEntity = payload.payment.entity;
+        const paymentSnap = await dbAdm.collection('payments')
+          .where('transactionId', '==', paymentEntity.id)
+          .get();
+
+        if (!paymentSnap.empty) {
+          await paymentSnap.docs[0].ref.update({
+            status: 'FAILED',
+            gatewayResponse: paymentEntity,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      } else if (event === "refund.processed") {
+        const refundEntity = payload.refund.entity;
+        const paymentSnap = await dbAdm.collection('payments')
+          .where('transactionId', '==', refundEntity.payment_id)
+          .get();
+
+        if (!paymentSnap.empty) {
+          await paymentSnap.docs[0].ref.update({
+            status: 'REFUNDED',
+            refundResponse: refundEntity,
+            refundedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      }
+
+      // Mark as processed
+      await logRef.update({ processed: true });
+      res.status(200).send("ok");
+
+    } catch (e: any) {
+      console.error("[PAYMENT] Webhook processing fatal error:", e.message);
+      res.status(500).send("internal error");
+    }
+  });
+
+  // Keep compatibility for old endpoint if existing integrations use it
+  app.post("/api/payments/webhook", (req, res) => {
+    res.redirect(307, "/api/razorpay/webhook");
   });
 
   // Twilio OTP Endpoints

@@ -53,7 +53,7 @@ import { auth } from "@/lib/firebase";
 import { UserRole } from "@/types";
 import RoadmapChart from "../common/RoadmapChart";
 import AdminAssistant from "../common/AdminAssistant";
-import { AiChat } from "../AiChat";
+import { ErrorBoundary } from "../common/ErrorBoundary";
 
 import {
   MapContainer,
@@ -197,10 +197,14 @@ export default function AdminPortal({
   const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
+  const [showDocModal, setShowDocModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
-  const [opFeedback, setOpFeedback] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [opFeedback, setOpFeedback] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [terminals, setTerminals] = useState<any[]>([]);
+  const [liveStatus, setLiveStatus] = useState<any[]>([]);
 
   useEffect(() => {
     if (opFeedback) {
@@ -212,12 +216,10 @@ export default function AdminPortal({
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   const [purgeInput, setPurgeInput] = useState("");
 
-  const liveUnitsCount = driverLocations.filter((loc) => {
-    if (loc.isOnline === false || loc.isOnline === "false") return false;
-    if (!loc.timestamp) return false;
-    
-    const lastUpdate = new Date(loc.timestamp).getTime();
-    return Date.now() - lastUpdate < 600000; // 10 minutes window
+  const liveUnitsCount = liveStatus.filter((status) => {
+    if (!status.updatedAt) return false;
+    const lastUpdate = status.updatedAt.toMillis?.() || 0;
+    return Date.now() - lastUpdate < 60000; // 1 minute window for live status
   }).length;
   const [selectedLocation, setSelectedLocation] = useState<any>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([
@@ -358,7 +360,7 @@ export default function AdminPortal({
   };
 
   const totalSuccessfulRevenue = (payments || [])
-    .filter((p) => p.status === "success")
+    .filter((p) => p && (p.status === "success" || p.status === "SUCCESS"))
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   useEffect(() => {
@@ -411,6 +413,8 @@ export default function AdminPortal({
     const unsubScreens =
       firebaseService.subscribeToDeviceScreens(setDeviceScreens);
     const unsubNotices = firebaseService.subscribeToPublicNotices(setNotices);
+    const unsubTerminals = firebaseService.subscribeToTerminals(setTerminals);
+    const unsubLiveStatus = firebaseService.subscribeToLiveStatus(setLiveStatus);
 
     firebaseService.getPlans().then(setPlans).catch(console.error);
     
@@ -428,6 +432,8 @@ export default function AdminPortal({
       unsubLocations();
       unsubScreens();
       unsubNotices();
+      unsubTerminals();
+      unsubLiveStatus();
     };
   }, []);
 
@@ -492,7 +498,7 @@ export default function AdminPortal({
     if (!newNotice.offer || !newNotice.message) return;
     try {
       await firebaseService.createPublicNotice(newNotice);
-      setNewNotice({ offer: "", message: "", targetRegion: "" });
+      setNewNotice({ offer: "", message: "", targetRegion: "", imageUrl: "" });
       showToast("Festival offer published successfully!", 'success');
     } catch (err) {
       console.error(err);
@@ -510,18 +516,38 @@ export default function AdminPortal({
     }
   };
 
-  const handleUpdatePlan = async (planId: string, newPrice: number) => {
-    setIsUpdatingPlan(planId);
+  const [planProposals, setPlanProposals] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchProposals = async () => {
+      const ps = await firebaseService.getPlanProposals();
+      setPlanProposals(ps);
+    };
+    fetchProposals();
+  }, []);
+
+  const handleApprovePlan = async (proposalId: string, planId: string, newPrice: number) => {
     try {
-      await firebaseService.updatePlan(planId, { price: newPrice });
-      setPlans(
-        plans.map((p) => (p.id === planId ? { ...p, price: newPrice } : p)),
-      );
-      showToast("Plan price updated successfully.", 'success');
-    } catch (err) {
-      showToast("Pricing update failed.", 'error');
-    } finally {
-      setIsUpdatingPlan(null);
+      await firebaseService.approvePlanProposal(proposalId, planId, newPrice);
+      const up = await firebaseService.getPlans();
+      setPlans(up);
+      const props = await firebaseService.getPlanProposals();
+      setPlanProposals(props);
+      showToast("Plan rate updated successfully!", 'success');
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to approve plan change.", 'error');
+    }
+  };
+
+  const handleRejectPlan = async (proposalId: string) => {
+    try {
+      await firebaseService.rejectPlanProposal(proposalId);
+      const props = await firebaseService.getPlanProposals();
+      setPlanProposals(props);
+      showToast("Plan proposal rejected.", 'info');
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -816,7 +842,8 @@ export default function AdminPortal({
   );
 
   return (
-    <div className="flex h-screen bg-[#f8fafc] text-slate-600 overflow-hidden relative">
+    <ErrorBoundary componentName="Admin Command Center">
+      <div className="flex h-screen bg-[#f8fafc] text-slate-600 overflow-hidden relative">
       <AnimatePresence>
         {showPurgeConfirm && (
           <motion.div
@@ -833,7 +860,7 @@ export default function AdminPortal({
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-6">
                 <Trash2 className="text-red-500" size={32} />
               </div>
-              <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-2 italic">
+              <h3 className="text-2xl font-black uppercase text-slate-900 mb-2 italic">
                 System Narrative Wipe
               </h3>
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest leading-relaxed mb-6">
@@ -877,7 +904,7 @@ export default function AdminPortal({
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="w-20 bg-slate-950 flex flex-col items-center py-8 gap-8 border-r border-slate-800 relative z-30 transition-all duration-300 hidden md:flex">
+      <div className="w-20 bg-slate-950 flex flex-col items-center py-8 gap-8 border-r border-slate-800 relative z-30 transition-all duration-300 hidden md:flex overflow-y-auto custom-scrollbar">
         <div className="flex flex-col gap-5">
           <button
             onClick={() => setActiveTab("DASHBOARD")}
@@ -973,9 +1000,92 @@ export default function AdminPortal({
             )}
           </button>
           <button
+            onClick={() => setActiveTab("DASHBOARD")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "DASHBOARD"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Dashboard"
+          >
+            <Activity size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "DASHBOARD" && "opacity-100")}>Stats</span>
+            {activeTab === "DASHBOARD" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("MAP")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "MAP"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Live Tracking Map"
+          >
+            <MapPin size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "MAP" && "opacity-100")}>Map</span>
+            {activeTab === "MAP" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("TERMINAL_HUB")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "TERMINAL_HUB"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Terminal Management"
+          >
+            <Terminal size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
+            {activeTab === "TERMINAL_HUB" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("CAMPAIGNS")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "CAMPAIGNS"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Campaign Management"
+          >
+            <Monitor size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "CAMPAIGNS" && "opacity-100")}>Ads</span>
+            {activeTab === "CAMPAIGNS" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("MONITOR")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "MONITOR"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Live Monitoring"
+          >
+            <Smartphone size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "MONITOR" && "opacity-100")}>Live</span>
+            {activeTab === "MONITOR" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+            {liveScreensCount > 0 && (
+              <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
+            )}
+          </button>
+          <button
             onClick={() => setActiveTab("PRICING")}
             className={cn(
-              "p-3 rounded-2xl transition-all relative group",
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
               activeTab === "PRICING"
                 ? "bg-amber-500 text-slate-950"
                 : "text-slate-500 hover:bg-white/5 hover:text-white",
@@ -983,6 +1093,7 @@ export default function AdminPortal({
             title="Market Pricing"
           >
             <IndianRupee size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "PRICING" && "opacity-100")}>Rates</span>
             {activeTab === "PRICING" && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
             )}
@@ -990,7 +1101,7 @@ export default function AdminPortal({
           <button
             onClick={() => setActiveTab("PAYMENTS")}
             className={cn(
-              "p-3 rounded-2xl transition-all relative group",
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
               activeTab === "PAYMENTS"
                 ? "bg-amber-500 text-slate-950"
                 : "text-slate-500 hover:bg-white/5 hover:text-white",
@@ -998,14 +1109,31 @@ export default function AdminPortal({
             title="Payments Registry"
           >
             <CreditCard size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "PAYMENTS" && "opacity-100")}>Pay</span>
             {activeTab === "PAYMENTS" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("TERMINAL_HUB")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "TERMINAL_HUB"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Terminal Management"
+          >
+            <Terminal size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
+            {activeTab === "TERMINAL_HUB" && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
             )}
           </button>
           <button
             onClick={() => setActiveTab("FLEET")}
             className={cn(
-              "p-3 rounded-2xl transition-all relative group",
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
               activeTab === "FLEET"
                 ? "bg-amber-500 text-slate-950"
                 : "text-slate-500 hover:bg-white/5 hover:text-white",
@@ -1013,7 +1141,24 @@ export default function AdminPortal({
             title="Fleet Management"
           >
             <Truck size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "FLEET" && "opacity-100")}>Fleet</span>
             {activeTab === "FLEET" && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("TERMINAL_HUB")}
+            className={cn(
+              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
+              activeTab === "TERMINAL_HUB"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-500 hover:bg-white/5 hover:text-white",
+            )}
+            title="Terminal Management"
+          >
+            <Terminal size={20} />
+            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Hub</span>
+            {activeTab === "TERMINAL_HUB" && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
             )}
           </button>
@@ -1054,7 +1199,7 @@ export default function AdminPortal({
               Support
             </span>
             <a
-              href="mailto:darshanct43@gmail.com"
+              href="mailto:admin@autoads.in"
               className="text-slate-400 hover:text-white transition-colors"
               title="Contact Technical Support"
             >
@@ -1177,18 +1322,9 @@ export default function AdminPortal({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden lg:flex flex-col items-end px-4 border-r border-slate-100">
-              <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-                Broadcast Clock
-              </p>
-              <p className="text-sm font-black text-slate-900 tabular-nums leading-none">
-                {currentTime.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                  hour12: false,
-                })}
-              </p>
+            <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100">
+               <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+               <span className="text-[9px] font-black text-slate-800 uppercase tracking-widest italic">Mayaan Network Live</span>
             </div>
             <button
               onClick={() => setShowPurgeConfirm(true)}
@@ -1251,13 +1387,21 @@ export default function AdminPortal({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto md:overflow-hidden px-8 py-8 md:px-12 md:py-10 space-y-10 md:space-y-12">
+        <main className="flex-1 overflow-y-auto px-8 py-8 md:px-12 md:py-10 space-y-10 md:space-y-12 custom-scrollbar">
           {showRoadmap ? (
             <RoadmapChart onClose={() => setShowRoadmap(false)} />
           ) : activeTab === "DASHBOARD" ? (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-              {[
+              {(drivers.length === 0 && campaigns.length === 0) ? (
+                <div className="col-span-full py-20 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center gap-4">
+                  <Activity className="text-slate-200 animate-pulse" size={48} />
+                  <div className="text-center">
+                    <h3 className="text-sm font-black text-slate-400 uppercase italic">Awaiting Network Synchronization</h3>
+                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">Deploy terminals or approve drivers to see metrics</p>
+                  </div>
+                </div>
+              ) : [
                 {
                   label: "Active Campaigns",
                   value: (campaigns || []).filter((c) =>
@@ -1316,7 +1460,7 @@ export default function AdminPortal({
                         </span>
                       </div>
                       <div className="space-y-0.5">
-                        <h3 className="text-xl md:text-3xl font-black text-white tracking-tighter truncate italic">
+                        <h3 className="text-xl md:text-2xl font-black text-white truncate italic tracking-tight">
                           {stat.value}
                         </h3>
                         <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-600 opacity-60">
@@ -1329,10 +1473,10 @@ export default function AdminPortal({
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <div className="xl:col-span-2 group">
-                  <div className="bg-white p-6 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all h-full">
-                    <div className="flex items-center justify-between mb-8">
+                    <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl transition-all h-full">
+                    <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="text-sm md:text-lg font-black text-slate-900 uppercase tracking-tighter italic">
+                        <h3 className="text-sm md:text-base font-black text-slate-900 uppercase italic">
                           Live Network Performance
                         </h3>
                         <p className="text-[10px] md:text-[12px] text-slate-400 uppercase tracking-widest font-black opacity-60">
@@ -1421,11 +1565,11 @@ export default function AdminPortal({
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-col gap-6">
-                  <div className="bg-white p-6 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm flex-1">
-                    <div className="flex items-center justify-between mb-8">
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-tighter italic">
-                        Node Distribution
+                <div className="flex flex-col gap-3">
+                  <div className="bg-white p-3 md:p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                       <h3 className="text-[10px] font-black text-slate-900 uppercase italic">
+                        Node Activation
                       </h3>
                     </div>
                     <div className="space-y-6">
@@ -1463,16 +1607,16 @@ export default function AdminPortal({
                       onClick={(e) => handleExtractionClick(e, drivers, "Global_Status_Report")}
                       disabled={isExtracting}
                       className={cn(
-                        "w-full mt-10 py-5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.3em] shadow-2xl transition-all",
+                        "w-full mt-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl transition-all",
                         isExtracting 
                           ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
-                          : "bg-slate-950 text-amber-500 hover:scale-[1.02] active:scale-95"
+                          : "bg-slate-950 text-white hover:bg-amber-500 hover:text-slate-950 active:scale-95"
                       )}
                     >
-                      {isExtracting ? "PROCESSING EXTRACTION..." : "GENERATE REPORT"}
+                      {isExtracting ? "PROCESSING..." : "GENERATE REPORT"}
                     </button>
                   </div>
-                  <div className="bg-amber-500 p-10 rounded-[2.5rem] shadow-xl shadow-amber-500/10 text-slate-950 flex flex-col justify-between overflow-hidden relative group">
+                  <div className="bg-amber-500 p-4 md:p-6 rounded-2xl shadow-xl shadow-amber-500/10 text-slate-950 flex flex-col justify-between overflow-hidden relative group">
                     <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
                       <Activity size={120} />
                     </div>
@@ -1480,7 +1624,7 @@ export default function AdminPortal({
                       <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">
                         Fleet Pulse
                       </p>
-                      <h4 className="text-3xl font-black italic tracking-tighter">
+                      <h4 className="text-3xl font-black italic">
                         NETWORK
                         <br />
                         ACCELERATED
@@ -1498,7 +1642,7 @@ export default function AdminPortal({
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 bg-slate-950 rounded-full animate-ping"></span>
                           <span className="text-[11px] font-black uppercase">
-                            Syncing Live Nodes...
+                            Processing Live Nodes...
                           </span>
                         </div>
                       )}
@@ -1509,11 +1653,11 @@ export default function AdminPortal({
             </>
           ) : activeTab === "CAMPAIGNS" ? (
             <div className="space-y-6">
-              <div className="bg-slate-900 p-6 md:p-10 rounded-[2.5rem] text-white relative overflow-hidden shadow-2xl">
+              <div className="bg-slate-900 p-4 md:p-6 rounded-2xl text-white relative overflow-hidden shadow-2xl">
                 <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
                 <div className="relative z-10 flex items-center justify-between">
                   <div>
-                    <h2 className="text-xl md:text-3xl font-black italic uppercase text-amber-500">
+                    <h2 className="text-lg md:text-2xl font-black italic uppercase text-amber-500">
                       Campaign Matrix
                     </h2>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -1553,7 +1697,7 @@ export default function AdminPortal({
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
                   <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                    <h3 className="text-xs font-black text-slate-900 uppercase italic tracking-tighter">
+                    <h3 className="text-xs font-black text-slate-900 uppercase italic">
                       Live Deployment Inventory
                     </h3>
                     <span className="text-[10px] font-black text-slate-400">
@@ -1589,7 +1733,7 @@ export default function AdminPortal({
                               )}
                             </div>
                             <div>
-                              <h4 className="text-sm font-black text-slate-900 uppercase tracking-tighter leading-none mb-1">
+                              <h4 className="text-sm font-black text-slate-900 uppercase leading-none mb-1">
                                 {c.title}
                               </h4>
                               <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
@@ -1636,12 +1780,12 @@ export default function AdminPortal({
                   )}
                 >
                   {!selectedCampaign ? (
-                    <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center p-12 text-center space-y-6">
+                    <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center p-6 md:p-8 text-center space-y-4">
                       <div className="w-20 h-20 bg-amber-500/10 text-amber-500 rounded-[2rem] flex items-center justify-center animate-pulse">
                         <MousePointer2 size={32} />
                       </div>
                       <div className="space-y-2">
-                        <h3 className="text-sm font-black text-slate-900 uppercase tracking-tighter">
+                        <h3 className="text-sm font-black text-slate-900 uppercase">
                           Selection Required
                         </h3>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] max-w-[200px]">
@@ -1651,9 +1795,9 @@ export default function AdminPortal({
                       </div>
                     </div>
                   ) : null}
-                  <div className="p-8 border-b border-slate-50 bg-slate-50/30">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-xs font-black text-slate-900 uppercase italic tracking-tighter">
+                  <div className="p-4 border-b border-slate-50 bg-slate-50/30">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xs font-black text-slate-900 uppercase italic">
                         Inventory Configuration
                       </h3>
                       <span className="px-3 py-1 bg-green-100 text-green-600 text-[8px] font-black uppercase rounded-lg">
@@ -1739,23 +1883,98 @@ export default function AdminPortal({
               </div>
             </div>
           ) : activeTab === "REVIEWS" ? (
-            <div className="space-y-8">
-              <div className="bg-amber-500 p-8 md:p-12 rounded-[2.5rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden">
-                <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 blur-3xl rounded-full -mr-16 -mt-16" />
-                <div className="relative z-10">
-                  <h2 className="text-2xl md:text-5xl font-black italic uppercase leading-none tracking-tighter">
-                    Quality Control
-                  </h2>
-                  <p className="text-[10px] md:text-[12px] font-black uppercase tracking-[0.3em] mt-3 opacity-60">
-                    Pending Deployment Verification Queue
-                  </p>
+    <div className="space-y-8">
+      <div className="bg-amber-500 p-6 md:p-8 rounded-[2rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 blur-3xl rounded-full -mr-16 -mt-16" />
+        <div className="relative z-10">
+          <h2 className="text-2xl md:text-5xl font-black italic uppercase leading-none">
+            Quality Control
+          </h2>
+          <p className="text-[10px] md:text-[12px] font-black uppercase tracking-[0.3em] mt-3 opacity-60">
+            Pending Global Verification Queue
+          </p>
+        </div>
+      </div>
+
+      {/* Driver Verification Section */}
+      <div className="space-y-4">
+        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Driver Onboarding ({drivers.filter(d => d.status === 'pending_verification').length})</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {drivers.filter(d => d.status === 'pending_verification').map((d, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col group"
+            >
+              <div className="p-6 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-800">
+                    <img 
+                      src={d.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${d.uid}`} 
+                      alt="" 
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-black text-slate-900 uppercase leading-none mb-1">{d.name}</h4>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.city || 'Unknown Location'}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Aadhaar', key: 'aadharPhoto' },
+                    { label: 'RC', key: 'rcPhoto' },
+                    { label: 'License', key: 'dlPhoto' },
+                    { label: 'PAN', key: 'panPhoto' },
+                    { label: 'Insurance', key: 'insurancePhoto' }
+                  ].map(doc => (
+                    <div key={doc.key} className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-1">
+                      <span className="text-[7px] font-black uppercase text-slate-400">{doc.label}</span>
+                      {d[doc.key as keyof Driver] ? (
+                        <Check size={12} className="text-green-500" />
+                      ) : (
+                        <X size={12} className="text-slate-300" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      setSelectedDriverForDocs(d);
+                      setShowDocModal(true);
+                    }}
+                    className="py-4 border border-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all font-sans"
+                  >
+                    Review Docs
+                  </button>
+                  <button
+                    onClick={() => firebaseService.updateDriverProfile(d.id, { status: 'active', isVerified: true })}
+                    className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 font-sans"
+                  >
+                    Quick Approve
+                  </button>
                 </div>
               </div>
+            </motion.div>
+          ))}
+          {drivers.filter(d => d.status === 'pending_verification').length === 0 && (
+            <div className="col-span-full py-12 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] text-center">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No pending driver verifications</p>
+            </div>
+          )}
+        </div>
+      </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {campaigns.filter((c) => c.status === "PENDING").length > 0 ? (
-                  campaigns
-                    .filter((c) => c.status === "PENDING")
+      <div className="space-y-4 pt-8">
+        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === 'PENDING').length})</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {campaigns.filter((c) => c.status === "PENDING").length > 0 ? (
+            campaigns
+              .filter((c) => c.status === "PENDING")
                     .map((c, i) => (
                       <motion.div
                         key={i}
@@ -1785,9 +2004,9 @@ export default function AdminPortal({
                             </span>
                           </div>
                         </div>
-                        <div className="p-8 flex flex-col flex-1">
+                        <div className="p-4 md:p-6 flex flex-col flex-1">
                           <div className="flex-1 space-y-2">
-                            <h4 className="text-lg font-black text-slate-900 uppercase tracking-tighter leading-none truncate">
+                            <h4 className="text-lg font-black text-slate-900 uppercase leading-none truncate">
                               {c.title}
                             </h4>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -1825,7 +2044,7 @@ export default function AdminPortal({
                       <Monitor size={40} className="opacity-20" />
                     </div>
                     <div className="text-center space-y-1">
-                      <h4 className="text-sm font-black text-slate-400 uppercase tracking-tighter italic">
+                      <h4 className="text-sm font-black text-slate-400 uppercase italic">
                         Queue Equilibrium Reached
                       </h4>
                       <p className="text-[10px] font-bold uppercase tracking-widest opacity-60">
@@ -1836,9 +2055,209 @@ export default function AdminPortal({
                 )}
               </div>
             </div>
-          ) : activeTab === "PRICING" ? (
+          </div>
+        ) : activeTab === "TERMINAL_HUB" ? (
+          <div className="space-y-8 pb-20">
+            {/* Header Stats From Screenshot */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[
+                { label: 'Active Campaigns', value: campaigns.filter(c => c.status === 'ACTIVE').length, sub: 'Live Now', icon: Monitor },
+                { label: 'Cloud Units Ready', value: drivers.filter(d => d.status === 'active').length, sub: 'Approved Fleet', icon: ShieldCheck },
+                { label: 'Total Revenue', value: `₹${totalSuccessfulRevenue.toLocaleString()}`, sub: 'Cumulative', icon: IndianRupee },
+                { label: 'Online Now', value: liveUnitsCount, sub: 'Real-time Pulse', icon: Activity }
+              ].map((stat, i) => (
+                <div key={i} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
+                  <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
+                    <stat.icon className="text-amber-500" size={100} />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 mb-6">
+                      <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center">
+                        <stat.icon className="text-amber-500" size={16} />
+                      </div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</span>
+                    </div>
+                    <h4 className="text-4xl font-black text-white tracking-tight">{stat.value}</h4>
+                    <p className="text-[10px] font-black text-amber-500/60 uppercase tracking-widest mt-2">{stat.sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Terminal Management Section */}
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-tight">Terminal Hub</h2>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Global Device Activation & Monitoring</p>
+                </div>
+                <div className="flex gap-3 w-full md:w-auto">
+                  <div className="relative flex-1 md:flex-initial">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                      type="text" 
+                      placeholder="SEARCH TERMINAL ID..." 
+                      className="w-full md:w-64 pl-12 pr-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20"
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <button className="p-4 bg-slate-900 text-amber-500 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all">
+                    <RefreshCw size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                {drivers.filter(d => (d.terminalId || '').toUpperCase().includes(searchTerm.toUpperCase())).map((d, i) => {
+                  const status = liveStatus.find(s => s.terminalId === d.terminalId);
+                  const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
+                  
+                  return (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-8 space-y-6 relative group overflow-hidden"
+                    >
+                      {/* Status Badge */}
+                      <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-slate-100 shadow-sm">
+                        <div className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-green-500 animate-pulse" : "bg-slate-300")} />
+                        <span className="text-[8px] font-black uppercase text-slate-500">
+                          {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Hardware Instance</p>
+                        <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">{d.terminalId || "UNASSIGNED"}</h4>
+                      </div>
+
+                      {/* Live Screen Preview */}
+                      {status?.currentAdImage && (
+                        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group/screen">
+                          <img 
+                            src={status.currentAdImage} 
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover/screen:scale-110" 
+                            alt="Live Display"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover/screen:opacity-100 transition-opacity flex items-end p-3">
+                            <p className="text-[8px] font-black text-white uppercase tracking-widest">LIVE SCREEN MIRROR</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Access Key</p>
+                          <p className="text-lg font-black text-amber-600 font-mono tracking-[0.2em]">{d.accessKey || "------"}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                          <p className="text-[10px] font-black text-slate-900 uppercase">
+                            {d.provisionStatus || 'IDLE'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Driver</span>
+                          <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.name}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Vehicle</span>
+                          <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.vNo || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Campaign</span>
+                          <span className="text-[10px] font-black text-amber-600 uppercase italic">
+                            {campaigns.find(c => c.assignedDrivers?.includes(d.uid))?.title || 'No Active Ads'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center py-2">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Last Sync</span>
+                          <span className="text-[9px] font-black text-slate-500 uppercase">
+                            {status?.updatedAt ? new Date(status.updatedAt.toMillis()).toLocaleString() : 'Never'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-4 flex gap-2">
+                        <button 
+                          onClick={() => {
+                            window.open(`/device-portal?terminalId=${d.terminalId}&accessKey=${d.accessKey}`, '_blank');
+                          }}
+                          className="flex-1 py-4 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl font-sans"
+                        >
+                          Open Portal
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            const loc = driverLocations.find(l => l.driverId === d.uid);
+                            if(loc && loc.lat && loc.lng && loc.lat !== 0) {
+                               setMapCenter([loc.lat, loc.lng]);
+                               setMapZoom(16);
+                               handleFetchDriverHistory(d.uid);
+                               setActiveTab("MAP");
+                            } else {
+                               try {
+                                 showToast("No active fix. Fetching last known...", 'info');
+                                 const logs = await firebaseService.getLocationLogs(d.uid);
+                                 const valid = logs.filter((l: any) => l.lat && l.lng && l.lat !== 0);
+                                 if (valid.length > 0) {
+                                   const last = valid[valid.length - 1];
+                                   setMapCenter([last.lat, last.lng]);
+                                   setMapZoom(16);
+                                   setSelectedDriverHistory(valid);
+                                   setActiveTab("MAP");
+                                 } else {
+                                   showToast("No telemetry data available.", 'error');
+                                 }
+                               } catch (e) {
+                                 showToast("Sync Error.", 'error');
+                               }
+                            }
+                          }}
+                          className="p-4 bg-amber-500 text-slate-950 rounded-2xl hover:scale-105 transition-all shadow-lg shadow-amber-500/20"
+                          title="Track on Map"
+                        >
+                          <MapPin size={16} />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSelectedDriverForDocs(d);
+                            setShowDocModal(true);
+                          }}
+                          className="p-4 bg-slate-100 text-slate-600 rounded-2xl hover:bg-slate-200 transition-all text-[8px] font-black uppercase"
+                        >
+                          Docs
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if(window.confirm(`Revoke access for Terminal ${d.terminalId}?`)) {
+                              firebaseService.revokeTerminal(d.terminalId!, d.uid)
+                                .then(() => showToast("Terminal credentials revoked.", 'info'))
+                                .catch(e => showToast(e.message, 'error'));
+                            }
+                          }}
+                          className="p-4 border border-slate-200 text-slate-400 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      
+                      {/* Decorative Element */}
+                      <div className="absolute -left-10 -bottom-10 w-24 h-24 bg-amber-500/10 blur-3xl rounded-full" />
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : activeTab === "PRICING" ? (
             <div className="space-y-8">
-              <div className="bg-slate-900 p-8 rounded-[2.5rem] flex items-center justify-between text-white">
+              <div className="bg-slate-900 p-6 md:p-8 rounded-3xl flex items-center justify-between text-white">
                 <div>
                   <h2 className="text-3xl font-black italic uppercase text-amber-500">
                     Marketplace Economics
@@ -1849,6 +2268,47 @@ export default function AdminPortal({
                 </div>
                 <IndianRupee className="text-amber-500" size={32} />
               </div>
+
+              {/* Proposals Section */}
+              {planProposals && planProposals.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Rate Adjustments (From Support)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {planProposals.map((proposal, i) => {
+                      const plan = plans.find(p => p.id === proposal.planId);
+                      return (
+                        <div key={i} className="bg-amber-50 p-6 rounded-2xl border border-amber-100 shadow-sm space-y-4">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest leading-none mb-1">Proposed Change</p>
+                              <h4 className="text-sm font-black text-slate-900 uppercase">{plan?.name || "Unknown Plan"}</h4>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Old: ₹{plan?.price || 0}</p>
+                              <p className="text-lg font-black text-amber-600 decoration-amber-500">→ ₹{proposal.newPrice}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => handleApprovePlan(proposal.id, proposal.planId, proposal.newPrice).catch(() => {})}
+                              className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all font-sans"
+                            >
+                              Approve
+                            </button>
+                            <button 
+                              onClick={() => handleRejectPlan(proposal.id).catch(() => {})}
+                              className="flex-1 py-3 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-500 transition-all font-sans"
+                            >
+                              Ignore
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {plans.map((plan, i) => (
                   <div
@@ -1863,30 +2323,9 @@ export default function AdminPortal({
                         ₹{plan.price}
                       </span>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Adjust Price
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          id={`admin-plan-${plan.id}`}
-                          defaultValue={plan.price}
-                          className="flex-1 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
-                        />
-                        <button
-                          onClick={() => {
-                            const input = document.getElementById(
-                              `admin-plan-${plan.id}`,
-                            ) as HTMLInputElement;
-                            handleUpdatePlan(plan.id, parseFloat(input.value));
-                          }}
-                          disabled={isUpdatingPlan === plan.id}
-                          className="px-4 py-3 bg-slate-950 text-amber-500 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-50"
-                        >
-                          Save
-                        </button>
-                      </div>
+                    <div className="space-y-2 text-center opacity-40">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Support Team Proposals Only</p>
+                      <Zap size={16} className="mx-auto mt-2" />
                     </div>
                   </div>
                 ))}
@@ -1894,12 +2333,12 @@ export default function AdminPortal({
             </div>
           ) : activeTab === "MAP" ? (
             <div className="flex flex-col space-y-4 relative">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 px-1">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4 shrink-0 px-1">
                 <div>
-                  <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-slate-900 leading-none">
+                  <h2 className="text-base md:text-2xl font-black italic uppercase text-slate-900 leading-none">
                     Active Network Overview
                   </h2>
-                  <p className="text-[10px] md:text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] italic mt-2">
+                  <p className="text-[8px] md:text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] italic mt-1 md:mt-2">
                     Live Fleet Telemetry Cluster
                   </p>
                 </div>
@@ -1943,7 +2382,6 @@ export default function AdminPortal({
                     doubleClickZoom={true}
                     boxZoom={true}
                     keyboard={true}
-                    tap={false}
                   >
                     <TileLayer
                       url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
@@ -1954,7 +2392,7 @@ export default function AdminPortal({
                     {/* Render Campaign Coverage Areas */}
                     {campaigns
                       .filter(
-                        (c) => c.status === "ACTIVE" || c.status === "LIVE",
+                        (c) => c.status === "ACTIVE",
                       )
                       .map((camp: any) => (
                         <Circle
@@ -1997,7 +2435,8 @@ export default function AdminPortal({
                       .filter(
                         (loc) =>
                           typeof loc.lat === "number" &&
-                          typeof loc.lng === "number",
+                          typeof loc.lng === "number" &&
+                          loc.lat !== 0 && loc.lng !== 0,
                       )
                       .map((loc) => (
                         <Marker
@@ -2009,12 +2448,13 @@ export default function AdminPortal({
                               setSelectedLocation(loc);
                               setMapCenter([loc.lat, loc.lng]);
                               setMapZoom(16);
-                              handleFetchDriverHistory(loc.id);
+                              handleFetchDriverHistory(loc.driverId);
                             },
                           }}
                         >
                           <Popup closeButton={false}>
                             <div className="p-3 w-48 font-sans">
+                              {/* Popup content */}
                               <div className="flex items-center gap-3 mb-3">
                                 <div className="w-10 h-10 bg-slate-950 rounded-lg flex items-center justify-center text-amber-500 shadow-lg border border-white/5">
                                   <Truck size={20} />
@@ -2022,7 +2462,7 @@ export default function AdminPortal({
                                 <div className="min-w-0">
                                   <p className="text-[11px] font-black italic text-slate-900 uppercase truncate">
                                     {drivers.find((d) => d.uid === loc.driverId)
-                                      ?.name || `Unknown Unit (${loc.driverId?.slice(-6) || "ID_MISSING"})`}
+                                      ?.fullName || `Unit (${loc.driverId?.slice(-6)})`}
                                   </p>
                                   <div className="flex items-center gap-1.5">
                                     <div
@@ -2036,59 +2476,87 @@ export default function AdminPortal({
                                     <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">
                                       {loc.isOnline
                                         ? "TELEMETRY LIVE"
-                                        : "SYNC INTERRUPT"}
+                                        : "LOST GPS FIX"}
                                     </p>
                                   </div>
-                                  {loc.gpsId && (
-                                    <p className="text-[6px] font-black text-amber-500 uppercase tracking-widest mt-1">
-                                      GPS ID: {loc.gpsId}
-                                    </p>
-                                  )}
                                 </div>
                               </div>
-                              <div className="grid grid-cols-2 gap-2 mb-3">
-                                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">
-                                    Pure Runtime
-                                  </p>
-                                  <p className="text-[10px] font-black text-slate-900 font-mono italic">
-                                    {loc.actualRuntime || 0}m
-                                  </p>
-                                </div>
-                                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">
-                                    No Ads Time
-                                  </p>
-                                  <p className="text-[10px] font-black text-amber-600 font-mono italic">
-                                    {loc.idleTime || 0}m
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 mb-3">
-                                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">
-                                    Our Ads Time
-                                  </p>
-                                  <p className="text-[10px] font-black text-blue-600 font-mono italic">
-                                    {loc.adRuntime || 0}m
-                                  </p>
-                                </div>
-                                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <p className="text-[7px] font-black text-slate-400 uppercase tracking-tighter">
-                                    Total Payout
-                                  </p>
-                                  <p className="text-[10px] font-black text-green-600 font-mono italic">
-                                    ₹{loc.paymentDue || 0}
-                                  </p>
-                                </div>
-                              </div>
-                              <button className="w-full py-2 bg-slate-950 text-amber-500 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-xl shadow-slate-200 flex items-center justify-center gap-2">
-                                PING UNIT <Zap size={10} />
+                              <button 
+                                onClick={() => handleFetchDriverHistory(loc.driverId)}
+                                className="w-full py-2 bg-slate-950 text-amber-500 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2"
+                              >
+                                SHOW TRAIL <Zap size={10} />
                               </button>
                             </div>
                           </Popup>
                         </Marker>
                       ))}
+
+                    {/* Static Markers for Offline Units with Last Known Position */}
+                    {driverLocations
+                      .filter((loc) => (!loc.lat || loc.lat === 0) && loc.isOnline)
+                      .map((loc) => {
+                         const driver = drivers.find(d => d.uid === loc.driverId);
+                         return (
+                            <div key={`no-fix-info-${loc.uid}`} /> 
+                         );
+                      })}
+
+                    {/* GPS Alert for units without fix */}
+                    {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length > 0 && (
+                      <div className="absolute bottom-6 right-6 z-[1000] bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest animate-bounce shadow-2xl flex items-center gap-2">
+                        <AlertTriangle size={14} />
+                        {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length} Units Missing GPS Fix
+                      </div>
+                    )}
+
+                    {/* Map Legend */}
+                    <div className="absolute top-6 left-6 z-[1000] space-y-4">
+                      <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-slate-100 shadow-xl space-y-2 hidden md:block w-48">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-[10px] font-black uppercase text-slate-900 italic">Map Legend</span>
+                           <Activity size={10} className="text-amber-500" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                          <span className="text-[8px] font-black uppercase text-slate-600">Online Unit</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-slate-300 rounded-full" />
+                          <span className="text-[8px] font-black uppercase text-slate-600">Offline/Syncing</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-amber-500/20 border border-amber-500/50 rounded-full" />
+                          <span className="text-[8px] font-black uppercase text-slate-600">Ad Coverage Area</span>
+                        </div>
+                      </div>
+
+                      {/* GPS Fix Tracker Widget */}
+                      {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length > 0 && (
+                        <div className="bg-red-500/90 backdrop-blur-md p-4 rounded-2xl border border-red-400 shadow-xl space-y-3 w-48 text-white">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle size={14} className="animate-pulse" />
+                            <span className="text-[9px] font-black uppercase tracking-widest">GPS Fix Alert</span>
+                          </div>
+                          <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                            {driverLocations
+                              .filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0))
+                              .map((loc, idx) => {
+                                const driver = drivers.find(d => d.uid === loc.driverId);
+                                return (
+                                  <div key={idx} className="flex flex-col bg-white/10 p-2 rounded-lg border border-white/10">
+                                    <span className="text-[8px] font-black uppercase truncate">{driver?.fullName || 'Unknown Unit'}</span>
+                                    <span className="text-[6px] font-bold opacity-70 uppercase">ID: {loc.terminalId || 'N/A'}</span>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                          <p className="text-[7px] font-bold uppercase tracking-tighter leading-tight opacity-80">
+                            These units are connected but missing location telemetry.
+                          </p>
+                        </div>
+                      )}
+                    </div>
 
                     {selectedDriverHistory.length > 1 && (
                       <Polyline
@@ -2183,7 +2651,7 @@ export default function AdminPortal({
                   )}
 
                   {/* Overlay Stats */}
-                  <div className="absolute top-6 left-6 z-[400] flex flex-col gap-3 pointer-events-none">
+                  <div className="absolute top-2 left-2 md:top-6 md:left-6 z-[400] flex flex-col gap-2 md:gap-3 pointer-events-none scale-90 md:scale-100 origin-top-left">
                     {ticketNotifications.length > 0 && (
                       <motion.div
                         initial={{ x: -20, opacity: 0 }}
@@ -2208,16 +2676,16 @@ export default function AdminPortal({
                       </motion.div>
                     )}
 
-                    <div className="bg-slate-950/90 backdrop-blur-xl p-4 md:p-6 rounded-3xl border border-white/10 shadow-2xl flex items-center gap-4 pointer-events-auto group hover:scale-105 transition-all">
-                      <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
+                    <div className="bg-slate-950/90 backdrop-blur-xl p-3 md:p-6 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center gap-3 md:gap-4 pointer-events-auto group hover:scale-105 transition-all">
+                      <div className="w-8 h-8 md:w-12 md:h-12 bg-amber-500 rounded-xl md:rounded-2xl flex items-center justify-center text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.3)] shrink-0">
                         <Activity size={24} />
                       </div>
                       <div>
                         <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 opacity-60">
                           Avg Velocity
                         </p>
-                        <div className="flex items-baseline gap-1">
-                          <h4 className="text-xl md:text-2xl font-black text-white italic leading-none">
+                        <div className="flex items-baseline gap-0.5 md:gap-1">
+                          <h4 className="text-lg md:text-2xl font-black text-white italic leading-none">
                             {(
                               driverLocations.reduce(
                                 (acc, curr) => acc + (curr.speed || 0),
@@ -2332,7 +2800,7 @@ export default function AdminPortal({
                       <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-1">
                         Network Capacity
                       </p>
-                      <h4 className="text-2xl font-black italic tracking-tighter">
+                      <h4 className="text-2xl font-black italic">
                         UPTIME SECURED
                       </h4>
                     </div>
@@ -2373,11 +2841,11 @@ export default function AdminPortal({
               </div>
             </div>
           ) : activeTab === "PAYMENTS" ? (
-            <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] shadow-2xl border border-slate-800 text-white relative overflow-hidden">
+            <div className="space-y-4">
+              <div className="bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
                 <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/5 blur-3xl rounded-full" />
                 <div className="relative z-10">
-                  <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500">
+                  <h2 className="text-lg md:text-xl font-black italic uppercase text-amber-500">
                     {paymentSubTab === "INCOME"
                       ? "Revenue Ledger"
                       : "Expense Ledger"}
@@ -2520,7 +2988,7 @@ export default function AdminPortal({
             </div>
           ) : activeTab === "TICKETS" ? (
             <div className="space-y-6 flex flex-col">
-              <div className="flex justify-between items-center bg-slate-900 p-6 md:p-10 rounded-[2rem] text-white">
+              <div className="flex justify-between items-center bg-slate-900 p-4 md:p-6 rounded-2xl text-white">
                 <div>
                   <h2 className="text-xl md:text-2xl font-black uppercase italic text-amber-500">
                     Fleet Operations Support
@@ -2715,11 +3183,11 @@ export default function AdminPortal({
             </div>
           ) : activeTab === "MONITOR" ? (
             <div className="flex flex-col space-y-6">
-              <div className="bg-slate-950 p-6 md:p-10 rounded-2xl md:rounded-[3rem] shadow-2xl border border-slate-800 text-white relative overflow-hidden shrink-0">
+              <div className="bg-slate-950 p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 text-white relative overflow-hidden shrink-0">
                 <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                   <div>
-                    <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500 mb-2">
+                    <h2 className="text-xl md:text-3xl font-black italic uppercase text-amber-500 mb-2">
                       Remote Cloud Monitoring
                     </h2>
                     <p className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.3em] font-mono">
@@ -2823,7 +3291,7 @@ export default function AdminPortal({
                                     minute: "2-digit",
                                     second: "2-digit",
                                   })
-                                : "Syncing..."}
+                                : "Processing..."}
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-[10px] font-bold">
@@ -2860,7 +3328,7 @@ export default function AdminPortal({
             </div>
           ) : activeTab === "FLEET" ? (
             <div className="space-y-6 pb-32">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] shadow-2xl border border-slate-800 text-white relative overflow-hidden">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
                 <div className="absolute right-0 top-0 w-64 h-64 bg-emerald-500/5 blur-3xl rounded-full" />
                 <div className="relative z-10 flex items-center justify-between">
                   <div>
@@ -2919,7 +3387,7 @@ export default function AdminPortal({
                               <div
                                 className={cn(
                                   "w-1.5 h-1.5 rounded-full",
-                                  d.status === "ACTIVE" || d.status === "active"
+                                  d.status === "active"
                                     ? "bg-green-500 animate-pulse"
                                     : "bg-red-500",
                                 )}
@@ -2939,6 +3407,15 @@ export default function AdminPortal({
                                 className="text-[8px] font-black bg-slate-100 text-slate-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
                               >
                                 Credit
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedDriverForDocs(d);
+                                  setShowDocModal(true);
+                                }}
+                                className="text-[8px] font-black bg-slate-100 text-slate-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
+                              >
+                                Docs
                               </button>
                               <button
                                 onClick={() => {
@@ -3050,7 +3527,7 @@ export default function AdminPortal({
       {activeTab === "WITHDRAWALS" && (
         <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto">
           <div className="max-w-4xl mx-auto space-y-8">
-            <div className="bg-slate-900 p-10 rounded-[2.5rem] text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
+            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
               <div>
                 <h2 className="text-3xl font-black italic uppercase text-amber-500">
                   Payout Hub
@@ -3170,7 +3647,7 @@ export default function AdminPortal({
       {activeTab === "NOTICES" && (
         <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto">
           <div className="max-w-4xl mx-auto space-y-8">
-            <div className="bg-slate-900 p-10 rounded-[2.5rem] text-white flex justify-between items-center relative overflow-hidden">
+            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8 opacity-10">
                 <Zap size={120} />
               </div>
@@ -3190,7 +3667,7 @@ export default function AdminPortal({
               </button>
             </div>
 
-            <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-6">
+            <div className="bg-white p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 space-y-6">
               <h3 className="text-sm font-black uppercase italic tracking-widest text-slate-900">
                 Broadcast New Signal
               </h3>
@@ -3370,7 +3847,7 @@ export default function AdminPortal({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-[2.5rem] p-10 w-full max-w-md relative z-10 space-y-8"
+            className="bg-white rounded-2xl p-4 md:p-6 w-full max-w-md relative z-10 space-y-4 md:space-y-6"
           >
             <h3 className="text-2xl font-black italic uppercase tracking-tighter">
               Assign Credit
@@ -3412,7 +3889,7 @@ export default function AdminPortal({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-[2.5rem] p-10 w-full max-w-lg relative z-10 space-y-6"
+            className="bg-white rounded-2xl p-6 md:p-10 w-full max-w-lg relative z-10 space-y-4 md:space-y-6"
           >
             <h3 className="text-2xl font-black italic uppercase text-center">
               New Campaign
@@ -3464,7 +3941,7 @@ export default function AdminPortal({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-[2.5rem] p-10 w-full max-w-md relative z-10 space-y-6"
+            className="bg-white rounded-2xl p-6 md:p-10 w-full max-w-md relative z-10 space-y-6"
           >
             <div className="text-center">
               <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-3xl flex items-center justify-center mx-auto mb-4">
@@ -3543,7 +4020,7 @@ export default function AdminPortal({
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90vh]"
           >
-            <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+            <div className="p-4 md:p-6 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-1">
                   Deep Approval Desk
@@ -3560,7 +4037,7 @@ export default function AdminPortal({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
@@ -3745,7 +4222,7 @@ export default function AdminPortal({
                 className="flex-[2] py-5 bg-amber-500 text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl shadow-amber-500/20 hover:scale-[1.02] transition-all disabled:opacity-50"
               >
                 {isSubmitting
-                  ? "Syncing Pipeline..."
+                  ? "Processing Pipeline..."
                   : `Approve & Deploy to ${selectedDriverIds.length} Nodes`}
               </button>
             </div>
@@ -3778,7 +4255,7 @@ export default function AdminPortal({
               <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-red-600/10 shadow-xl">
                 <Trash2 size={40} />
               </div>
-              <h2 className="text-3xl font-black text-slate-950 uppercase tracking-tighter italic mb-4">Wipe EVERYTHING Up</h2>
+              <h2 className="text-3xl font-black text-slate-950 uppercase italic mb-4">Wipe EVERYTHING Up</h2>
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed mb-8 text-balance">
                 NO DRAMA. MAKE ALL 0. This will permanently destroy all network data.
               </p>
@@ -3796,6 +4273,112 @@ export default function AdminPortal({
                   className="flex-1 py-5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase shadow-2xl shadow-red-600/30 hover:bg-red-700 transition-all disabled:opacity-50"
                 >
                   {isSubmitting ? "WIPING..." : "CONFIRM PURGE"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDocModal && selectedDriverForDocs && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDocModal(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none">Document Review</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Verification Pipeline: {selectedDriverForDocs.name}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowDocModal(false)}
+                  className="p-3 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-2xl transition-all"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-50/30">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {[
+                    { label: 'Profile Photo / Selfie', key: 'profileImage' },
+                    { label: 'Aadhaar Card', key: 'aadharPhoto' },
+                    { label: 'Vehicle RC', key: 'rcPhoto' },
+                    { label: 'Driving License', key: 'dlPhoto' },
+                    { label: 'PAN Card', key: 'panPhoto' },
+                    { label: 'Vehicle Insurance', key: 'insurancePhoto' }
+                  ].map((docItem) => (
+                    <div key={docItem.key} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest italic">{docItem.label}</span>
+                        {!selectedDriverForDocs[docItem.key as keyof Driver] && (
+                          <span className="text-[8px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded-lg">Missing Document</span>
+                        )}
+                      </div>
+                      <div className="aspect-[4/3] bg-slate-200 rounded-[2rem] overflow-hidden border border-slate-100 relative group shadow-sm bg-white cursor-zoom-in">
+                        {selectedDriverForDocs[docItem.key as keyof Driver] ? (
+                          <img 
+                            src={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
+                            alt={docItem.label}
+                            className="w-full h-full object-contain filter group-hover:brightness-90 transition-all"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center grayscale opacity-20">
+                            <Truck size={48} className="mb-2" />
+                            <p className="text-[9px] font-black uppercase tracking-widest">Awaiting Upload</p>
+                          </div>
+                        )}
+                        {selectedDriverForDocs[docItem.key as keyof Driver] && (
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <a 
+                              href={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="px-6 py-3 bg-white text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl"
+                            >
+                              Open Original
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-8 border-t border-slate-100 bg-white grid grid-cols-2 gap-4 shrink-0">
+                <button
+                  onClick={() => setShowDocModal(false)}
+                  className="py-5 border border-slate-200 text-slate-400 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-slate-50 transition-all italic"
+                >
+                  Close Pipeline
+                </button>
+                <button
+                  onClick={async () => {
+                    await firebaseService.adminApproveDriverAndProvisionTerminal(selectedDriverForDocs.id, selectedDriverForDocs.name);
+                    showToast(`${selectedDriverForDocs.name} Verified & Terminal Provisioned Successfully`, 'success');
+                    setShowDocModal(false);
+                  }}
+                  className="py-5 bg-slate-950 text-amber-500 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all italic"
+                >
+                  Verify & Activate Node
                 </button>
               </div>
             </motion.div>
@@ -3832,7 +4415,7 @@ export default function AdminPortal({
           </motion.div>
         )}
       </AnimatePresence>
-      <AiChat />
     </div>
+    </ErrorBoundary>
   );
 }

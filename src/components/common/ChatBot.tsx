@@ -254,7 +254,7 @@ export default function ChatBot() {
                       </button>
                       
                       <a 
-                        href="https://wa.me/919481027833" 
+                        href="https://wa.me/910000000000" 
                         target="_blank" 
                         rel="noreferrer"
                         className="w-full p-4 bg-emerald-500 text-white rounded-2xl flex items-center justify-between group"
@@ -267,7 +267,7 @@ export default function ChatBot() {
                       </a>
 
                       <a 
-                        href="mailto:serviceprovider43@outlook.com" 
+                        href="mailto:support@autoads.in" 
                         className="w-full p-4 bg-white border border-slate-200 text-slate-600 rounded-2xl flex items-center justify-between group"
                       >
                          <div className="flex items-center gap-3">

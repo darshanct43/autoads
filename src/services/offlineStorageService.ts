@@ -1,4 +1,7 @@
 
+import { storageService } from './storageService';
+import { firebaseService } from './firebaseService';
+
 /**
  * Offline Storage Service for Strict Document Verification
  * Uses IndexedDB to store blobs and metadata locally.
@@ -13,8 +16,18 @@ export interface DocMeta {
   dl: 'pending' | 'uploaded';
   aadhar: 'pending' | 'uploaded';
   selfie: 'pending' | 'uploaded';
+  pan?: 'pending' | 'uploaded';
+  insurance?: 'pending' | 'uploaded';
   synced: boolean;
   syncing?: boolean;
+  urls?: {
+    rc?: string;
+    dl?: string;
+    aadhar?: string;
+    selfie?: string;
+    pan?: string;
+    insurance?: string;
+  };
   updatedAt: number;
 }
 
@@ -39,7 +52,7 @@ export const offlineStorageService = {
     });
   },
 
-  async saveDocument(uid: string, type: 'rc' | 'dl' | 'aadhar' | 'selfie', blob: Blob): Promise<void> {
+  async saveDocument(uid: string, type: DocId, blob: Blob): Promise<void> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -51,7 +64,7 @@ export const offlineStorageService = {
     });
   },
 
-  async getDocument(uid: string, type: 'rc' | 'dl' | 'aadhar' | 'selfie'): Promise<string | null> {
+  async getDocument(uid: string, type: DocId): Promise<string | null> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
@@ -109,7 +122,7 @@ export const offlineStorageService = {
     });
   },
 
-  async getDocumentBlob(uid: string, type: 'rc' | 'dl' | 'aadhar' | 'selfie'): Promise<Blob | null> {
+  async getDocumentBlob(uid: string, type: DocId): Promise<Blob | null> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
@@ -126,42 +139,61 @@ export const offlineStorageService = {
     if (meta.synced || meta.syncing) return true;
     
     // Check if offline status (basic)
-    if (!navigator.onLine) return false;
+    if (!navigator.onLine) {
+      console.log("[Sync] Device offline, skipping sync.");
+      return false;
+    }
 
-    // Check if all uploaded locally
+    // Check if all primary uploaded locally
     const isReady = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded';
     if (!isReady) return false;
 
     await this.updateMeta(uid, { syncing: true });
 
     try {
-      const formData = new FormData();
-      formData.append('uid', uid);
+      console.log(`[Sync] Starting cloud synchronization for driver ${uid}...`);
+      const types: DocId[] = ['rc', 'dl', 'aadhar', 'selfie', 'pan', 'insurance'];
+      const urls: any = { ...meta.urls };
 
-      const types: ('rc' | 'dl' | 'aadhar' | 'selfie')[] = ['rc', 'dl', 'aadhar', 'selfie'];
       for (const t of types) {
+        // Skip if already has a URL
+        if (urls[t]) continue;
+
         const blob = await this.getDocumentBlob(uid, t);
         if (blob) {
-          formData.append(t, blob, `${t}.jpg`);
+          const file = new File([blob], `${t}.jpg`, { type: 'image/jpeg' });
+          const path = storageService.getDriverDocPath(uid, t as any, `${t}.jpg`);
+          const url = await storageService.uploadFile(path, file);
+          urls[t] = url;
+          console.log(`[Sync] Uploaded ${t} to ${url}`);
         }
       }
 
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
+      // Update Firebase Profile with these URLs
+      await firebaseService.updateDriverProfile(uid, {
+        profileImage: urls.selfie,
+        aadharPhoto: urls.aadhar,
+        rcPhoto: urls.rc,
+        dlPhoto: urls.dl,
+        panPhoto: urls.pan,
+        insurancePhoto: urls.insurance,
+        isVerified: false,
+        status: 'pending_verification'
       });
 
-      if (!response.ok) throw new Error('Upload failed');
-
-      const data = await response.json();
-      console.log("[Sync] Success:", data);
-
-      await this.updateMeta(uid, { synced: true, syncing: false });
+      await this.updateMeta(uid, { 
+        synced: true, 
+        syncing: false,
+        urls 
+      });
+      console.log("[Sync] Cloud synchronization complete.");
       return true;
     } catch (err) {
-      console.error("[Sync] Error:", err);
+      console.error("[Sync] Error during cloud sync:", err);
       await this.updateMeta(uid, { syncing: false });
       return false;
     }
   }
 };
+
+type DocId = 'rc' | 'dl' | 'aadhar' | 'selfie' | 'pan' | 'insurance';

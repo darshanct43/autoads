@@ -14,7 +14,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, storage } from '@/lib/firebase';
 import { firebaseService } from '@/services/firebaseService';
 import { apiService } from '@/services/apiService';
-import { FirebaseStorageTester } from './FirebaseStorageTester';
+import { ErrorBoundary } from './common/ErrorBoundary';
 
 interface AuthProps {
   onLogin: (role: UserRole) => void;
@@ -50,7 +50,7 @@ export default function Auth({ onLogin }: AuthProps) {
           } else if (emailLower.includes('driver')) {
             userRole = 'DRIVER';
             setRole('DRIVER');
-          } else if (emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support') || emailLower.includes('staff') || emailLower.includes('agent')) {
+          } else if (emailLower.includes('support') || emailLower.includes('staff') || emailLower.includes('agent')) {
             userRole = 'SUPPORT';
             setRole('SUPPORT');
           }
@@ -75,24 +75,28 @@ export default function Auth({ onLogin }: AuthProps) {
   const handleOTPComplete = async () => {
     const code = otp.join('');
     if (code.length < 6) {
-      setError('Enter full security key');
+      setError('Enter full 6-digit security key');
       return;
     }
     
     try {
+      setError('');
       setLoading(true);
+      console.log("[Auth] Verifying OTP for:", phone);
       const res = await apiService.verifyOTP(`+91${phone}`, code);
       if (res.status === 'approved') {
+        console.log("[Auth] OTP Approved. Transitioning to password setup.");
         if (authMode === 'RECOVERY_OTP') {
           setAuthMode('RECOVERY_SET_PASSWORD');
         } else {
           setAuthMode('SET_PASSWORD');
         }
       } else {
-        setError('Invalid security key');
+        setError('Invalid security key. Please check your SMS.');
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Verification Failed');
+      console.error("[Auth] OTP Verify Error:", err);
+      setError(err.response?.data?.error || 'Verification Failed. System connection issue.');
     } finally {
       setLoading(false);
     }
@@ -173,7 +177,7 @@ export default function Auth({ onLogin }: AuthProps) {
         console.log("[Auth] Sign In Error Code:", authErr.code);
         // If it's a demo handle, specific support account, or phone number, auto-provision if not found
         if (authErr.code === 'auth/invalid-credential' || authErr.code === 'auth/user-not-found' || authErr.message?.includes('invalid-credential')) {
-           const isSupportDemo = inputEmail.toLowerCase() === 'vijayathrishu@gmail.com' && inputPassword === 'autoads123';
+           const isSupportDemo = (inputEmail.toLowerCase() === 'support@autoads.in' || inputEmail.toLowerCase() === 'support') && inputPassword === 'autoads123';
            
            if (isSupportDemo || /^\d{10}$/.test(inputEmail) || inputEmail.toLowerCase().includes('driver')) {
              console.log("[Auth] Account missing for support/demo handle, attempting auto-provisioning...");
@@ -184,7 +188,7 @@ export default function Auth({ onLogin }: AuthProps) {
                // Setup initial role
                let initialRole: UserRole = 'CUSTOMER';
                const lowerIn = inputEmail.toLowerCase();
-               if (lowerIn === 'vijayathrishu@gmail.com' || lowerIn.includes('support')) initialRole = 'SUPPORT';
+               if (lowerIn.includes('support')) initialRole = 'SUPPORT';
                if (lowerIn.includes('driver') || lowerIn.startsWith('drv-')) initialRole = 'DRIVER';
                if (lowerIn.includes('admin')) initialRole = 'ADMIN';
                
@@ -223,13 +227,22 @@ export default function Auth({ onLogin }: AuthProps) {
       let userRole: UserRole = 'CUSTOMER';
       const emailLower = user.email?.toLowerCase() || '';
       
+      // Role Priority Resolution (Trust Firestore Profile First)
       if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
         userRole = 'ADMIN';
-      } else if (emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support') || emailLower.includes('staff') || emailLower.includes('agent')) {
+      } else if (emailLower === 'vijayathrishu@gmail.com') {
         userRole = 'SUPPORT';
       } else {
         const profile = await firebaseService.getUserProfile(user.uid);
-        if (profile?.role) {
+        if (profile?.role === 'ADMIN') {
+          userRole = 'ADMIN';
+        } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF') {
+          userRole = 'SUPPORT';
+        } else if (profile?.role === 'DRIVER') {
+          userRole = 'DRIVER';
+        } else if (emailLower.includes('support') || emailLower.includes('staff')) {
+          userRole = 'SUPPORT';
+        } else if (profile?.role) {
           userRole = profile.role as UserRole;
         } else if (emailLower.includes('driver')) {
           userRole = 'DRIVER';
@@ -280,8 +293,8 @@ export default function Auth({ onLogin }: AuthProps) {
       await apiService.sendOTP(`+91${phone}`);
       setAuthMode('RECOVERY_OTP');
     } catch (err: any) {
-      console.warn("[OTP] Recovery Dispatch Error. Bypassing for Dev.");
-      setAuthMode('RECOVERY_OTP');
+      console.error("[OTP] Recovery Dispatch Failed:", err);
+      setError('Communication link failure. Please try again later.');
     } finally {
       setLoading(false);
     }
@@ -406,14 +419,17 @@ export default function Auth({ onLogin }: AuthProps) {
       setAuthEmail(phoneBasedEmail);
       setUserName(`User ${phone}`);
 
-      try {
-        await apiService.sendOTP(`+91${phone}`);
-        setRole(selectedRole);
-        setAuthMode('OTP');
+          try {
+        const res = await apiService.sendOTP(`+91${phone}`);
+        if (res.status === 'pending') {
+          setRole(selectedRole);
+          setAuthMode('OTP');
+        } else {
+          setError('System connection error. Please try again.');
+        }
       } catch (otpErr: any) {
-        // Fallback for development/sandbox environments
-        setRole(selectedRole);
-        setAuthMode('OTP');
+        console.error("[OTP] Dispatch Failure:", otpErr);
+        setError('Communication link failure. Please try again later.');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || 'OTP Dispatch Failure');
@@ -423,7 +439,8 @@ export default function Auth({ onLogin }: AuthProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+    <ErrorBoundary componentName="Auth Interface">
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0, y: 20 }} 
         animate={{ opacity: 1, y: 0 }} 
@@ -483,7 +500,7 @@ export default function Auth({ onLogin }: AuthProps) {
                     </div>
                   )}
 
-                  {isRegistering && (
+                   {isRegistering && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -500,6 +517,7 @@ export default function Auth({ onLogin }: AuthProps) {
                            onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                            className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 text-sm font-black tracking-tight focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none transition-all"
                            placeholder="10-Digit Mobile"
+                           autoComplete="tel"
                            required 
                          />
                       </div>
@@ -660,25 +678,37 @@ export default function Auth({ onLogin }: AuthProps) {
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">A code was sent to +91 {phone}</p>
                </div>
                
-               <div className="flex justify-center gap-3">
+               <div className="flex justify-center gap-2 md:gap-3">
                   {otp.map((digit, i) => (
                     <input 
                       key={i}
                       type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       maxLength={1}
                       value={digit}
                       onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
                         const newOtp = [...otp];
-                        newOtp[i] = e.target.value.replace(/\D/g, '');
+                        newOtp[i] = val;
                         setOtp(newOtp);
-                        if (e.target.value && i < 5) {
+                        if (val && i < 5) {
                            (e.target.nextSibling as HTMLInputElement)?.focus();
                         }
                       }}
-                      className="w-12 h-16 bg-[#f8fafc] border border-slate-200 rounded-xl text-center text-xl font-black text-slate-900 focus:ring-1 focus:ring-amber-500 focus:outline-none shadow-inner"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Backspace' && !otp[i] && i > 0) {
+                          (e.currentTarget.previousSibling as HTMLInputElement)?.focus();
+                        }
+                      }}
+                      className="w-10 h-14 md:w-12 md:h-16 bg-[#f8fafc] border border-slate-200 rounded-xl text-center text-xl font-black text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-inner transition-all"
                     />
                   ))}
                </div>
+               
+               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                 Enter the code to verify your mobile number
+               </p>
 
                <button 
                 onClick={handleOTPComplete} 
@@ -817,5 +847,6 @@ export default function Auth({ onLogin }: AuthProps) {
         </div>
       </motion.div>
     </div>
+    </ErrorBoundary>
   );
 }

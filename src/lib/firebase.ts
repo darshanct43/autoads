@@ -1,54 +1,46 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import firebaseConfig from '../../firebase-applet-config.json';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDLwQwpYKjFVrbnP9Iwz6r3EAQsVaiCr3A",
-  authDomain: "autoads-18b26.firebaseapp.com",
-  projectId: "autoads-18b26",
-  storageBucket: "autoads-18b26.firebasestorage.app",
-  messagingSenderId: "195891414080",
-  appId: "1:195891414080:web:8149fd51d5c034d4b0cba5"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-
-// Debug logs
+// Log the Project ID on initialization to confirm correct connection
 console.log("[Firebase] Initializing with Project ID:", firebaseConfig.projectId);
 
+const app = initializeApp(firebaseConfig);
 (window as any)._firebaseApp = app;
 (window as any)._firebaseConfig = firebaseConfig;
-
 console.log("[Firebase] Global App and Config exposed to window for debugging.");
 
-// Firestore
-export const db = getFirestore(app);
+// Use memoryLocalCache to avoid assertion errors related to IndexedDB/Persistence in iframes
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache(),
+  experimentalAutoDetectLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId === '(default)' ? undefined : firebaseConfig.firestoreDatabaseId);
 
-// Auth
 export const auth = getAuth(app);
-
-// Storage
 export const storage = getStorage(app);
 
-// Connection verification test
+// Connection verification test with higher resilience
 async function testConnection() {
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("[Firebase] Connection verified successfully.");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('offline')) {
-      console.error("[Firebase] Warning: Offline or limited connectivity.");
+    console.log("[Firebase] Probing Cloud Firestore (Wait 15s)...");
+    await Promise.race([
+      getDocFromServer(doc(db, 'test', 'connectivity')),
+      timeout
+    ]);
+    console.log("[Firebase] Cloud Link Established.");
+  } catch (error: any) {
+    if (error.message === 'timeout' || (error instanceof Error && error.message.includes('offline'))) {
+      console.warn("[Firebase] Backend latency detected or Offline mode active.");
     } else {
-      console.log("[Firebase] Connectivity check completed.");
+      console.log("[Firebase] System initialized (Network standby).");
     }
   }
 }
-
 testConnection();
 
-// Google Login
 export const googleLogin = async () => {
   const provider = new GoogleAuthProvider();
   return await signInWithPopup(auth, provider);

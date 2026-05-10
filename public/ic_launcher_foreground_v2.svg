@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="108" height="108">
+  <!-- Android Adaptive Icon Foreground (108x108 viewport, safe area is inside) -->
+  <g transform="scale(0.4) translate(150, 200)">
+      <!-- Main Body Silhouette (Black) -->
+      <path d="M80,280 
+        C120,240 180,220 250,230 
+        C320,240 400,220 500,200 
+        C600,180 700,160 800,150 
+        C840,145 880,160 900,190 
+        L910,220 
+        C890,260 840,290 780,310 
+        C700,340 500,350 300,340 
+        C150,330 80,280 Z" fill="white"/>
+      
+      <!-- Spiky Mane -->
+      <path d="M100,260 
+        L120,230 L140,250 L160,220 L185,245 L210,215 L240,240 L270,210 L310,235 L350,205 L400,230 L450,190 L510,215 L580,175 L650,200 L730,160 L800,185 L860,155 L890,180 L880,195 L840,170 L780,190 L710,165 L630,190 L550,165 L470,185 L390,160 L310,180 L230,165 L150,180 L80,195 Z" fill="#eee" opacity="0.8"/>
+      
+      <!-- Roaring Face -->
+      <path d="M900,190 Q920,180 940,195 L955,225 Q930,245 905,235 Z" fill="white"/>
+      <!-- Mouth -->
+      <path d="M925,210 Q940,215 935,230 L915,225 Z" fill="black"/>
+      <!-- Eye -->
+      <circle cx="918" cy="205" r="3" fill="black"/>
+  </g>
+</svg>

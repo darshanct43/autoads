@@ -16,6 +16,8 @@ const REQUIRED_DOCS = [
   { id: 'rc', label: 'Registration Certificate (RC)', fileName: 'rc.jpg' },
   { id: 'dl', label: 'Driving License (DL)', fileName: 'dl.jpg' },
   { id: 'aadhar', label: 'Aadhar Card', fileName: 'aadhar.jpg' },
+  { id: 'pan', label: 'PAN Card', fileName: 'pan.jpg' },
+  { id: 'insurance', label: 'Insurance Copy', fileName: 'insurance.jpg' },
   { id: 'selfie', label: 'Driver Selfie', fileName: 'selfie.jpg' },
 ] as const;
 
@@ -77,7 +79,7 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
       setMeta(data);
       setLoading(false);
       
-      const isLocallyComplete = data.rc === 'uploaded' && data.dl === 'uploaded' && data.aadhar === 'uploaded' && data.selfie === 'uploaded';
+      const isLocallyComplete = data.rc === 'uploaded' && data.dl === 'uploaded' && data.aadhar === 'uploaded' && data.selfie === 'uploaded' && data.pan === 'uploaded' && data.insurance === 'uploaded';
       
       // If locally all done, trigger complete
       if (isLocallyComplete) {
@@ -171,7 +173,7 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
       stopCamera();
       
       // If all completed, finish
-      if (newMeta.rc === 'uploaded' && newMeta.dl === 'uploaded' && newMeta.aadhar === 'uploaded' && newMeta.selfie === 'uploaded') {
+      if (newMeta.rc === 'uploaded' && newMeta.dl === 'uploaded' && newMeta.aadhar === 'uploaded' && newMeta.selfie === 'uploaded' && newMeta.pan === 'uploaded' && newMeta.insurance === 'uploaded') {
         onComplete();
       }
     } catch (err) {
@@ -184,7 +186,7 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
 
   if (loading || !meta) return null;
 
-  const isLocallyComplete = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded';
+  const isLocallyComplete = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded' && meta.pan === 'uploaded' && meta.insurance === 'uploaded';
 
   return (
     <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col items-center p-6 pb-24 text-white overflow-y-auto font-sans">
@@ -302,14 +304,45 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.8 }}
-          className="mt-8 px-6"
+          className="mt-8 px-6 space-y-4"
         >
-          <button 
-            disabled
-            className="w-full py-5 bg-slate-900 border border-white/5 text-slate-600 font-black rounded-full text-xs uppercase tracking-[0.2em] opacity-50 cursor-not-allowed shadow-2xl relative overflow-hidden"
-          >
-            Payment Status: Restricted
-          </button>
+          {meta.syncing ? (
+            <div className="flex flex-col items-center gap-3">
+              <RefreshCw className="w-6 h-6 text-amber-500 animate-spin" />
+              <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest animate-pulse">Synchronizing with Cloud...</p>
+            </div>
+          ) : meta.synced ? (
+            <div className="flex flex-col items-center gap-3">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+              <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Cloud Backup Verified</p>
+              <button 
+                onClick={onComplete}
+                className="w-full py-5 bg-emerald-600 text-white font-black rounded-full text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 transition-all"
+              >
+                Verification Submitted
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={handleSync}
+              className="w-full py-5 bg-slate-900 border border-white/5 text-slate-300 font-black rounded-full text-xs uppercase tracking-[0.2em] shadow-2xl relative overflow-hidden group"
+            >
+              <div className="absolute inset-0 bg-amber-500/10 -translate-x-full group-hover:translate-x-0 transition-transform" />
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                <CloudUpload size={16} />
+                Sync Documents to Cloud
+              </span>
+            </button>
+          )}
+
+          {!meta.synced && (
+            <button 
+              disabled
+              className="w-full py-5 bg-slate-950 border border-white/5 text-slate-600 font-black rounded-full text-[10px] uppercase tracking-[0.2em] opacity-50 cursor-not-allowed"
+            >
+              Payment Status: Restricted until Sync
+            </button>
+          )}
         </motion.div>
       </motion.div>
 

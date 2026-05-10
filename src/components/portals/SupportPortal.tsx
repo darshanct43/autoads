@@ -18,18 +18,29 @@ import {
   Radio,
   X,
   Plus,
+  Search,
+  RefreshCw,
+  Database,
+  Monitor,
+  ShieldCheck,
+  IndianRupee,
   Activity,
   ChevronLeft,
   Truck,
   Gift,
   Trash2,
-  Download
+  Download,
+  Info,
+  Shield,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, SupportTicket, ChatMessage } from '@/services/firebaseService';
 import { auth } from '@/lib/firebase';
 import { UserRole } from '@/types';
 import { AiChat } from '../AiChat';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
+import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 
 interface SupportPortalProps {
   onLogout: () => void;
@@ -37,7 +48,11 @@ interface SupportPortalProps {
 }
 
 export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalProps) {
-  const [activeTab, setActiveTab] = useState<'CREATE' | 'STATUS' | 'PLANS' | 'TICKETS' | 'NOTICES'>('CREATE');
+  const [activeTab, setActiveTab] = useState<'CREATE' | 'STATUS' | 'PLANS' | 'TICKETS' | 'NOTICES' | 'TERMINAL_HUB' | 'LEGAL'>('CREATE');
+  const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
+  const [terminals, setTerminals] = useState<any[]>([]);
+  const [liveStatus, setLiveStatus] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [filterType, setFilterType] = useState<'ALL' | 'DEVICE' | 'CUSTOMER'>('ALL');
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
@@ -53,6 +68,8 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
   const [isUpdatingPlan, setIsUpdatingPlan] = useState<string | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCampaignId, setApprovingCampaignId] = useState<string | null>(null);
+  const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<any | null>(null);
+  const [showDocModal, setShowDocModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
   const [approvalForm, setApprovalForm] = useState({
@@ -66,6 +83,12 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     mediaUrl: '',
     mediaType: 'IMAGE' as 'IMAGE' | 'VIDEO'
   });
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     const unsub = firebaseService.subscribeToCampaigns((data) => {
@@ -75,6 +98,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     const unsubDrivers = firebaseService.subscribeToDrivers(setDrivers);
     const unsubTickets = firebaseService.subscribeToSupportTicketsForAll(setTickets);
     const unsubNotices = firebaseService.subscribeToPublicNotices(setNotices);
+    const unsubTerminals = firebaseService.subscribeToTerminals(setTerminals);
+    const unsubLiveStatus = firebaseService.subscribeToLiveStatus(setLiveStatus);
+    const unsubPayments = firebaseService.subscribeToPayments(setPayments);
     
     firebaseService.getPlans().then(setPlans).catch(console.error);
 
@@ -83,6 +109,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
       unsubDrivers();
       unsubTickets();
       unsubNotices();
+      unsubTerminals();
+      unsubLiveStatus();
+      unsubPayments();
     };
   }, []);
 
@@ -147,10 +176,10 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         ...approvalForm,
         assignedDrivers: selectedDriverIds
       });
-      alert("Campaign Approved!");
+      showToast("Campaign Approved!", 'success');
       setShowApprovalModal(false);
     } catch (err) {
-      alert("Approval failed.");
+      showToast("Approval failed.", 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -165,15 +194,14 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     }
   };
 
-  const handleUpdatePlan = async (planId: string, newPrice: number) => {
+  const handleProposePlan = async (planId: string, newPrice: number) => {
     setIsUpdatingPlan(planId);
     try {
-      await firebaseService.updatePlan(planId, { price: newPrice });
-      const updatedPlans = plans.map(p => p.id === planId ? { ...p, price: newPrice } : p);
-      setPlans(updatedPlans);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update plan price.");
+      await firebaseService.proposePlanChange(planId, newPrice, auth.currentUser?.uid || 'anonymous');
+      showToast("Proposal sent to Admin for review", 'success');
+    } catch (e) {
+      console.error(e);
+      showToast("Proposal failed", 'error');
     } finally {
       setIsUpdatingPlan(null);
     }
@@ -184,27 +212,28 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     if (!newNotice.offer || !newNotice.message) return;
     try {
       await firebaseService.createPublicNotice(newNotice);
-      setNewNotice({ offer: '', message: '', targetRegion: '' });
-      alert("Offer published successfully!");
+      setNewNotice({ offer: '', message: '', targetRegion: '', imageUrl: '' });
+      showToast("Offer published successfully!", 'success');
     } catch (err) {
       console.error(err);
-      alert("Failed to publish offer.");
+      showToast("Failed to publish offer.", 'error');
     }
   };
 
   const handleDeleteNotice = async (id: string) => {
     try {
       await firebaseService.deletePublicNotice(id);
+      showToast("Offer deleted", 'success');
     } catch (err) {
       console.error(err);
-      alert("Failed to delete offer.");
+      showToast("Failed to delete offer.", 'error');
     }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCampaign.title || !newCampaign.mediaUrl) {
-      alert("Please fill in all fields");
+      showToast("Please fill in all fields", 'error');
       return;
     }
 
@@ -216,21 +245,32 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         mediaUrl: newCampaign.mediaUrl,
         mediaType: newCampaign.mediaType
       });
-      alert("Campaign created and submitted for Admin approval!");
+      showToast("Campaign created and submitted for review", 'success');
       setNewCampaign({ title: '', description: '', mediaUrl: '', mediaType: 'IMAGE' });
       setActiveTab('STATUS');
     } catch (err) {
       console.error(err);
-      alert("Failed to create campaign. Check console.");
+      showToast("Failed to create campaign.", 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const liveUnitsCount = liveStatus.filter((status) => {
+    if (!status.updatedAt) return false;
+    const lastUpdate = status.updatedAt.toMillis?.() || 0;
+    return Date.now() - lastUpdate < 60000;
+  }).length;
+
+  const totalSuccessfulRevenue = payments
+    .filter(p => p.status === 'SUCCESS' || p.status === 'success' || p.status === 'captured')
+    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
   const user = auth.currentUser;
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-[#020308] text-slate-400 overflow-hidden font-sans selection:bg-amber-500/30">
+    <ErrorBoundary componentName="Support Command Center">
+      <div className="flex flex-col md:flex-row h-screen bg-[#020308] text-slate-400 overflow-hidden font-sans selection:bg-amber-500/30">
       {/* MOBILE HEADER */}
       <div className="md:hidden h-14 bg-[#05070a] border-b border-white/5 flex items-center justify-between px-6 shrink-0 z-40">
         <div className="flex items-center gap-2">
@@ -257,6 +297,8 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
             { id: 'CREATE', icon: <Plus size={20} />, label: 'Compose' },
             { id: 'STATUS', icon: <Activity size={20} />, label: 'Monitor' },
             { id: 'TICKETS', icon: <MessageSquare size={20} />, label: 'Relay' },
+            { id: 'TERMINAL_HUB', icon: <Database size={20} />, label: 'Nodes' },
+            { id: 'LEGAL', icon: <Shield size={20} />, label: 'Rules' },
             { id: 'PLANS', icon: <Zap size={20} />, label: 'Pricing' },
             { id: 'NOTICES', icon: <Gift size={20} />, label: 'Offers' }
           ].map((item) => (
@@ -291,7 +333,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
           </div>
           <div className="flex items-center gap-3">
              <div className="text-right">
-                <p className="text-[10px] font-black text-white leading-none mb-1">{user?.displayName || 'Darshan'}</p>
+                <p className="text-[10px] font-black text-white leading-none mb-1">{user?.displayName || 'Support Agent'}</p>
                 <p className="text-[8px] text-slate-600 uppercase tracking-widest font-black">Auth Level: Support</p>
              </div>
              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-800 to-slate-950 border border-white/5 flex items-center justify-center text-[10px] font-black text-white">S</div>
@@ -396,7 +438,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                         disabled={isSubmitting}
                         className="w-full py-6 bg-amber-500 text-slate-950 rounded-[1.5rem] text-[11px] font-black uppercase tracking-[0.3em] shadow-xl shadow-amber-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 italic"
                       >
-                        {isSubmitting ? 'Syncing with Cloud...' : 'Submit for Admin Review'}
+                        {isSubmitting ? 'Processing Uplink...' : 'Submit for Admin Review'}
                         <Send size={16} />
                       </button>
                    </div>
@@ -443,7 +485,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                             ))}
                          </div>
                       </div>
-                      <div className="flex-1 overflow-y-auto divide-y divide-white/5 scrollbar-hide">
+                      <div className="flex-1 overflow-y-auto divide-y divide-white/5 custom-scrollbar pb-20 md:pb-0">
                          {tickets.filter(t => filterType === 'ALL' || t.type === filterType).map((ticket, i) => (
                            <div 
                              key={i} 
@@ -463,7 +505,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                                        )}>
                                          {ticket.type || 'UNCATEGORIZED'}
                                        </span>
-                                       <span className="text-[7px] font-bold text-slate-600">ID: {ticket.id?.slice(-6).toUpperCase()}</span>
+                                       <span className="text-[7px] font-bold text-slate-600">UNIT: {ticket.driverName?.slice(0, 3)}***</span>
                                     </div>
                                  </div>
                                  <span className={cn(
@@ -517,9 +559,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                                  </div>
                                  <div className="min-w-0">
                                     <h4 className="text-xs md:text-sm font-black text-white uppercase italic leading-none truncate mb-1 pr-2">
-                                      {tickets.find(t => t.id === activeTicketId)?.driverName || 'Relay Node'}
+                                      {tickets.find(t => t.id === activeTicketId)?.driverName ? "RELAY_NODE_" + tickets.find(t => t.id === activeTicketId)?.driverName.slice(0, 3) : 'Relay Node'}
                                     </h4>
-                                    <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest leading-none">Encrypted Tunnel</p>
+                                    <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest leading-none">Encrypted Tunnel • ID MASKED</p>
                                  </div>
                               </div>
                               <div className="flex gap-2">
@@ -652,12 +694,12 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                               <button 
                                 onClick={() => {
                                   const input = document.getElementById(`plan-${plan.id}`) as HTMLInputElement;
-                                  handleUpdatePlan(plan.id, parseFloat(input.value));
+                                  handleProposePlan(plan.id, parseFloat(input.value));
                                 }}
                                 disabled={isUpdatingPlan === plan.id}
                                 className="px-6 bg-slate-900 text-amber-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
                               >
-                                {isUpdatingPlan === plan.id ? 'Syncing...' : 'Update'}
+                                {isUpdatingPlan === plan.id ? 'Processing...' : 'Update'}
                               </button>
                            </div>
                         </div>
@@ -801,7 +843,227 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                     </div>
                  </div>
               </motion.div>
-            ) : (
+            ) : activeTab === 'TERMINAL_HUB' ? (
+              <motion.div 
+                key="terminal_hub"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-8 pb-20 p-4 md:p-10"
+              >
+                {/* Header Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {[
+                    { label: 'Active Campaigns', value: campaigns.filter(c => c.status === 'ACTIVE').length, sub: 'Live Now', icon: Monitor },
+                    { label: 'Cloud Units Ready', value: drivers.filter(d => d.status === 'active').length, sub: 'Approved Fleet', icon: ShieldCheck },
+                    { label: 'Total Revenue', value: `₹${totalSuccessfulRevenue.toLocaleString()}`, sub: 'Cumulative', icon: IndianRupee },
+                    { label: 'Online Now', value: liveUnitsCount, sub: 'Real-time Pulse', icon: Activity }
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
+                      <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
+                        <stat.icon className="text-amber-500" size={100} />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 mb-6">
+                          <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center">
+                            <stat.icon className="text-amber-500" size={16} />
+                          </div>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</span>
+                        </div>
+                        <h4 className="text-4xl font-black text-white tracking-tight">{stat.value}</h4>
+                        <p className="text-[10px] font-black text-amber-500/60 uppercase tracking-widest mt-2">{stat.sub}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Terminal Management Section */}
+                <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-tight">Terminal Hub</h2>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Global Device Activation & Monitoring</p>
+                    </div>
+                    <div className="flex gap-3 w-full md:w-auto">
+                      <div className="relative flex-1 md:flex-initial">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="SEARCH TERMINAL ID..." 
+                          className="w-full md:w-64 pl-12 pr-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20"
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                      <button className="p-4 bg-slate-900 text-amber-500 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all">
+                        <RefreshCw size={20} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                    {drivers.filter(d => (d.terminalId || '').toUpperCase().includes(searchTerm.toUpperCase())).map((d, i) => {
+                      const status = liveStatus.find(s => s.terminalId === d.terminalId);
+                      const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
+                      
+                      return (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-8 space-y-6 relative group overflow-hidden"
+                        >
+                          <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-slate-100 shadow-sm">
+                            <div className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-green-500 animate-pulse" : "bg-slate-300")} />
+                            <span className="text-[8px] font-black uppercase text-slate-500">
+                              {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Hardware Instance</p>
+                            <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">{d.terminalId || "UNASSIGNED"}</h4>
+                          </div>
+
+                          {/* Live Screen Preview */}
+                          {status?.currentAdImage && (
+                            <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group/screen">
+                              <img 
+                                src={status.currentAdImage} 
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover/screen:scale-110" 
+                                alt="Live Display"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover/screen:opacity-100 transition-opacity flex items-end p-3">
+                                <p className="text-[8px] font-black text-white uppercase tracking-widest">LIVE SCREEN MIRROR</p>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Access Key</p>
+                              <p className="text-lg font-black text-amber-600 font-mono tracking-[0.2em]">{d.accessKey || "------"}</p>
+                            </div>
+                            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                              <p className="text-[10px] font-black text-slate-900 uppercase">
+                                {d.provisionStatus || 'IDLE'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Driver</span>
+                              <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.name}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Vehicle</span>
+                              <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.vNo || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Campaign</span>
+                              <span className="text-[10px] font-black text-amber-600 uppercase italic">
+                                {campaigns.find(c => c.assignedDrivers?.includes(d.uid))?.title || 'No Active Ads'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center py-2">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Last Sync</span>
+                              <span className="text-[9px] font-black text-slate-500 uppercase">
+                                {status?.updatedAt ? new Date(status.updatedAt.toMillis()).toLocaleString() : 'Never'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-4 flex gap-2">
+                            <button 
+                              onClick={() => {
+                                window.open(`/device-portal?terminalId=${d.terminalId}&accessKey=${d.accessKey}`, '_blank');
+                              }}
+                              className="flex-1 py-4 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl font-sans"
+                            >
+                              Open Portal
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setSelectedDriverForDocs(d);
+                                setShowDocModal(true);
+                              }}
+                              className="p-4 bg-slate-100 text-slate-600 rounded-2xl hover:bg-slate-200 transition-all text-[8px] font-black uppercase"
+                            >
+                              Docs
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if(window.confirm(`Revoke access for Terminal ${d.terminalId}?`)) {
+                                  firebaseService.revokeTerminal(d.terminalId!, d.uid)
+                                    .then(() => showToast("Terminal credentials revoked.", 'success'))
+                                    .catch(e => showToast(e.message, 'error'));
+                                }
+                              }}
+                              className="p-4 border border-slate-200 text-slate-400 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </motion.div>
+            ) : activeTab === 'LEGAL' ? (
+              <motion.div 
+                key="legal"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-8 pb-20 max-w-6xl mx-auto w-full p-4 md:p-10"
+              >
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-none">Compliance Hub</h2>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Legal, Privacy & Policy Management</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                  <div className="lg:col-span-1 space-y-2">
+                    {[
+                      { id: 'ABOUT', label: 'About Network', icon: Info },
+                      { id: 'PRIVACY', label: 'Privacy Policy', icon: Shield },
+                      { id: 'TERMS', label: 'Terms of Use', icon: FileText },
+                      { id: 'REFUND', label: 'Refund Policy', icon: RefreshCw },
+                      { id: 'CONTACT', label: 'Support Nodes', icon: MessageSquare }
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setLegalPage(item.id as CompliancePage)}
+                        className={cn(
+                          "w-full p-6 rounded-3xl border transition-all flex items-center gap-4 group text-left",
+                          legalPage === item.id 
+                            ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
+                            : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
+                        )}
+                      >
+                        <item.icon size={20} />
+                        <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="lg:col-span-3 bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden min-h-[600px] flex flex-col">
+                     <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white rounded-xl shadow-sm flex items-center justify-center text-slate-400 group-hover:text-amber-500">
+                          <Shield size={16} />
+                        </div>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Compliance Viewer State: LOADED</span>
+                     </div>
+                     <div className="flex-1 overflow-y-auto">
+                        <ComplianceContent page={legalPage} isEmbed />
+                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            ) : activeTab === 'STATUS' ? (
               <motion.div 
                 key="status"
                 initial={{ opacity: 0, x: 20 }}
@@ -893,10 +1155,88 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                 </div>
               </div>
             </motion.div>
-          )}
+          ) : null}
           </AnimatePresence>
         </main>
 
+        {showDocModal && selectedDriverForDocs && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.95 }}
+               animate={{ opacity: 1, scale: 1 }}
+               className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90vh]"
+             >
+                <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+                   <div>
+                     <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">Document Registry</h3>
+                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Verification Profile: {selectedDriverForDocs.name}</p>
+                   </div>
+                   <button onClick={() => setShowDocModal(false)} className="p-3 bg-slate-200 text-slate-900 rounded-2xl hover:bg-slate-300 transition-all">
+                     <X size={20} />
+                   </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-8 lg:p-12">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
+                    {[
+                      { label: 'Driving License', key: 'dlUrl' },
+                      { label: 'Aadhar Card', key: 'aadharUrl' },
+                      { label: 'Vehicle RC', key: 'rcUrl' },
+                      { label: 'Driver Selfie', key: 'selfieUrl' }
+                    ].map((docItem, idx) => (
+                      <div key={idx} className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{docItem.label}</p>
+                          {selectedDriverForDocs[docItem.key] ? (
+                            <span className="text-[8px] font-black py-1 px-3 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20 uppercase">SECURE_LINK_ACTIVE</span>
+                          ) : (
+                            <span className="text-[8px] font-black py-1 px-3 bg-red-500/10 text-red-500 rounded-full border border-red-500/20 uppercase">NOT_UPLOADED</span>
+                          )}
+                        </div>
+                        <div className="bg-slate-50 rounded-[2rem] border border-slate-100 aspect-[4/3] overflow-hidden flex items-center justify-center relative group">
+                          {selectedDriverForDocs[docItem.key] ? (
+                            <>
+                              <img 
+                                src={selectedDriverForDocs[docItem.key]} 
+                                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                                alt={docItem.label}
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                 <a 
+                                  href={selectedDriverForDocs[docItem.key]} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="px-6 py-3 bg-white text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl hover:scale-110 active:scale-95 transition-all"
+                                 >
+                                   Expand Original
+                                 </a>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center gap-3 opacity-20">
+                              <Database size={40} />
+                              <p className="text-[8px] font-black uppercase tracking-widest">Awaiting Data Uplink</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                   </div>
+                </div>
+
+                <div className="p-8 bg-slate-50 border-t border-slate-100 flex justify-end">
+                   <button 
+                    onClick={() => setShowDocModal(false)}
+                    className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl"
+                   >
+                     Done Reviewing
+                   </button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+        
         {showApprovalModal && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
              <motion.div 
@@ -957,7 +1297,24 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
           </div>
         )}
         <AiChat />
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className={cn(
+                "fixed bottom-24 right-8 z-[200] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border font-black uppercase text-[10px] tracking-widest",
+                toast.type === 'success' ? "bg-green-500 border-green-400 text-white" : "bg-red-500 border-red-400 text-white"
+              )}
+            >
+              {toast.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+              {toast.message}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
+    </ErrorBoundary>
   );
 }

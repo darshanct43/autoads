@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database } from 'lucide-react';
+import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, Device } from '@/services/firebaseService';
 import { auth, googleLogin, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { apiService } from '@/services/apiService';
+import { storageService } from '@/services/storageService';
 import { compressImage } from '@/lib/utils';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
+import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
+
+declare const Razorpay: any;
 
 const plans = [
   { id: 'BASIC', name: 'Starter', price: '₹0', unitCount: '2 Units', color: 'bg-emerald-500' },
@@ -27,8 +31,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [selectedCity, setSelectedCity] = useState('');
   const [customCity, setCustomCity] = useState('');
   const [targetArea, setTargetArea] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'CARD' | 'PHONEPE' | 'GPAY' | 'UPI'>('UPI');
-  const [paymentStage, setPaymentStage] = useState<'SELECTION' | 'VERIFICATION'>('SELECTION');
+  const [paymentStage, setPaymentStage] = useState<'SELECTION' | 'PREPARATION'>('SELECTION');
   const [manualTxnId, setManualTxnId] = useState('');
 
   const states = {
@@ -58,7 +61,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     'Others': ['Select "Other" below and specify city', 'Other']
   };
 
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'OFFERS'>('DASHBOARD');
+  const [step, setStep] = useState<'DASHBOARD' | 'CREATE' | 'FLEET' | 'SUPPORT' | 'LEGAL'>('DASHBOARD');
+  const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
+  const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'OFFERS' | 'LEGAL'>('DASHBOARD');
   const [dbPlans, setDbPlans] = useState<any[]>([]);
   
   const mergedPlans = useMemo(() => {
@@ -86,6 +92,33 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [isExtracting, setIsExtracting] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
+  const [uploadTimeLeft, setUploadTimeLeft] = useState(120);
+  const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isUploadingMedia) {
+      setUploadTimeLeft(120);
+      uploadTimerRef.current = setInterval(() => {
+        setUploadTimeLeft(prev => {
+          if (prev <= 1) {
+            if (uploadTimerRef.current) clearInterval(uploadTimerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (uploadTimerRef.current) {
+        clearInterval(uploadTimerRef.current);
+        uploadTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (uploadTimerRef.current) clearInterval(uploadTimerRef.current);
+    };
+  }, [isUploadingMedia]);
+
   const [phone, setPhone] = useState('');
   const [campaignDetails, setCampaignDetails] = useState({
     title: '',
@@ -99,7 +132,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const activeDevicesCount = devices.filter(d => d.status === 'ONLINE' || d.status === 'STREAMING').length;
   const totalNetworkUnits = devices.length;
   const syncScore = devices.length > 0 ? Math.floor((activeDevicesCount / devices.length) * 100) : 0;
-  const liveCampaign = myCampaigns.find(c => c.status === 'LIVE' || c.status === 'ACTIVE');
+  const liveCampaign = myCampaigns.find(c => c.status === 'ACTIVE' || c.status === 'LIVE');
 
   const handlePaymentSuccess = async (txnId?: string) => {
     try {
@@ -110,19 +143,24 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         status: 'PENDING',
         type: campaignDetails.type,
         assetUrl: campaignDetails.asset || '',
+        videoThumbnail: videoThumbnail || '',
         customerId: user?.uid || '',
         targetCity: selectedCity === 'Other' ? customCity : selectedCity,
         targetState: selectedState,
-        duration: campaignDetails.duration
+        duration: campaignDetails.duration,
+        needDesigner: !!needDesigner
       });
 
       // 2. Record Payment
+      const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+      const designerCharge = needDesigner ? 1000 : 0;
+      
       await firebaseService.recordPayment({
         campaignId: campaignRef.id,
-        amount: typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price,
+        amount: baseAmount + designerCharge,
         currency: 'INR',
         status: 'PENDING_ADMIN_VERIFY',
-        paymentMethod: paymentMethod,
+        paymentMethod: 'razorpay',
         transactionId: txnId || `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
         customerId: user?.uid || '',
       });
@@ -130,7 +168,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       setShowPayment(false);
       setPaymentStage('SELECTION');
       setManualTxnId('');
-      alert('Payment Request Received! Your campaign will be verified by an admin within 2-4 hours.');
+      alert('Payment Logged & Verification Pending! Our team will verify the transaction and activate your campaign within 2-4 hours.');
       setCampaignDetails({ title: '', type: 'VIDEO', asset: null, budget: '', duration: '30' });
       setLoading(false);
     } catch (e: any) {
@@ -158,27 +196,147 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       return;
     }
 
-    // Move to Verification Stage
-    const amount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    
-    // VPA details
-    const pa = "pay@autoadspro";
-    const pn = encodeURIComponent("AutoAd Pro Advertising");
-    const tn = encodeURIComponent(`Campaign Order ${selectedPlan.name}`);
-    const tr = `TR${Date.now().toString().slice(-8)}`;
-    
-    const upiUrl = `upi://pay?pa=${pa}&pn=${pn}&am=${amount}&cu=INR&tn=${tn}&tr=${tr}&mc=5411`;
-    
-    console.log(`[Payment] Initializing: ${upiUrl}`);
-    
-    // Attempt redirect
-    try {
-      window.location.href = upiUrl;
-    } catch (e) {
-      console.error("Redirect failed", e);
+    if (!campaignDetails.title) {
+      alert('Please enter a Campaign Title first');
+      return;
+    }
+    if (!campaignDetails.asset && !needDesigner) {
+      alert('Please upload an Ad Asset or choose "Need Designer Help"');
+      return;
+    }
+    if (!selectedState || !selectedCity) {
+      alert('Please select a Target Region (State & City)');
+      return;
     }
 
-    setPaymentStage('VERIFICATION');
+    const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+    const designerCharge = needDesigner ? 1000 : 0;
+    const amount = baseAmount + designerCharge;
+
+    setLoading(true);
+
+    if (amount <= 0) {
+      // Handle free or zero amount plans directly
+      await handlePaymentSuccess('FREE_PLAN_AUTO');
+      return;
+    }
+
+    const razorpayKey = (import.meta.env.VITE_RAZORPAY_KEY_ID as string) || 'rzp_live_SnZDlb9YCezb2w';
+    
+    try {
+      // 1. Create Order on Server
+      const orderResponse = await fetch('/api/razorpay/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount,
+          currency: 'INR',
+          notes: {
+            user_uid: user.uid,
+            campaign_title: campaignDetails.title
+          }
+        })
+      });
+
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json();
+        throw new Error(errorData.error || 'Failed to initialize order');
+      }
+
+      const order = await orderResponse.json();
+
+      // 2. Configure Razorpay Options
+      const options = {
+        key: razorpayKey,
+        amount: order.amount,
+        currency: order.currency,
+        name: "AutoAds Pro",
+        description: `Campaign: ${selectedPlan.name}`,
+        image: "https://darshanct43.github.io/autoads/logo.png",
+        order_id: order.id,
+        handler: async function (response: any) {
+          try {
+            setLoading(true);
+            // 3. Verify Payment on Server
+            const verifyResponse = await fetch('/api/razorpay/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                uid: user.uid,
+                planData: { amount, planId: selectedPlan.id },
+                campaignData: {
+                  title: campaignDetails.title,
+                  type: campaignDetails.type,
+                  assetUrl: campaignDetails.asset || '',
+                  videoThumbnail: videoThumbnail || '',
+                  customerId: user.uid,
+                  targetCity: selectedCity === 'Other' ? customCity : selectedCity,
+                  targetState: selectedState,
+                  duration: campaignDetails.duration,
+                  needDesigner: !!needDesigner
+                }
+              })
+            });
+
+            if (!verifyResponse.ok) {
+              const errorData = await verifyResponse.json();
+              throw new Error(errorData.error || 'Payment verification failed');
+            }
+
+            const result = await verifyResponse.json();
+            
+            // 4. Finalize UI State
+            setShowPayment(false);
+            setPaymentStage('SELECTION');
+            setManualTxnId('');
+            alert('Payment Verified & Campaign Activated! Syncing with network nodes...');
+            setCampaignDetails({ title: '', type: 'VIDEO', asset: null, budget: '', duration: '30' });
+            setLoading(false);
+          } catch (verifyErr: any) {
+            console.error("[Verification] Error:", verifyErr);
+            alert(`Verification Error: ${verifyErr.message}`);
+            setLoading(false);
+          }
+        },
+        prefill: {
+          name: user.displayName || user.email?.split('@')[0] || "Client",
+          email: user.email || "",
+          contact: phone.length === 10 ? `+91${phone}` : phone
+        },
+        notes: {
+          campaign_title: campaignDetails.title,
+          plan: selectedPlan.id,
+          user_uid: user.uid,
+          designer: needDesigner ? "YES" : "NO"
+        },
+        modal: {
+          confirm_close: true,
+          ondismiss: function() {
+            setLoading(false);
+            console.log("[Razorpay] Checkout closed by user");
+          },
+          escape: true,
+          backdropclose: false
+        },
+        theme: {
+          color: "#f59e0b"
+        }
+      };
+
+      const rzpObj = new Razorpay(options);
+      rzpObj.on('payment.failed', function (response: any) {
+        console.error("[Razorpay] Payment Failed:", response.error);
+        alert(`Payment Failed: ${response.error.description}\nCode: ${response.error.code}`);
+      });
+      rzpObj.open();
+    } catch (e: any) {
+      console.error("Order init error:", e);
+      alert(`Initialization Error: ${e.message}`);
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -226,8 +384,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       alert('Please Login to Submit Campaign');
       return;
     }
-    if (!campaignDetails.title || !campaignDetails.asset) {
-      alert('Please provide campaign title and upload an asset');
+    if (!campaignDetails.title) {
+      alert('Please provide campaign title');
       return;
     }
     
@@ -323,7 +481,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc]">
+    <ErrorBoundary componentName="Client Command Center">
+      <div className="min-h-screen bg-[#f8fafc]">
       {/* Navigation */}
       <nav className="h-16 border-b border-slate-200 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -387,7 +546,49 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto p-8 space-y-12">
+      <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-4 md:space-y-8">
+        {activeTab === 'LEGAL' && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-8 pb-32"
+          >
+             <div>
+                <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Legal & Compliance</h2>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Platform Rules, Privacy & Support</p>
+             </div>
+
+             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <div className="lg:col-span-1 space-y-2">
+                   {[
+                      { id: 'ABOUT', label: 'About Network', icon: Info },
+                      { id: 'PRIVACY', label: 'Privacy Policy', icon: ShieldCheck },
+                      { id: 'TERMS', label: 'Terms of Use', icon: FileText },
+                      { id: 'REFUND', label: 'Refund Policy', icon: RefreshCw },
+                      { id: 'CONTACT', label: 'Support Center', icon: MessageSquare }
+                   ].map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setLegalPage(item.id as CompliancePage)}
+                        className={cn(
+                          "w-full flex items-center gap-4 p-6 rounded-3xl border transition-all text-left",
+                          legalPage === item.id 
+                            ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
+                            : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
+                        )}
+                      >
+                        <item.icon size={20} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
+                      </button>
+                   ))}
+                </div>
+                <div className="lg:col-span-3 bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden min-h-[500px]">
+                   <ComplianceContent page={legalPage} isEmbed />
+                </div>
+             </div>
+          </motion.div>
+        )}
+
         {activeTab === 'DASHBOARD' && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -396,10 +597,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           >
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
-                <div className="flex items-center justify-between bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                <div className="flex items-center justify-between bg-white p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                       <h1 className="text-xl font-black text-slate-900 uppercase tracking-tighter italic leading-none">Command Center</h1>
+                       <h1 className="text-xl font-black text-slate-900 uppercase italic leading-none">Command Center</h1>
                        <div className="px-2 py-0.5 bg-amber-500 text-[8px] font-black text-slate-950 rounded uppercase tracking-widest">Active</div>
                     </div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Active Campaign Control Hub</p>
@@ -407,7 +608,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                   <div className="flex gap-2">
                     <div className="flex flex-col items-end">
                        <p className={cn("text-xs font-black tabular-nums", activeDevicesCount > 0 ? "text-green-500" : "text-slate-400")}>
-                         {activeDevicesCount > 0 ? 'SYNCHRONIZED' : 'IDLE'}
+                         {activeDevicesCount > 0 ? 'UPLINK_ACTIVE' : 'IDLE'}
                        </p>
                        <p className="text-[7px] text-slate-400 font-black uppercase tracking-widest">Network Pulse</p>
                     </div>
@@ -424,7 +625,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             <Gift size={14} className="animate-bounce" />
                             <span className="text-[9px] font-black uppercase tracking-widest">Exclusive Offer</span>
                           </div>
-                          <h3 className="text-lg font-black italic tracking-tighter uppercase leading-none">{promo.offer}</h3>
+                          <h3 className="text-lg font-black italic uppercase leading-none">{promo.offer}</h3>
                           <div className="flex items-center gap-2 pt-2">
                             <button 
                               onClick={() => setShowPayment(true)}
@@ -451,43 +652,43 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="p-1.5 bg-slate-50 rounded-lg group-hover:bg-amber-50 transition-colors uppercase shrink-0">{stat.icon}</div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest mb-0.5 truncate leading-none">{stat.label}</p>
-                        <h3 className="text-xs font-black text-slate-900 tracking-tighter italic leading-none truncate">{stat.value}</h3>
+                        <h3 className="text-xs font-black text-slate-900 tracking-tight italic leading-none truncate">{stat.value}</h3>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 {liveCampaign ? (
-                  <div className="bg-slate-950 rounded-[2rem] p-8 text-white relative overflow-hidden border border-slate-900 shadow-xl">
+                  <div className="bg-slate-950 rounded-2xl md:rounded-[2rem] p-4 md:p-8 text-white relative overflow-hidden border border-slate-900 shadow-xl">
                      <div className="relative z-10 space-y-4">
                         <div className="flex items-center gap-3">
                            <span className="px-2 py-0.5 bg-amber-500 text-black rounded text-[8px] font-black uppercase tracking-widest italic animate-pulse">LIVE SIGNAL</span>
                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest italic">Node-ID: {liveCampaign.id.slice(-6)}</span>
                         </div>
-                        <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">{liveCampaign.title}</h2>
-                        <div className="flex gap-10">
-                           <div>
-                              <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-1 italic">Network Load</p>
-                              <p className="text-white font-black text-lg italic tabular-nums tracking-tighter">{(liveCampaign.devices?.length || 0)} Units</p>
-                           </div>
-                           <div>
-                              <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-1 italic">Target City</p>
-                              <div className="flex items-center gap-2">
-                                 <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50" />
-                                 <p className="text-white font-black text-lg uppercase tracking-tighter italic">{liveCampaign.targetCity}</p>
+                        <h2 className="text-2xl font-black italic text-white uppercase">{liveCampaign.title}</h2>
+                           <div className="flex gap-10">
+                              <div>
+                                 <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-1 italic">Network Load</p>
+                                 <p className="text-white font-black text-lg italic tabular-nums">{(liveCampaign.assignedDrivers?.length || 0)} Units</p>
+                              </div>
+                              <div>
+                                 <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-1 italic">Target City</p>
+                                 <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-lg shadow-green-500/50" />
+                                    <p className="text-white font-black text-lg uppercase italic">{liveCampaign.targetArea || 'Global'}</p>
+                                 </div>
                               </div>
                            </div>
-                        </div>
                      </div>
                      <div className="absolute top-1/2 -right-6 -translate-y-1/2 opacity-[0.05] rotate-12 scale-125">
                         <BarChart3 size={150} />
                      </div>
                   </div>
                 ) : (
-                  <div className="bg-white rounded-[2rem] p-8 text-slate-900 relative overflow-hidden border border-slate-100 shadow-sm">
+                  <div className="bg-white rounded-2xl md:rounded-[2rem] p-4 md:p-8 text-slate-900 relative overflow-hidden border border-slate-100 shadow-sm">
                      <div className="relative z-10 space-y-4 max-w-xs">
                         <span className="px-2 py-0.5 bg-slate-900 text-white rounded text-[8px] font-black uppercase tracking-widest italic">System Ready</span>
-                        <h2 className="text-xl font-black italic tracking-tighter text-slate-900 uppercase">Deploy Network Signal</h2>
+                        <h2 className="text-xl font-black italic text-slate-900 uppercase">Deploy Network Signal</h2>
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed italic text-balance">The network is synchronized and waiting for instructions.</p>
                         <button 
                           onClick={() => setShowPayment(true)}
@@ -509,24 +710,24 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     <button onClick={() => setActiveTab('CAMPAIGNS')} className="text-[8px] font-black text-amber-600 uppercase tracking-widest hover:underline">View All</button>
                   </div>
                   <div className="bg-white border border-slate-100 rounded-2xl divide-y divide-slate-50 overflow-hidden">
-                    {myCampaigns.slice(0, 3).map((ad) => (
-                      <div key={ad.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-amber-500">
-                             {ad.type === 'VIDEO' ? <PlayCircle size={14} /> : <ImageIcon size={14} />}
+                        {myCampaigns.slice(0, 3).map((ad) => (
+                          <div key={ad.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-amber-500">
+                                 {ad.mediaType === 'VIDEO' ? <PlayCircle size={14} /> : <ImageIcon size={14} />}
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{ad.title}</p>
+                                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">{ad.targetArea || 'Global'}</p>
+                              </div>
+                            </div>
+                            <div className={cn("px-2 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
+                              ad.status === 'ACTIVE' ? "bg-slate-900 text-amber-500" : "bg-slate-100 text-slate-400"
+                            )}>
+                              {ad.status}
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{ad.title}</p>
-                            <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">{ad.targetCity}</p>
-                          </div>
-                        </div>
-                        <div className={cn("px-2 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
-                          ad.status === 'LIVE' ? "bg-slate-900 text-amber-500" : "bg-slate-100 text-slate-400"
-                        )}>
-                          {ad.status?.split('_')[0]}
-                        </div>
-                      </div>
-                    ))}
+                        ))}
                     {myCampaigns.length === 0 && (
                       <div className="p-8 text-center space-y-4">
                         <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest italic">No Global Events Registered</p>
@@ -575,11 +776,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="flex flex-col gap-2">
                         <div className="flex items-start justify-between">
                           <div className="space-y-0.5">
-                            <h4 className="text-xs font-black text-slate-900 tracking-tighter uppercase italic leading-none">{plan.name}</h4>
+                            <h4 className="text-xs font-black text-slate-900 tracking-tight uppercase italic leading-tight">{plan.name}</h4>
                             <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest italic">{plan.unitCount} Access</p>
                           </div>
                           <div className="flex flex-col items-end">
-                             <p className="text-base font-black text-slate-900 italic tracking-tighter tabular-nums leading-none">{plan.price}</p>
+                             <p className="text-base font-black text-slate-900 italic tracking-tight tabular-nums leading-tight">{plan.price}</p>
                              <p className="text-[7px] text-slate-400 font-bold uppercase mt-0.5">/ cycle</p>
                           </div>
                         </div>
@@ -613,10 +814,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-12 pb-20"
           >
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-              <div className="space-y-2">
-                <h1 className="text-4xl font-black italic tracking-tighter uppercase text-slate-950">Festival Offer Hub</h1>
-                <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em]">Exclusive seasonal campaign packages & rewards</p>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div className="space-y-1">
+                <h1 className="text-3xl font-black italic uppercase text-slate-950">Festival Offer Hub</h1>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Exclusive seasonal campaign packages & rewards</p>
               </div>
               <div className="bg-amber-500/10 border border-amber-500/20 px-6 py-3 rounded-2xl">
                  <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest italic">{promotions.length} Offers Currently Active</p>
@@ -645,7 +846,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
                       <div className="space-y-4">
                          <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest bg-amber-500/10 px-4 py-1.5 rounded-full italic border border-amber-500/20">Active Festival Signal</span>
-                         <h2 className="text-3xl font-black italic tracking-tighter uppercase text-slate-900 leading-tight pr-12">{promo.offer}</h2>
+                         <h2 className="text-3xl font-black italic tracking-tight uppercase text-slate-900 leading-tight pr-12">{promo.offer}</h2>
                          {promo.imageUrl && (
                            <div className="rounded-3xl overflow-hidden border border-slate-100 aspect-video bg-slate-50 mt-4">
                               <img src={promo.imageUrl} alt={promo.offer} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -717,7 +918,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               <td className="px-8 py-6">
                                  <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 overflow-hidden shrink-0">
-                                       {ad.type === 'VIDEO' ? <PlayCircle size={20} /> : <ImageIcon size={20} />}
+                                       {ad.mediaType === 'VIDEO' ? <PlayCircle size={20} /> : <ImageIcon size={20} />}
                                     </div>
                                     <div>
                                        <p className="text-sm font-bold text-slate-900 tracking-tight leading-none mb-1 uppercase italic">{ad.title}</p>
@@ -734,14 +935,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               <td className="px-8 py-6">
                                  <div className="flex items-center gap-2">
                                     <Zap size={12} className={cn(ad.status === 'LIVE' ? "text-amber-500 animate-pulse" : "text-slate-300")} />
-                                    <span className="text-[10px] font-bold text-slate-600 uppercase">{ad.devices?.length || 0} Nodes</span>
+                                    <span className="text-[10px] font-bold text-slate-600 uppercase">{ad.assignedDrivers?.length || 0} Nodes</span>
                                  </div>
                               </td>
                               <td className="px-8 py-6">
                                  <span className={cn("text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border", 
-                                    ad.status === 'PENDING_VERIFICATION' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                    ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                     ad.status === 'APPROVED' ? "bg-green-50 text-green-600 border-green-100" :
-                                    ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
+                                    ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
                                     "bg-red-50 text-red-600 border-red-100"
                                  )}>
                                     {ad.status?.replace('_', ' ')}
@@ -821,7 +1022,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <Sparkles size={40} />
                    </div>
                    <div className="space-y-2">
-                      <h2 className="text-3xl font-black italic text-slate-900 uppercase tracking-tighter leading-none">Designer Help</h2>
+                      <h2 className="text-3xl font-black italic text-slate-900 uppercase tracking-tight leading-relaxed">Designer Help</h2>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Scale your story with expert design strategy</p>
                    </div>
                 </div>
@@ -831,7 +1032,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4">
                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Standard Creative</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Perfect for quick announcements, offers, and regional targeting.</p>
-                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tighter">₹0</h3>
+                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹0</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Professional 4K Static Design</li>
@@ -847,7 +1048,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4 relative z-10">
                          <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Elite Motion Studio</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">High-Impact 1080p motion graphics to grab maximum network attention.</p>
-                         <h3 className="text-3xl font-black italic text-white tracking-tighter">₹0</h3>
+                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹0</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-300 tracking-widest relative z-10">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Custom Motion Narrative (15s)</li>
@@ -861,12 +1062,62 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
              </div>
           </motion.div>
         )}
+        {/* Production Footer Section */}
+        <div className="pt-20 pb-10">
+          <div className="bg-slate-900 rounded-[3rem] p-12 text-center space-y-8 relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+             <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">Lead the Network Surge</h2>
+             <p className="text-slate-400 max-w-md mx-auto text-sm font-medium tracking-tight">India's Premimum Digital Transit Advertising Ecosystem. Hardware-verified impressions for modern brand precision.</p>
+             <button 
+               onClick={() => setShowPayment(true)}
+               className="px-10 py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl shadow-amber-500/20"
+             >
+               Launch New Node
+             </button>
+
+             {/* Compliance Directory */}
+             <div className="pt-12 mt-12 border-t border-white/5 grid grid-cols-2 lg:grid-cols-4 gap-8 text-left">
+                <div className="col-span-2 space-y-4 pr-12">
+                   <div className="flex items-center gap-2">
+                       <span className="text-sm font-black text-white uppercase italic tracking-tighter shrink-0">AutoAds / <span className="text-amber-500">Mayaan</span></span>
+                   </div>
+                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">India's smartest advertising grid. Leveraging AI-driven location intelligence to deliver deep brand impact in transit.</p>
+                   <div className="flex items-center gap-4 pt-2">
+                      <div className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[6px] font-black text-slate-400 uppercase">Razorpay Integrated</div>
+                      <div className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[6px] font-black text-slate-400 uppercase">AES-256 Verified</div>
+                   </div>
+                </div>
+                <div className="space-y-4">
+                   <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-widest leading-none">Resources</h4>
+                   <ul className="space-y-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('ABOUT'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Company Map</li>
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('CONTACT'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Contact Help</li>
+                   </ul>
+                </div>
+                <div className="space-y-4">
+                   <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-widest leading-none">Rules</h4>
+                   <ul className="space-y-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('PRIVACY'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Privacy Center</li>
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('TERMS'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Platform Terms</li>
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('REFUND'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Refund Policy</li>
+                   </ul>
+                </div>
+             </div>
+             
+             <div className="pt-8 flex flex-col sm:flex-row justify-between items-center border-t border-white/5 gap-4">
+                <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.3em]">© 2026 AUTOADS NETWORK LIVE / MAYAAN GROUP</p>
+                <div className="flex gap-4 opacity-40 grayscale">
+                   <img src="https://img.icons8.com/color/48/razorpay.png" className="h-4" alt="Razorpay" />
+                </div>
+             </div>
+          </div>
+        </div>
       </main>
 
       {/* Payment & Designer Portal Modal */}
       <AnimatePresence>
         {showPayment && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[200] overflow-y-auto flex items-start justify-center p-4 sm:p-6 lg:p-8">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -878,11 +1129,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+              className="relative w-full max-w-xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden my-auto"
             >
               <div className={cn("p-8 text-white flex items-center justify-between relative", selectedPlan?.color)}>
                 <div className="flex items-center gap-4">
-                  {paymentStage === 'VERIFICATION' && (
+                  {paymentStage === 'PREPARATION' && (
                     <motion.button 
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -893,7 +1144,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     </motion.button>
                   )}
                   <div>
-                    <h3 className="text-2xl font-black italic tracking-tighter uppercase">Order Summary</h3>
+                    <h3 className="text-2xl font-black italic tracking-tight uppercase">Order Summary</h3>
                     <p className="text-[10px] font-bold opacity-70 uppercase tracking-widest">Plan: {selectedPlan?.name}</p>
                   </div>
                 </div>
@@ -902,21 +1153,21 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 </button>
               </div>
 
-              <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+              <div className="p-4 space-y-4">
                 {paymentStage === 'SELECTION' ? (
                   <>
                     {/* Campaign Basics */}
-                    <div className="space-y-6">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Campaign Configuration</h4>
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Campaign Headline</label>
+                    <div className="space-y-4">
+                      <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Campaign Configuration</h4>
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Campaign Headline</label>
                           <input 
                             type="text"
                             value={campaignDetails.title}
                             onChange={(e) => setCampaignDetails({...campaignDetails, title: e.target.value})}
                             placeholder="e.g. Summer Mega Sale 2026"
-                            className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-4 text-[11px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
+                            className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[10px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
                           />
                         </div>
                         
@@ -969,25 +1220,36 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                              const localUrl = URL.createObjectURL(file);
                              setCampaignDetails(prev => ({ ...prev, asset: localUrl }));
                              setIsUploadingMedia(true);
+                             setUploadProgress(0);
                              
                              try {
-                               // Compress if it's an image
-                               let uploadData: Blob | File = file;
-                               if (file.type.startsWith('image/')) {
-                                 uploadData = await compressImage(file, 800, 0.5);
+                               // Generate and upload video thumbnail if it's a video
+                               if (file.type.startsWith('video/')) {
+                                 try {
+                                   const thumbBlob = await storageService.generateVideoThumbnail(file);
+                                   const thumbFile = new File([thumbBlob], `thumb_${file.name}.jpg`, { type: 'image/jpeg' });
+                                   const thumbPath = storageService.getCampaignMediaPath(user.uid, 'videos', `thumb_${Date.now()}.jpg`);
+                                   const thumbUrl = await storageService.uploadFile(thumbPath, thumbFile);
+                                   setVideoThumbnail(thumbUrl);
+                                   console.log("[CustomerPortal] Video thumbnail generated and uploaded:", thumbUrl);
+                                 } catch (thumbErr) {
+                                   console.error("[CustomerPortal] Failed to generate video thumbnail:", thumbErr);
+                                 }
                                }
-                               
+
                                const fileName = `${Date.now()}_${file.name}`;
-                               const storagePath = `campaign_assets/${user.uid}/${fileName}`;
-                               const url = await firebaseService.uploadFileWithProgress(storagePath, uploadData, (percent) => {
-                                 setUploadProgress(percent);
+                               const mediaType = file.type.startsWith('video/') ? 'videos' : 'posters';
+                               const storagePath = storageService.getCampaignMediaPath(user.uid, mediaType, fileName);
+                               
+                               const url = await storageService.uploadFile(storagePath, file, (p) => {
+                                 setUploadProgress(p.progress);
                                });
                                
                                setCampaignDetails(prev => ({ ...prev, asset: url }));
                                console.log("[CustomerPortal] Asset uploaded to storage:", url);
-                             } catch (err) {
+                             } catch (err: any) {
                                console.error("[CustomerPortal] Asset upload failed:", err);
-                               alert("Failed to upload campaign asset. Please try again.");
+                               alert(err.message || "Failed to upload campaign asset. Please try again.");
                                setCampaignDetails(prev => ({...prev, asset: null}));
                              } finally {
                                setIsUploadingMedia(false);
@@ -1012,15 +1274,37 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               <button onClick={(e) => { e.stopPropagation(); setCampaignDetails({...campaignDetails, asset: null}); }} className="text-[9px] font-bold text-red-500 uppercase hover:underline">Remove</button>
                            </div>
                          ) : (
-                           <>
-                             <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover/asset:text-amber-500 transition-colors">
-                                {isUploadingMedia ? <div className="text-[10px] font-black text-amber-500">{uploadProgress}%</div> : (loading ? <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /> : (campaignDetails.type === 'VIDEO' ? <Video size={20} /> : <ImageIcon size={20} />))}
-                             </div>
-                             <div className="text-center">
-                                <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{isUploadingMedia ? `Syncing Network ${uploadProgress}%` : (loading ? 'Uploading Signal...' : 'Click to Inject Asset')}</p>
-                                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Required: High DPI {campaignDetails.type === 'VIDEO' ? 'MP4' : 'JPEG/PNG'}</p>
-                             </div>
-                           </>
+                           <div className="text-center space-y-3">
+                              {isUploadingMedia ? (
+                                <>
+                                   <div className="relative w-16 h-16 mx-auto">
+                                      <svg className="w-full h-full rotate-[-90deg]">
+                                         <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4" className="text-slate-100" />
+                                         <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4" className="text-amber-500" strokeDasharray={176} strokeDashoffset={176 - (176 * uploadProgress) / 100} strokeLinecap="round" />
+                                      </svg>
+                                      <div className="absolute inset-0 flex items-center justify-center">
+                                         <span className="text-[10px] font-black text-slate-900">{uploadProgress}%</span>
+                                      </div>
+                                   </div>
+                                   <div className="space-y-1">
+                                      <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">Uplinking Asset...</p>
+                                      <p className={cn("text-[8px] font-bold uppercase tracking-widest", uploadTimeLeft < 30 ? "text-red-500 animate-pulse" : "text-slate-400")}>
+                                         Limit: {Math.floor(uploadTimeLeft / 60)}:{(uploadTimeLeft % 60).toString().padStart(2, '0')}
+                                      </p>
+                                   </div>
+                                </>
+                              ) : (
+                                <>
+                                   <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover/asset:text-amber-500 transition-colors mx-auto">
+                                      {loading ? <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /> : (campaignDetails.type === 'VIDEO' ? <Video size={20} /> : <ImageIcon size={20} />)}
+                                   </div>
+                                   <div className="text-center">
+                                      <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{loading ? 'Processing...' : 'Click to Inject Asset'}</p>
+                                      <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Required: High DPI {campaignDetails.type === 'VIDEO' ? 'MP4' : 'JPEG/PNG'}</p>
+                                   </div>
+                                </>
+                              )}
+                           </div>
                          )}
                        </div>
                     </div>
@@ -1118,15 +1402,21 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         </div>
 
                         {needDesigner && (
-                          <motion.div 
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            className="overflow-hidden space-y-3 pt-3 border-t border-slate-200"
-                          >
-                            <p className="text-[10px] text-amber-600 font-bold uppercase tracking-tight italic">
-                              * NOTE: Designer services are now included at no extra charge (₹0) to help you get started.
-                            </p>
-                            <div className="space-y-2">
+                            <motion.div 
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              className="overflow-hidden space-y-4 pt-4 border-t-2 border-amber-100"
+                            >
+                              <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200">
+                                 <p className="text-[10px] text-amber-700 font-extrabold uppercase tracking-tight italic flex items-center gap-2">
+                                   <AlertCircle size={12} />
+                                   PROFESSIONAL DESIGN SERVICE ENABLED
+                                 </p>
+                                 <p className="text-[10px] text-amber-900 font-bold mt-2 leading-relaxed">
+                                   Our studio experts will draft your campaign visuals. <span className="font-extrabold text-amber-600 underline underline-offset-2">Designer Charge: ₹1,000</span> is added to your total.
+                                 </p>
+                              </div>
+                              <div className="space-y-2">
                               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Requirements for Design Request:</p>
                               <ul className="text-[10px] space-y-1.5 text-slate-700 font-medium">
                                 <li className="flex items-center gap-2"><div className="w-1 h-1 bg-amber-500 rounded-full" /> Business Story/Concept details</li>
@@ -1160,40 +1450,20 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                          </div>
                       </div>
 
-                      <div className="space-y-3">
-                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Payment Method</h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {[
-                            { id: 'CARD', name: 'Cards', icon: <CreditCard size={14} /> },
-                            { id: 'PHONEPE', name: 'PhonePe', icon: <Wallet size={14} /> },
-                            { id: 'GPAY', name: 'GooglePay', icon: <Zap size={14} /> },
-                            { id: 'UPI', name: 'Other UPI', icon: <Plus size={14} /> },
-                          ].map(method => (
-                            <button
-                              key={method.id}
-                              onClick={() => setPaymentMethod(method.id as any)}
-                              className={cn(
-                                "flex items-center gap-2 px-3 py-3 rounded-xl border text-[9px] font-bold uppercase tracking-widest transition-all",
-                                paymentMethod === method.id ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-500 border-slate-200 hover:border-amber-200"
-                              )}
-                            >
-                              {method.icon}
-                              {method.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
                       <div className="flex items-center justify-between p-4 bg-amber-50 rounded-2xl border border-amber-100 flex-col sm:flex-row gap-4">
                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-amber-500 text-slate-900 rounded-xl flex items-center justify-center font-bold italic tracking-tighter">10%</div>
+                            <div className="w-10 h-10 bg-amber-500 text-slate-900 rounded-xl flex items-center justify-center font-bold italic tracking-tight shadow-lg shadow-amber-500/10">TOTAL</div>
                             <div>
-                               <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-none">New Launch Offer</p>
-                               <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">Applied on First Month</p>
+                               <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-none">Order Details</p>
+                               <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">
+                                 {selectedPlan.name} Plan {needDesigner ? '+ Designer Review' : ''}
+                               </p>
                             </div>
                          </div>
                          <div className="text-right">
-                            <p className="text-lg font-black text-slate-900 tracking-tighter italic leading-none">{selectedPlan?.price}</p>
+                            <p className="text-lg font-black text-slate-900 tracking-tight italic leading-tight">
+                              ₹{(typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + (needDesigner ? 1000 : 0)}
+                            </p>
                             <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Total Payable</p>
                          </div>
                       </div>
@@ -1201,27 +1471,32 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-3">
                         <button 
                           onClick={handlePaymentAndSubmit}
-                          disabled={phone.length < 10 || loading || isUploadingMedia}
+                          disabled={phone.length < 10 || loading}
                           className={cn(
-                            "w-full py-5 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl active:scale-95",
-                            phone.length >= 10 && !isUploadingMedia ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-200" : "bg-slate-100 text-slate-300 cursor-not-allowed"
+                            "w-full py-5 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl active:scale-95 group/btn",
+                            phone.length >= 10 ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-200" : "bg-slate-100 text-slate-300 cursor-not-allowed"
                           )}
                         >
-                          <CheckCircle2 size={18} className={cn(phone.length >= 10 && !isUploadingMedia ? "text-amber-500" : "text-slate-300")} />
-                          {isUploadingMedia ? `Syncing Network ${uploadProgress}%...` : 'PROCEED TO PAYMENT'}
+                          {loading ? (
+                            <div className="flex items-center gap-2">
+                               <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                               <span>Processing...</span>
+                            </div>
+                          ) : isUploadingMedia ? (
+                            <div className="flex items-center gap-2">
+                               <div className="w-4 h-4 border-2 border-slate-300 border-t-amber-500 rounded-full animate-spin" />
+                               <span>Uplinking Asset {uploadProgress}% (Proceed Anyway)</span>
+                            </div>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={18} className={cn(phone.length >= 10 ? "text-amber-500" : "text-slate-300")} />
+                              INITIATE SECURE PAYMENT
+                            </>
+                          )}
                         </button>
                         
                         <div className="flex flex-col gap-2">
-                           <p className="text-center text-[9px] text-slate-400 font-medium italic">Secure 256-bit SSL encrypted transaction via {paymentMethod}.</p>
-                           <button 
-                             onClick={() => {
-                               navigator.clipboard.writeText("pay@autoadspro");
-                               alert("VPA 'pay@autoadspro' copied! You can now pay manually in your app.");
-                             }}
-                             className="text-[9px] font-bold text-amber-600 uppercase tracking-widest hover:underline"
-                           >
-                             Issues with app? Click to copy VPA (pay@autoadspro)
-                           </button>
+                           <p className="text-center text-[9px] text-slate-400 font-medium italic">Secure 256-bit SSL encrypted transaction via Razorpay.</p>
                         </div>
                      </div>
                     </div>
@@ -1233,55 +1508,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           <ShieldCheck size={40} />
                        </div>
                        <div>
-                          <h4 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900">Payment Verification</h4>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Awaiting Transaction Confirmation</p>
+                          <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Initiated</h4>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Process in Progress</p>
                        </div>
                     </div>
-
-                    <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-8 space-y-6">
-                       <div className="space-y-2">
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Transfer Exactly</p>
-                          <p className="text-4xl font-black text-slate-900 italic tracking-tighter text-center">{selectedPlan?.price}</p>
-                       </div>
-                       
-                       <div className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between">
-                          <div>
-                             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">UPI VPA</p>
-                             <p className="text-xs font-black text-amber-600 font-mono">pay@autoadspro</p>
-                          </div>
-                          <button 
-                            onClick={() => { navigator.clipboard.writeText("pay@autoadspro"); alert("VPA Copied!"); }}
-                            className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all"
-                          >
-                             <Check size={16} />
-                          </button>
-                       </div>
-
-                       <div className="space-y-3">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block ml-1">Enter Transaction ID / UTR No.</label>
-                          <input 
-                            value={manualTxnId}
-                            onChange={(e) => setManualTxnId(e.target.value)}
-                            placeholder="e.g. 123456789012"
-                            className="w-full bg-white border border-slate-100 rounded-xl px-5 py-5 font-black text-sm tracking-widest focus:ring-2 focus:ring-amber-500/20 outline-none uppercase placeholder:lowercase placeholder:font-normal"
-                          />
-                       </div>
-                    </div>
-
-                    <div className="space-y-3">
-                       <button 
-                        onClick={() => {
-                          if (manualTxnId.length < 8) {
-                            alert("Please enter a valid Transaction ID");
-                            return;
-                          }
-                          handlePaymentSuccess(manualTxnId);
-                        }}
-                        className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl hover:bg-slate-800 transition-all active:scale-95"
-                       >
-                         Confirm Payout to Registry
-                       </button>
-                       <button onClick={() => setPaymentStage('SELECTION')} className="w-full text-[9px] font-black text-slate-400 uppercase tracking-widest py-2 hover:text-slate-900">Back to Selection</button>
+                    <div className="text-center">
+                       <button onClick={() => setShowPayment(false)} className="px-8 py-4 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-[10px]">Return to Portal</button>
                     </div>
                   </motion.div>
                 )}
@@ -1351,5 +1583,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       </AnimatePresence>
 
     </div>
+    </ErrorBoundary>
   );
 }

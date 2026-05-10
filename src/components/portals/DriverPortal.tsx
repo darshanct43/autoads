@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
 import { firebaseService, AdCampaign, DriverAssignment, SupportTicket, ChatMessage } from '@/services/firebaseService';
 import { apiService } from '@/services/apiService';
 import { offlineStorageService } from '@/services/offlineStorageService';
 import StrictVerificationSystem from '@/components/common/StrictVerificationSystem';
 import { UserRole } from '@/types';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
+import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 
 interface DriverPortalProps {
   onLogout: () => void;
@@ -24,7 +27,9 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const [showLangPicker, setShowLangPicker] = useState(false);
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const status = (driverProfile?.status === 'active' || driverProfile?.status === 'ACTIVE') ? 'ACTIVE' : 'OFFLINE';
-  const [activeTab, setActiveTab] = useState<'EARNINGS' | 'WITHDRAW'>('EARNINGS');
+  const [activeTab, setActiveTab] = useState<'EARNINGS' | 'WITHDRAW' | 'SETTINGS'>('EARNINGS');
+  const [showCompliance, setShowCompliance] = useState(false);
+  const [compliancePage, setCompliancePage] = useState<CompliancePage>('ABOUT');
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [showSupport, setShowSupport] = useState(false);
   const [assignedCampaigns, setAssignedCampaigns] = useState<AdCampaign[]>([]);
@@ -138,7 +143,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
     return () => {
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     };
-  }, [user, status, driverCampaigns]);
+  }, [user, status, driverCampaigns.length > 0 ? driverCampaigns[0].id : null]);
 
   useEffect(() => {
     if (!user) return;
@@ -306,6 +311,60 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'SETTINGS':
+        return (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-6 pb-24"
+          >
+             <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-xl space-y-8">
+                <div className="flex items-center justify-between">
+                   <div>
+                      <h2 className="text-2xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Settings Hub</h2>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Compliance & Support</p>
+                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                   {[
+                     { id: 'ABOUT', label: 'About AutoAds', icon: Info, color: 'text-blue-500' },
+                     { id: 'PRIVACY', label: 'Privacy Policy', icon: Shield, color: 'text-emerald-500' },
+                     { id: 'TERMS', label: 'Terms of Use', icon: FileText, color: 'text-indigo-500' },
+                     { id: 'REFUND', label: 'Refund Policy', icon: RefreshCw, color: 'text-amber-500' },
+                     { id: 'CONTACT', label: 'Contact Support', icon: MessageSquare, color: 'text-amber-600' }
+                   ].map((item) => (
+                     <button 
+                        key={item.id}
+                        onClick={() => { setCompliancePage(item.id as CompliancePage); setShowCompliance(true); }}
+                        className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100 hover:bg-white hover:border-slate-200 transition-all group"
+                     >
+                        <div className="flex items-center gap-4">
+                           <div className={cn("w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform", item.color)}>
+                              <item.icon size={20} />
+                            </div>
+                           <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">{item.label}</span>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-400" />
+                     </button>
+                   ))}
+                </div>
+
+                <div className="pt-8 border-t border-slate-100 flex flex-col items-center gap-4 text-center">
+                   <div className="bg-slate-900 text-amber-500 px-6 py-2 rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-xl">
+                      App Version: 1.0.4 - PROD
+                   </div>
+                   <button 
+                     onClick={onLogout}
+                     className="flex items-center gap-2 text-red-500 font-black uppercase text-[10px] tracking-widest hover:scale-105 transition-all mt-4"
+                   >
+                     <LogOut size={16} />
+                     Secure Logout
+                   </button>
+                </div>
+             </div>
+          </motion.div>
+        );
       case 'WITHDRAW':
         return (
           <div className="space-y-6">
@@ -386,7 +445,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                   </div>
               </div>
 
-              {/* TERMINAL HUB SECTION - MOVED FOR PROMINENCE */}
+              {/* TERMINAL HUB SECTION */}
               <div className="bg-[#0F172A] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl shadow-slate-900/40 relative overflow-hidden group">
                   <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-10 transition-opacity">
                     <Smartphone size={120} />
@@ -398,25 +457,39 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">Managed Ad-Display Module</p>
                        </div>
                        <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
-                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                          <span className="text-[8px] font-black text-green-500 uppercase tracking-widest">Provisioned</span>
+                          <div className={cn("w-1.5 h-1.5 rounded-full", driverProfile?.terminalId ? "bg-green-500 animate-pulse" : "bg-slate-500")} />
+                          <span className={cn("text-[8px] font-black uppercase tracking-widest", driverProfile?.terminalId ? "text-green-500" : "text-slate-500")}>
+                            {driverProfile?.terminalId ? "Provisioned" : "Pending"}
+                          </span>
                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pb-2">
-                       <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                       <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center transition-all hover:bg-white/10">
                           <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Terminal ID</p>
-                          <p className="text-xs font-mono font-black text-amber-500">{driverProfile?.driverCode || 'DRV-CORE-9011'}</p>
+                          <p className="text-xs font-mono font-black text-amber-500">{driverProfile?.terminalId || 'NOT ASSIGNED'}</p>
                        </div>
-                       <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                       <div 
+                         className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center cursor-pointer transition-all hover:bg-white/10"
+                         onClick={() => {
+                           if (driverProfile?.accessKey) {
+                             alert(`Your Terminal Access Key is: ${driverProfile.accessKey}\n\nDo not share this key.`);
+                           }
+                         }}
+                       >
                           <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Access Key</p>
-                          <p className="text-xs font-mono font-black text-white">••••••</p>
+                          <div className="flex items-center justify-center gap-2 text-white">
+                            <p className="text-xs font-mono font-black">{driverProfile?.accessKey ? "••••••" : "------"}</p>
+                            <Eye size={10} className="text-slate-500" />
+                          </div>
                        </div>
                     </div>
 
                     <div className="bg-white/5 p-4 rounded-xl border border-white/10 flex items-center justify-center gap-3">
                        <ShieldCheck size={14} className="text-amber-500" />
-                       <p className="text-[7px] text-center text-slate-400 font-bold uppercase tracking-[0.2em] leading-relaxed">Auto-Syncing with Hardware Terminal</p>
+                       <p className="text-[7px] text-center text-slate-400 font-bold uppercase tracking-[0.2em] leading-relaxed">
+                         {driverProfile?.terminalId ? "Hardware Terminal Uplink Active" : "Awaiting Terminal Provisioning"}
+                       </p>
                     </div>
                   </div>
               </div>
@@ -502,7 +575,8 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-black text-slate-300 uppercase tracking-widest h-screen">Loading System...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-24 font-sans">
+    <ErrorBoundary componentName="Driver Interaction Hub">
+      <div className="min-h-screen bg-slate-50 text-slate-900 pb-24 font-sans">
       <header className="bg-white border-b border-slate-100 p-5 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-4">
           <div className="w-11 h-11 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 font-bold overflow-hidden border border-slate-200">
@@ -544,7 +618,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
         )}
       </AnimatePresence>
 
-      <main className="p-8 space-y-10 max-w-4xl mx-auto">
+      <main className="p-4 md:p-8 space-y-6 md:space-y-10 max-w-4xl mx-auto">
         {renderContent()}
       </main>
 
@@ -795,7 +869,23 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
             <Wallet size={20} />
             {activeTab === 'WITHDRAW' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Wallet</span>}
          </button>
+         <button onClick={() => setActiveTab('SETTINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'SETTINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
+            <Settings size={20} />
+            {activeTab === 'SETTINGS' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Setup</span>}
+         </button>
       </footer>
+
+      <AnimatePresence>
+        {showCompliance && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+             <ComplianceContent 
+               page={compliancePage} 
+               onClose={() => setShowCompliance(false)} 
+             />
+          </div>
+        )}
+      </AnimatePresence>
     </div>
+    </ErrorBoundary>
   );
 }

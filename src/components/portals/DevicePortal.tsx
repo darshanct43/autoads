@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff } from 'lucide-react';
+import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
 import { auth } from '../../lib/firebase';
@@ -11,14 +11,23 @@ interface DevicePortalProps {
 
 export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [isLogged, setIsLogged] = useState(false);
-  const [driverCode, setDriverCode] = useState('');
-  const [password, setPassword] = useState('');
+  const [terminalId, setTerminalId] = useState('');
+  const [accessKey, setAccessKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [driver, setDriver] = useState<Driver | null>(null);
+  const [activeTerminal, setActiveTerminal] = useState<any>(null);
   const [playlist, setPlaylist] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [online, setOnline] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [systemMetrics, setSystemMetrics] = useState({
+    cpu: 18,
+    ram: 42,
+    storage: 0.8, // GB used
+    battery: 88
+  });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [startTime] = useState(Date.now());
   const [statusLogs, setStatusLogs] = useState<string[]>([
@@ -30,6 +39,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [showGpsPrompt, setShowGpsPrompt] = useState(false);
   const [internalGpsId, setInternalGpsId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showComplianceNotice, setShowComplianceNotice] = useState(false);
   const sessionUptime = Math.floor((currentTime.getTime() - startTime) / 1000);
   const formatUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -102,9 +112,79 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     return () => unsubscribe();
   }, [isLogged, driver?.uid]);
 
+  // Remote Commands & Heartbeat
+  useEffect(() => {
+    if (!isLogged || !activeTerminal?.id) return;
+
+    // 1. Listen for Remote Commands (REBOOT, DISABLE, etc)
+    const unsubscribeCommand = firebaseService.subscribeToTerminalCommands(activeTerminal.id, (terminal) => {
+      if (terminal?.status === 'DISABLED') {
+         setStatusLogs(prev => ["CMD: REMOTE DISABLE RECEIVED", "SYS: HALTING PROCESSES", ...prev]);
+         setTimeout(() => onLogout(), 3000);
+      }
+      if (terminal?.remoteCommand === 'REBOOT') {
+         setStatusLogs(prev => ["CMD: REMOTE REBOOT RECEIVED", "SYS: WARM RESTARTING...", ...prev]);
+         setTimeout(() => window.location.reload(), 2000);
+      }
+      if (terminal?.remoteCommand === 'CLEAR_CACHE') {
+         setStatusLogs(prev => ["CMD: CLEAR_CACHE RECEIVED", "SYS: PURGING ASSETS", ...prev]);
+         setPlaylist([]);
+         setStatusLogs(prev => ["SYS: CACHE PURGED", ...prev]);
+      }
+    });
+
+    // 2. Periodic Heartbeat System
+    const interval = setInterval(async () => {
+       if (online) {
+          const metrics = {
+             online: true,
+             lastHeartbeat: new Date().toISOString(),
+             battery: Math.floor(Math.random() * 5 + 85),
+             ramUsage: Math.floor(Math.random() * 10 + 40) + '%',
+             cpuTemp: Math.floor(Math.random() * 5 + 42) + '°C',
+             signal: 'STRONG',
+             storageAvailable: '12.4 GB'
+          };
+          setSystemMetrics(prev => ({
+            ...prev,
+            battery: metrics.battery,
+            ram: parseInt(metrics.ramUsage)
+          }));
+          await firebaseService.syncTerminalPulse(activeTerminal.id, metrics);
+       }
+    }, 30000);
+
+    return () => {
+       unsubscribeCommand();
+       clearInterval(interval);
+    };
+  }, [isLogged, activeTerminal?.id, online]);
+
+  // Asset Download Simulation (Offline Caching)
+  useEffect(() => {
+    if (playlist.length > 0 && !downloading) {
+       setDownloading(true);
+       setDownloadProgress(0);
+       setStatusLogs(prev => ["IO: ASSET CACHE START", ...prev]);
+       
+       const progressInterval = setInterval(() => {
+          setDownloadProgress(prev => {
+             if (prev >= 100) {
+                clearInterval(progressInterval);
+                setDownloading(false);
+                setStatusLogs(prevLogs => ["IO: ASSET CACHE SYNC COMPLETE", ...prevLogs]);
+                return 100;
+             }
+             return prev + 5;
+          });
+       }, 500);
+       return () => clearInterval(progressInterval);
+    }
+  }, [playlist.length]);
+
   // Real-time location reporting
   useEffect(() => {
-    if (!isLogged || !driver?.uid) return;
+    if (!isLogged || !driver?.uid || !activeTerminal?.id) return;
 
     // Simulate location movement around Bengaluru
     let lat = 12.9716;
@@ -144,6 +224,18 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
             adRuntime: Math.floor(currentTally.adRuntime),
             paymentDue: Math.floor(currentTally.adRuntime * 2.5) // Example payout rate ₹2.5 per min
           });
+
+          // Update LIVE STATUS in Terminal Hub
+          await firebaseService.syncTerminalPulse(activeTerminal.id, {
+            online: true,
+            currentAd: playlist[currentIndex]?.title || 'IDLE',
+            currentAdImage: playlist[currentIndex]?.imageUrl || null,
+            lat,
+            lng,
+            battery: Math.floor(80 + Math.random() * 20),
+            signal: 'STRONG'
+          });
+
           await firebaseService.logLocation({ 
             driverId: driver.uid, 
             lat: lat, 
@@ -158,13 +250,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }, 10000); // Update every 10 seconds
 
     return () => clearInterval(locationInterval);
-  }, [isLogged, driver?.uid, online]);
+  }, [isLogged, driver?.uid, online, activeTerminal?.id, playlist, currentIndex]);
 
   // Check shared preferences simulation (localStorage)
   useEffect(() => {
-    const savedUid = localStorage.getItem('auto_ads_device_uid');
-    if (savedUid) {
-      resumeSession(savedUid);
+    const savedTerminalId = localStorage.getItem('auto_ads_terminal_id');
+    if (savedTerminalId) {
+      resumeTerminalSession(savedTerminalId);
     }
 
     const handleConnection = () => setOnline(navigator.onLine);
@@ -176,50 +268,81 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     };
   }, []);
 
-  const resumeSession = async (uid: string) => {
+  const resumeTerminalSession = async (tid: string) => {
     try {
-      const d = await firebaseService.getDriverProfile(uid);
-      if (d) {
-        setDriver(d);
-        setIsLogged(true);
+      setLoading(true);
+      const terminals: any[] = await firebaseService.getTerminals();
+      const term = terminals.find(t => t.id === tid);
+      if (term && term.status === 'ACTIVE') {
+        setActiveTerminal(term);
+        const d = await firebaseService.getDriverProfile(term.driverId);
+        if (d) {
+          setDriver(d);
+          setIsLogged(true);
+          setShowComplianceNotice(true);
+        }
+      } else {
+        localStorage.removeItem('auto_ads_terminal_id');
       }
     } catch (e) {
-      localStorage.removeItem('auto_ads_device_uid');
+      localStorage.removeItem('auto_ads_terminal_id');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Auto-Reboot simulation for 2GB RAM devices
+  useEffect(() => {
+    const memoryChecker = setInterval(() => {
+       if (systemMetrics.ram > 90) {
+          setStatusLogs(prev => ["SYS: CRITICAL MEMORY SATURATION", "SYS: INITIATING AUTO-RECOVERY REBOOT", ...prev]);
+          setTimeout(() => window.location.reload(), 3000);
+       }
+    }, 60000);
+    return () => clearInterval(memoryChecker);
+  }, [systemMetrics.ram]);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
+
+  const handleActivation = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!driver?.uid) {
+       setError("No Driver Session Found. Login to App first.");
+       return;
+    }
     setLoading(true);
     setError('');
 
     try {
-      const drivers = await firebaseService.getDrivers();
-      let found = drivers.find(d => 
-        d.driverCode?.toUpperCase() === driverCode.toUpperCase() && 
-        d.password === password
-      );
+      const systemDeviceId = "NODE-" + Math.random().toString(36).substr(2, 6).toUpperCase();
+      const result = await firebaseService.activateTerminal(terminalId, accessKey, {
+        deviceId: systemDeviceId,
+        deviceName: 'Android Kiosk Box',
+        pairedDriverId: driver.uid,
+        pairedAt: new Date().toISOString()
+      });
 
-      if (found) {
-        const systemDeviceId = "WEB-SIMULATOR-" + window.navigator.userAgent.slice(-10);
-        
-        // Ensure UID is present
-        const uid = found.uid || (found as any).id;
-        if (!uid) throw new Error("Missing Driver UID");
-
-        if (found.deviceId && found.deviceId !== systemDeviceId) {
-          setError("DEVICE MISMATCH: Account locked to another terminal.");
-        } else {
-          await firebaseService.updateDriverProfile(uid, { deviceId: systemDeviceId });
-          localStorage.setItem('auto_ads_device_uid', uid);
-          setDriver({ ...found, uid });
-          setIsLogged(true);
-        }
+      if (result.success) {
+        localStorage.setItem('auto_ads_terminal_id', terminalId);
+        await resumeTerminalSession(terminalId);
+        setShowComplianceNotice(true);
+        setStatusLogs(prev => ["SYS: PAIRING COMPLETE", `SYS: NODE ID ${terminalId} ACTIVE`, ...prev]);
       } else {
-        setError("Invalid Driver Code or Password.");
+        setError(result.error || "Activation failed.");
       }
     } catch (err: any) {
-      setError(err.message || "System connection failure.");
+      setError(err.message || "Activation logic error.");
     } finally {
       setLoading(false);
     }
@@ -279,13 +402,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.5em] mt-3">Auto Ads Display Node</p>
           </motion.div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleActivation} className="space-y-4">
             <div className="space-y-1 group">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Node Identifier</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Terminal Identifier</label>
               <div className="relative">
                  <input 
-                  value={driverCode}
-                  onChange={(e) => setDriverCode(e.target.value.toUpperCase())}
+                  value={terminalId}
+                  onChange={(e) => setTerminalId(e.target.value.toUpperCase())}
                   placeholder="DRV-CORE-0000" 
                   className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 md:p-5 text-white font-mono text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:bg-white/10 transition-all font-bold placeholder:text-slate-700"
                   required
@@ -294,13 +417,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               </div>
             </div>
             <div className="space-y-1 group">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Auth Signature</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Access Key</label>
               <div className="relative">
                 <input 
                   type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" 
+                  value={accessKey}
+                  onChange={(e) => setAccessKey(e.target.value)}
+                  placeholder="••••••" 
+                  maxLength={6}
                   className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 md:p-5 pr-12 text-white font-mono text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:bg-white/10 transition-all font-bold placeholder:text-slate-700"
                   required
                 />
@@ -326,7 +450,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 h-14 md:h-16 rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-xs transition-all shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 group overflow-hidden relative active:scale-95"
             >
               <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 slant" />
-              {loading ? <RefreshCw className="animate-spin" size={18} /> : <>INITIALIZE HUB <Play size={14} fill="currentColor" /></>}
+              {loading ? <RefreshCw className="animate-spin" size={18} /> : <>ACTIVATE TERMINAL <Play size={14} fill="currentColor" /></>}
             </button>
           </form>
 
@@ -373,7 +497,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                 <p className="text-[9px] md:text-[11px] font-black text-white uppercase tracking-[0.1em] md:tracking-[0.2em] leading-none">
                   {driver?.name?.split(' ')[0] || 'Authorized'}
                 </p>
-                <div className="px-1 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[6px] md:text-[7px] font-black text-green-500 uppercase tracking-tighter">
+                <div className="px-1 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[6px] md:text-[7px] font-black text-green-500 uppercase tracking-normal">
                   VERIFIED
                 </div>
               </div>
@@ -411,10 +535,19 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         </div>
 
         {/* Bottom Footer Info */}
-        <div className="flex justify-between items-end flex-row-reverse pb-2 md:pb-0">
-           <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-3 md:px-5 py-1.5 md:py-2.5 rounded-xl border border-white/5">
-              <div className="w-1 h-1 md:w-1.5 md:h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              <p className="text-[6px] md:text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] md:tracking-[0.3em] font-mono">NODE_ACTIVE // SESSION_SECURE</p>
+        <div className="flex justify-between items-end flex-row-reverse pb-2 md:pb-0 pointer-events-auto">
+           <div className="flex items-center gap-3">
+              <button 
+                 onClick={toggleFullscreen}
+                 className="bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-2 hover:bg-white/5 transition-all group"
+              >
+                 <Maximize size={12} className="text-amber-500 group-hover:scale-110 transition-transform" />
+                 <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Kiosk Force</span>
+              </button>
+              <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-3 md:px-5 py-1.5 md:py-2.5 rounded-xl border border-white/5">
+                <div className="w-1 h-1 md:w-1.5 md:h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <p className="text-[6px] md:text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] md:tracking-[0.3em] font-mono">NODE_ACTIVE // SESSION_SECURE</p>
+              </div>
            </div>
         </div>
       </div>
@@ -469,9 +602,26 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                   <div className="w-full md:col-span-4 space-y-4 md:space-y-6 order-2 md:order-1 px-2 md:px-0">
                      <div className="space-y-2">
                         <p className="text-[8px] md:text-[10px] font-black text-amber-500 uppercase tracking-[0.3em] font-mono">&gt; NODE_STATUS</p>
-                        <div className="p-4 md:p-5 bg-white/5 border border-white/5 rounded-2xl md:rounded-3xl backdrop-blur-xl shadow-2xl">
+                        <div className="p-4 md:p-5 bg-white/5 border border-white/5 rounded-2xl md:rounded-3xl backdrop-blur-xl shadow-2xl relative overflow-hidden">
+                           {downloading && (
+                             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                                <RefreshCw className="text-amber-500 animate-spin" size={24} />
+                                <div>
+                                   <p className="text-[10px] font-black text-white uppercase tracking-widest">Caching Ad Assets</p>
+                                   <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">{downloadProgress}% Synchronized</p>
+                                </div>
+                                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                                   <motion.div 
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${downloadProgress}%` }}
+                                      className="h-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+                                   />
+                                </div>
+                             </div>
+                           )}
                            <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
                               <div className="w-12 h-8 md:w-16 md:h-10 rounded-lg md:xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 p-1.5 md:p-2">
+                                 <Smartphone className="text-amber-500" size={20} />
                               </div>
                               <div>
                                  <p className="text-[10px] md:text-xs font-black text-white uppercase tracking-tight">Active Standby</p>
@@ -491,23 +641,34 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                                  />
                               </div>
                               <div className="flex justify-between items-center text-[7px] md:text-[9px] font-bold uppercase tracking-widest">
-                                 <span className="text-slate-500">Buffer Health</span>
-                                 <span className="text-amber-500 text-[6px] md:text-[8px]">OPTIMAL</span>
+                                 <span className="text-slate-500">Storage Use</span>
+                                 <span className="text-blue-500 text-[6px] md:text-[8px]">{systemMetrics.storage}GB / 16GB</span>
+                              </div>
+                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                                 <div className="h-full bg-blue-500/50" style={{ width: `${(systemMetrics.storage / 16) * 100}%` }} />
                               </div>
                            </div>
                         </div>
                      </div>
 
                      <div className="space-y-2">
-                        <p className="text-[8px] md:text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] font-mono">&gt; SESSION_METRICS</p>
+                        <p className="text-[8px] md:text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] font-mono">&gt; HARDWARE_METRICS</p>
                         <div className="grid grid-cols-2 gap-3">
                            <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md">
-                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">Status</p>
-                              <p className="text-xs md:text-sm font-black text-green-500 uppercase">Standby</p>
+                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">RAM Usage</p>
+                              <p className="text-xs md:text-sm font-black text-white">{systemMetrics.ram}%</p>
+                              <div className="w-full bg-white/5 h-1.5 rounded-full mt-2 overflow-hidden">
+                                 <div className="h-full bg-blue-500" style={{ width: `${systemMetrics.ram}%` }} />
+                              </div>
                            </div>
                            <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md">
-                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">Relay</p>
-                              <p className="text-xs md:text-sm font-black text-white">READY</p>
+                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">Battery</p>
+                              <p className={cn("text-xs md:text-sm font-black", systemMetrics.battery < 20 ? "text-red-500" : "text-green-500")}>
+                                 {systemMetrics.battery}%
+                              </p>
+                              <div className="w-full bg-white/5 h-1.5 rounded-full mt-2 overflow-hidden">
+                                 <div className={cn("h-full", systemMetrics.battery < 20 ? "bg-red-500" : "bg-green-500")} style={{ width: `${systemMetrics.battery}%` }} />
+                              </div>
                            </div>
                         </div>
                      </div>
@@ -699,6 +860,58 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showComplianceNotice && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[200] flex items-center justify-center p-6 sm:px-10">
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.95, y: 20 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               className="bg-white rounded-[2.5rem] p-10 max-w-xl shadow-2xl relative overflow-hidden"
+             >
+                <div className="absolute top-0 left-0 w-full h-1 bg-amber-500" />
+                
+                <div className="space-y-6">
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-900">
+                         <Database size={24} />
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-black italic uppercase text-slate-900 leading-none">Terminal Compliance</h2>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Legal Disclosure & Usage Notice</p>
+                      </div>
+                   </div>
+
+                   <div className="space-y-4 max-h-[300px] overflow-y-auto pr-4 text-sm text-slate-600 leading-relaxed custom-scrollbar">
+                      <section>
+                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-1">Kiosk Mode & Auto-Start</h4>
+                         <p>This application is optimized for Kiosk mode. Long-press the 'AA' logo in maintenance area to unlock technician settings. Ensure 'Auto-Start on Boot' is enabled in Android settings for persistent uptime.</p>
+                      </section>
+                      <section>
+                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-1">GPS & Tracking Disclosure</h4>
+                         <p>This terminal is equipped with persistent GPS tracking to verify ad impression authenticity. Location data is logged every 10-60 seconds while the unit is active.</p>
+                      </section>
+                      <section>
+                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-1">Content Moderation</h4>
+                         <p>Only approved media from the AutoAds Cloud will be displayed. Any attempt to modify system files or display custom content will result in immediate hardware deauthorization.</p>
+                      </section>
+                      <section>
+                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-1">Offline Connectivity</h4>
+                         <p>The device may cache ads. However, impression payouts require a network heartbeat to sync verified display counts to the ledger.</p>
+                      </section>
+                   </div>
+
+                   <button 
+                     onClick={() => setShowComplianceNotice(false)}
+                     className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl hover:bg-slate-800 transition-all active:scale-95"
+                   >
+                     I Accept & Initialize Terminal
+                   </button>
+                </div>
+             </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
