@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  Check,
   PlusCircle, 
   List, 
   Upload, 
@@ -36,9 +37,10 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, SupportTicket, ChatMessage } from '@/services/firebaseService';
+import { storageService } from '@/services/storageService';
 import { auth } from '@/lib/firebase';
 import { UserRole } from '@/types';
-import { AiChat } from '../AiChat';
+import AdminAssistant from '../common/AdminAssistant';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 
@@ -53,7 +55,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
   const [terminals, setTerminals] = useState<any[]>([]);
   const [liveStatus, setLiveStatus] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
-  const [filterType, setFilterType] = useState<'ALL' | 'DEVICE' | 'CUSTOMER'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'DEVICE' | 'CUSTOMER' | 'DESIGN'>('ALL');
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
@@ -88,6 +90,33 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleUploadMediaToCampaign = async (campaignId: string, file: File) => {
+    try {
+      setIsUploading(true);
+      showToast("Optimizing and Uploading...", "success");
+
+      const res = await storageService.uploadCampaignMedia(campaignId, file, (progress) => {
+        console.log(`Upload progress: ${progress}%`);
+      });
+
+      await firebaseService.updateCampaign(campaignId, {
+        assetUrl: res.url,
+        mediaUrl: res.url,
+        videoThumbnail: res.thumbnailUrl || "",
+        mediaType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+        mediaReceived: true,
+        updatedAt: new Date()
+      });
+
+      showToast("Media Uploaded Successfully!", "success");
+    } catch (error) {
+      console.error("Upload error:", error);
+      showToast("Upload failed. Please try again.", "error");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   useEffect(() => {
@@ -194,11 +223,29 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     }
   };
 
-  const handleProposePlan = async (planId: string, newPrice: number) => {
+  const handleUpdatePlanDirect = async (planId: string, newPrice: number) => {
     setIsUpdatingPlan(planId);
     try {
-      await firebaseService.proposePlanChange(planId, newPrice, auth.currentUser?.uid || 'anonymous');
-      showToast("Proposal sent to Admin for review", 'success');
+      await firebaseService.updatePlan(planId, { price: newPrice });
+      showToast("Plan price updated directly", 'success');
+    } catch (e) {
+      console.error(e);
+      showToast("Update failed", 'error');
+    } finally {
+      setIsUpdatingPlan(null);
+    }
+  };
+
+  const handleProposePlan = async (planId: string, type: 'price' | 'designerPrice', newValue: number) => {
+    setIsUpdatingPlan(planId);
+    try {
+      await firebaseService.proposePlanChange({
+        planId,
+        newPrice: newValue,
+        proposedBy: auth.currentUser?.uid || 'SUPPORT',
+        type
+      });
+      showToast(`Proposal for new ${type} submitted for Admin approval`, 'success');
     } catch (e) {
       console.error(e);
       showToast("Proposal failed", 'error');
@@ -473,7 +520,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                             </div>
                          </div>
                          <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
-                            {(['ALL', 'DEVICE', 'CUSTOMER'] as const).map((t) => (
+                            {(['ALL', 'DEVICE', 'CUSTOMER', 'DESIGN'] as const).map((t) => (
                               <button
                                 key={t}
                                 onClick={() => setFilterType(t)}
@@ -486,7 +533,11 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                          </div>
                       </div>
                       <div className="flex-1 overflow-y-auto divide-y divide-white/5 custom-scrollbar pb-20 md:pb-0">
-                         {tickets.filter(t => filterType === 'ALL' || t.type === filterType).map((ticket, i) => (
+                         {tickets.filter(t => {
+                           if (filterType === 'ALL') return true;
+                           if (filterType === 'DESIGN') return t.category === 'Design Strategy' || t.title?.includes('Design Order');
+                           return t.type === filterType;
+                         }).map((ticket, i) => (
                            <div 
                              key={i} 
                              onClick={() => setActiveTicketId(ticket.id!)}
@@ -677,30 +728,62 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                               <p className="text-xs text-slate-400">{plan.description}</p>
                            </div>
                            <div className="flex flex-col items-end">
-                              <span className="text-2xl font-black text-slate-900 italic">₹{plan.price}</span>
-                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Current Unit</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-2xl font-black text-slate-900 italic">₹{plan.price}</span>
+                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Base</span>
+                              </div>
+                              {plan.designerPrice && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xl font-black text-amber-600 italic">₹{plan.designerPrice}</span>
+                                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Design</span>
+                                </div>
+                              )}
                            </div>
                         </div>
                         
-                        <div className="space-y-2">
-                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Modify Pricing (₹)</label>
-                           <div className="flex gap-2">
-                              <input 
-                                type="number" 
-                                defaultValue={plan.price}
-                                id={`plan-${plan.id}`}
-                                className="flex-1 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
-                              />
-                              <button 
-                                onClick={() => {
-                                  const input = document.getElementById(`plan-${plan.id}`) as HTMLInputElement;
-                                  handleProposePlan(plan.id, parseFloat(input.value));
-                                }}
-                                disabled={isUpdatingPlan === plan.id}
-                                className="px-6 bg-slate-900 text-amber-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
-                              >
-                                {isUpdatingPlan === plan.id ? 'Processing...' : 'Update'}
-                              </button>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                           <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Base Price (₹)</label>
+                              <div className="flex gap-2">
+                                 <input 
+                                   type="number" 
+                                   defaultValue={plan.price}
+                                   id={`plan-price-${plan.id}`}
+                                   className="flex-1 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                                 />
+                                 <button 
+                                   onClick={() => {
+                                     const input = document.getElementById(`plan-price-${plan.id}`) as HTMLInputElement;
+                                     handleProposePlan(plan.id, 'price', parseFloat(input.value));
+                                   }}
+                                   disabled={isUpdatingPlan === plan.id}
+                                   className="px-4 bg-slate-900 text-amber-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
+                                 >
+                                   {isUpdatingPlan === plan.id ? 'Wait...' : 'Propose'}
+                                 </button>
+                              </div>
+                           </div>
+
+                           <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Designer Price (₹)</label>
+                              <div className="flex gap-2">
+                                 <input 
+                                   type="number" 
+                                   defaultValue={plan.designerPrice || 0}
+                                   id={`plan-designer-${plan.id}`}
+                                   className="flex-1 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                                 />
+                                 <button 
+                                   onClick={() => {
+                                     const input = document.getElementById(`plan-designer-${plan.id}`) as HTMLInputElement;
+                                     handleProposePlan(plan.id, 'designerPrice', parseFloat(input.value));
+                                   }}
+                                   disabled={isUpdatingPlan === plan.id}
+                                   className="px-4 bg-amber-500 text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-400 transition-all disabled:opacity-50 shadow-lg shadow-amber-500/10"
+                                 >
+                                   {isUpdatingPlan === plan.id ? 'Wait...' : 'Propose'}
+                                 </button>
+                              </div>
                            </div>
                         </div>
 
@@ -1127,12 +1210,35 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                               <div className="flex items-center gap-2">
                                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{new Date(campaign.createdAt?.toDate?.() || campaign.createdAt).toLocaleDateString()}</span>
                               </div>
-                              {campaign.status === 'PENDING' && (
-                                <div className="flex gap-2">
-                                  <button onClick={() => handleRejectCampaign(campaign.id)} className="px-3 py-1.5 border border-red-100 text-red-500 rounded-lg text-[8px] font-black uppercase hover:bg-red-50">Reject</button>
-                                  <button onClick={() => handleApproveCampaign(campaign.id)} className="px-3 py-1.5 bg-slate-900 text-amber-500 rounded-lg text-[8px] font-black uppercase hover:bg-slate-800">Approve</button>
-                                </div>
-                              )}
+                              <div className="flex gap-2">
+                                {campaign.status === 'PENDING' && !campaign.mediaReceived && !campaign.assetUrl && (
+                                   <label className="cursor-pointer">
+                                      <div className={cn(
+                                        "px-3 py-1.5 bg-amber-100 text-amber-600 rounded-lg text-[8px] font-black uppercase hover:bg-amber-200 flex items-center gap-1.5",
+                                        isUploading && "opacity-50 cursor-not-allowed"
+                                      )}>
+                                         <Upload size={10} />
+                                         {isUploading ? "Uploading..." : "Add Media"}
+                                      </div>
+                                      <input 
+                                        type="file" 
+                                        className="hidden" 
+                                        accept="image/*,video/*"
+                                        disabled={isUploading}
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) handleUploadMediaToCampaign(campaign.id!, file);
+                                        }}
+                                      />
+                                   </label>
+                                )}
+                                {campaign.status === 'PENDING' && (
+                                  <>
+                                    <button onClick={() => handleRejectCampaign(campaign.id)} className="px-3 py-1.5 border border-red-100 text-red-500 rounded-lg text-[8px] font-black uppercase hover:bg-red-50">Reject</button>
+                                    <button onClick={() => handleApproveCampaign(campaign.id)} className="px-3 py-1.5 bg-slate-900 text-amber-500 rounded-lg text-[8px] font-black uppercase hover:bg-slate-800">Approve</button>
+                                  </>
+                                )}
+                              </div>
                               <div className="flex items-center -space-x-2">
                                  {campaign.assignedDrivers && campaign.assignedDrivers.length > 0 ? (
                                    <>
@@ -1179,32 +1285,34 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                 <div className="flex-1 overflow-y-auto p-8 lg:p-12">
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
                     {[
-                      { label: 'Driving License', key: 'dlUrl' },
-                      { label: 'Aadhar Card', key: 'aadharUrl' },
-                      { label: 'Vehicle RC', key: 'rcUrl' },
-                      { label: 'Driver Selfie', key: 'selfieUrl' }
+                      { label: 'Profile Photo / Selfie', key: 'profileImage' },
+                      { label: 'Aadhar Card', key: 'aadharPhoto' },
+                      { label: 'Vehicle RC', key: 'rcPhoto' },
+                      { label: 'Driving License', key: 'dlPhoto' },
+                      { label: 'PAN Card', key: 'panPhoto' },
+                      { label: 'Vehicle Insurance', key: 'insurancePhoto' }
                     ].map((docItem, idx) => (
                       <div key={idx} className="space-y-4">
                         <div className="flex items-center justify-between">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{docItem.label}</p>
-                          {selectedDriverForDocs[docItem.key] ? (
+                          {selectedDriverForDocs[docItem.key as keyof Driver] ? (
                             <span className="text-[8px] font-black py-1 px-3 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20 uppercase">SECURE_LINK_ACTIVE</span>
                           ) : (
                             <span className="text-[8px] font-black py-1 px-3 bg-red-500/10 text-red-500 rounded-full border border-red-500/20 uppercase">NOT_UPLOADED</span>
                           )}
                         </div>
                         <div className="bg-slate-50 rounded-[2rem] border border-slate-100 aspect-[4/3] overflow-hidden flex items-center justify-center relative group">
-                          {selectedDriverForDocs[docItem.key] ? (
+                          {selectedDriverForDocs[docItem.key as keyof Driver] ? (
                             <>
                               <img 
-                                src={selectedDriverForDocs[docItem.key]} 
+                                src={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
                                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
                                 alt={docItem.label}
                                 referrerPolicy="no-referrer"
                               />
                               <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                  <a 
-                                  href={selectedDriverForDocs[docItem.key]} 
+                                  href={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
                                   target="_blank" 
                                   rel="noreferrer"
                                   className="px-6 py-3 bg-white text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl hover:scale-110 active:scale-95 transition-all"
@@ -1296,7 +1404,17 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
              </motion.div>
           </div>
         )}
-        <AiChat />
+        <AdminAssistant 
+          activeTab={activeTab} 
+          role="admin" 
+          systemContext={{
+            userName: user?.displayName || 'Support Staff',
+            activeTickets: tickets.filter(t => t.status === 'open').length,
+            transactions: payments,
+            balance: 0,
+            liveUnitsCount: terminals.length
+          }}
+        />
         <AnimatePresence>
           {toast && (
             <motion.div

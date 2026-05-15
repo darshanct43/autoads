@@ -58,6 +58,7 @@ export interface Driver {
     bankName: string;
     holderName: string;
   };
+  fullName?: string;
 }
 
 export interface AdCampaign {
@@ -82,6 +83,16 @@ export interface AdCampaign {
   devices?: number;
   type?: string;
   videoThumbnail?: string;
+  paymentReceived?: boolean;
+  mediaReceived?: boolean;
+  assetUrl?: string;
+  updatedAt?: any;
+  targetLat?: number;
+  targetLng?: number;
+  coverageRadius?: number;
+  needDesigner?: boolean;
+  designerApproved?: boolean;
+  paymentId?: string;
 }
 
 export interface UserProfile {
@@ -104,8 +115,9 @@ export interface DriverAssignment {
 
 export interface SupportTicket {
   id?: string;
-  driverId: string;
+  driverId?: string;
   driverName?: string;
+  customerName?: string;
   title: string;
   subject?: string;
   description: string;
@@ -114,19 +126,25 @@ export interface SupportTicket {
   type?: 'DEVICE' | 'CUSTOMER';
   priority?: 'LOW' | 'MEDIUM' | 'HIGH';
   category?: string;
+  lat?: number;
+  lng?: number;
+  campaignId?: string;
   createdAt: any;
   updatedAt?: any;
   resolvedAt?: any;
   lastMessage?: string;
   unreadCount?: number;
+  customerId?: string;
+  customerSatisfied?: boolean;
 }
 
 export interface ChatMessage {
   id?: string;
   senderId: string;
   senderName: string;
-  senderRole: 'driver' | 'admin' | 'staff';
-  text: string;
+  senderRole?: 'driver' | 'admin' | 'staff' | 'customer' | 'system';
+  text?: string;
+  content?: string;
   timestamp: any;
 }
 
@@ -392,16 +410,19 @@ export const firebaseService = {
   },
 
   // Plan Proposals Logic
-  async proposePlanChange(planId: string, newPrice: number, proposedBy: string) {
+  async proposePlanChange(proposal: {
+    planId: string;
+    newPrice: number;
+    proposedBy: string;
+    type: 'price' | 'designerPrice';
+  }) {
     try {
-      const proposal = {
-        planId,
-        newPrice,
-        proposedBy,
+      const data = {
+        ...proposal,
         status: 'pending',
         createdAt: serverTimestamp()
       };
-      return await addDoc(collection(db, 'planProposals'), proposal);
+      return await addDoc(collection(db, 'planProposals'), data);
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, 'planProposals');
       throw e;
@@ -418,24 +439,40 @@ export const firebaseService = {
     }
   },
 
-  async approvePlanProposal(proposalId: string, planId: string, newPrice: number) {
+  subscribeToPlanProposals(callback: (proposals: any[]) => void) {
+    const q = query(
+      collection(db, 'planProposals'),
+      where('status', '==', 'pending')
+    );
+    return onSnapshot(q, (snapshot) => {
+      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'planProposals'));
+  },
+
+  async approvePlanProposal(proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice') {
     try {
       const batch = writeBatch(db);
       
-      // Update the plan
+      // Update the plan.
       const planRef = doc(db, 'plans', planId);
-      batch.update(planRef, {
-        price: newPrice,
+      const updateData: any = {
         updatedAt: serverTimestamp()
-      });
+      };
+      if (type === 'designerPrice') {
+        updateData.designerPrice = newValue;
+      } else {
+        updateData.price = newValue;
+      }
 
-      // Update the proposal status
+      batch.set(planRef, updateData, { merge: true });
+
+      // Update the proposal status.
       const proposalRef = doc(db, 'planProposals', proposalId);
-      batch.update(proposalRef, {
+      batch.set(proposalRef, {
         status: 'approved',
         approvedAt: serverTimestamp(),
         approvedBy: auth.currentUser?.uid
-      });
+      }, { merge: true });
 
       await batch.commit();
     } catch (e) {
@@ -446,11 +483,11 @@ export const firebaseService = {
 
   async rejectPlanProposal(proposalId: string) {
     try {
-      await updateDoc(doc(db, 'planProposals', proposalId), {
+      await setDoc(doc(db, 'planProposals', proposalId), {
         status: 'rejected',
         rejectedAt: serverTimestamp(),
         rejectedBy: auth.currentUser?.uid
-      });
+      }, { merge: true });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, 'planProposals');
       throw e;
@@ -478,6 +515,45 @@ export const firebaseService = {
     }
   },
 
+  async createTicket(ticket: { title: string, description: string, category: string, priority: string, campaignId?: string }) {
+    try {
+      if (!auth.currentUser) throw new Error("Authentication required");
+      const ticketData = {
+        ...ticket,
+        userId: auth.currentUser.uid,
+        userName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'User',
+        status: 'open',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        messages: [
+          {
+            role: 'system',
+            content: `Ticket initialized for ${ticket.category}. ${ticket.description}`,
+            timestamp: new Date().toISOString()
+          }
+        ]
+      };
+      const docRef = await addDoc(collection(db, 'supportTickets'), ticketData);
+      return docRef;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'supportTickets');
+      throw e;
+    }
+  },
+
+  async updateCampaign(campaignId: string, updates: Partial<AdCampaign>) {
+    try {
+      const campaignRef = doc(db, CAMPAIGNS_COLLECTION, campaignId);
+      await updateDoc(campaignRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, CAMPAIGNS_COLLECTION);
+      throw e;
+    }
+  },
+
   async supportCreateCampaign(campaign: { title: string, description?: string, clientName?: string, mediaUrl: string, mediaType: 'VIDEO' | 'IMAGE' }) {
     return this.createCampaign(campaign);
   },
@@ -486,6 +562,8 @@ export const firebaseService = {
     try {
       await updateDoc(doc(db, 'campaigns', campaignId), {
         status: 'ACTIVE',
+        paymentReceived: true,
+        mediaReceived: true,
         approvedBy: auth.currentUser?.uid,
         updatedAt: serverTimestamp()
       });
@@ -499,10 +577,16 @@ export const firebaseService = {
   async adminApproveCampaignWithDetails(campaignId: string, details: { 
     durationDays: number, 
     hoursPerDay: number, 
+    totalMinutes?: number,
     maxAutos: number, 
     startDate?: string,
     endDate?: string,
-    assignedDrivers: string[] 
+    assignedDrivers: string[],
+    paymentConfirmed?: boolean,
+    mediaConfirmed?: boolean,
+    targetLat?: number,
+    targetLng?: number,
+    coverageRadius?: number
   }) {
     try {
       const batch = writeBatch(db);
@@ -512,11 +596,17 @@ export const firebaseService = {
       batch.update(campaignRef, {
         durationDays: details.durationDays,
         hoursPerDay: details.hoursPerDay,
+        totalMinutes: details.totalMinutes || 0,
         maxAutos: details.maxAutos,
         startDate: details.startDate || null,
         endDate: details.endDate || null,
         assignedDrivers: details.assignedDrivers, // Ensure this is saved
         status: 'ACTIVE',
+        paymentReceived: details.paymentConfirmed ?? true,
+        mediaReceived: details.mediaConfirmed ?? true,
+        targetLat: details.targetLat || 12.9716,
+        targetLng: details.targetLng || 77.5946,
+        coverageRadius: details.coverageRadius || 5000,
         approvedBy: auth.currentUser?.uid,
         updatedAt: serverTimestamp()
       });
@@ -533,6 +623,9 @@ export const firebaseService = {
           startDate: details.startDate || null,
           endDate: details.endDate || null,
           hoursPerDay: details.hoursPerDay,
+          targetLat: details.targetLat || 12.9716,
+          targetLng: details.targetLng || 77.5946,
+          coverageRadius: details.coverageRadius || 5000,
           createdAt: serverTimestamp()
         });
       });
@@ -561,8 +654,8 @@ export const firebaseService = {
 
   async adminApproveDriverAndProvisionTerminal(driverId: string, name: string) {
     try {
-      const accessKey = Math.floor(100000 + Math.random() * 900000).toString();
-      const terminalId = `TRM-${name.split(' ')[0].toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const accessKey = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digit access key
+      const terminalId = `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
       
       const batch = writeBatch(db);
       
@@ -774,11 +867,33 @@ export const firebaseService = {
   async saveDriverProfile(driver: Driver) {
     const driverRef = doc(db, DRIVERS_COLLECTION, driver.uid);
     try {
-      return await setDoc(driverRef, {
+      const accessKey = driver.accessKey || Math.floor(1000 + Math.random() * 9000).toString();
+      const terminalId = driver.terminalId || `DEVICE-${Math.floor(10000 + Math.random() * 90000)}`; // 5 digit for better uniqueness
+
+      const batch = writeBatch(db);
+      
+      batch.set(driverRef, {
         ...driver,
+        accessKey,
+        terminalId,
+        provisionStatus: driver.provisionStatus || 'PROVISIONED',
         createdAt: serverTimestamp(),
         lastLoginAt: serverTimestamp()
       }, { merge: true });
+
+      // Ensure terminal record exists for immediate login
+      const terminalRef = doc(db, 'terminals', terminalId);
+      batch.set(terminalRef, {
+        id: terminalId,
+        driverId: driver.uid,
+        accessKey,
+        status: 'PROVISIONED',
+        createdAt: serverTimestamp(),
+        lastSync: null
+      }, { merge: true });
+
+      await batch.commit();
+      return { terminalId, accessKey };
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `${DRIVERS_COLLECTION}/${driver.uid}`);
       throw e;
@@ -1199,6 +1314,55 @@ export const firebaseService = {
     }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION));
   },
 
+  subscribeToCustomerTickets(customerId: string, callback: (tickets: SupportTicket[]) => void) {
+    const q = query(
+      collection(db, TICKETS_COLLECTION),
+      where('customerId', '==', customerId)
+    );
+    return onSnapshot(q, (snapshot) => {
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
+      // Client-side sort
+      tickets.sort((a, b) => {
+        const timeA = a.updatedAt?.toMillis?.() || 0;
+        const timeB = b.updatedAt?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+      callback(tickets);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION, true));
+  },
+
+  async approveDesignerWork(ticketId: string, campaignId: string) {
+    try {
+      const batch = writeBatch(db);
+      const ticketRef = doc(db, TICKETS_COLLECTION, ticketId);
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      
+      batch.update(ticketRef, {
+        status: 'resolved',
+        customerSatisfied: true,
+        updatedAt: serverTimestamp()
+      });
+      
+      batch.update(campaignRef, {
+        mediaReceived: true,
+        designerApproved: true,
+        updatedAt: serverTimestamp()
+      });
+      
+      await batch.commit();
+      
+      // Add system message to chat
+      await addDoc(collection(db, TICKETS_COLLECTION, ticketId, 'messages'), {
+        content: "Customer has marked this design as SATISFIED. Campaign moved to Team Approval.",
+        senderId: 'system',
+        senderName: 'SYSTEM',
+        timestamp: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, TICKETS_COLLECTION);
+    }
+  },
+
   subscribeToSupportTickets(driverId: string, callback: (tickets: SupportTicket[]) => void) {
     // Try with orderBy first
     try {
@@ -1258,10 +1422,10 @@ export const firebaseService = {
   async updatePlanPrice(planId: string, newPrice: number) {
     try {
       const planRef = doc(db, 'plans', planId);
-      await updateDoc(planRef, { 
+      await setDoc(planRef, { 
         price: newPrice,
         updatedAt: serverTimestamp()
-      });
+      }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `plans/${planId}`);
     }

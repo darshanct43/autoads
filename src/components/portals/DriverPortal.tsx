@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { firebaseService, AdCampaign, DriverAssignment, SupportTicket, ChatMessage } from '@/services/firebaseService';
-import { apiService } from '@/services/apiService';
 import { offlineStorageService } from '@/services/offlineStorageService';
 import StrictVerificationSystem from '@/components/common/StrictVerificationSystem';
 import { UserRole } from '@/types';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
+import AdminAssistant from '../common/AdminAssistant';
 
 interface DriverPortalProps {
   onLogout: () => void;
@@ -119,10 +119,12 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       });
     };
 
-    let watchId: number | null = null;
+    let locationInterval: NodeJS.Timeout | null = null;
     
-    if ("geolocation" in navigator) {
-      watchId = navigator.geolocation.watchPosition(
+    const reportLocation = () => {
+      if (!("geolocation" in navigator)) return;
+      
+      navigator.geolocation.getCurrentPosition(
         (position) => {
           updateLocation(
             position.coords.latitude, 
@@ -131,17 +133,19 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
           );
         },
         (error) => {
-          console.warn("Geolocation watch error:", error);
-          // Only update if we have a known position, no random fallback
+          console.warn("Geolocation current position error:", error);
         },
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+        { enableHighAccuracy: true }
       );
-    } else {
-      console.warn("Geolocation not supported by this browser.");
+    };
+
+    if (user && status === 'ACTIVE') {
+      reportLocation();
+      locationInterval = setInterval(reportLocation, 12000);
     }
 
     return () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (locationInterval) clearInterval(locationInterval);
     };
   }, [user, status, driverCampaigns.length > 0 ? driverCampaigns[0].id : null]);
 
@@ -375,9 +379,20 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                     <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Available Balance</p>
                     <h3 className="text-4xl font-black text-white tracking-tighter italic">₹{(availableBalance || 0).toLocaleString()}</h3>
                   </div>
-                  <button onClick={handleWithdrawClick} className="w-14 h-14 bg-amber-500 text-slate-900 rounded-[1.25rem] flex items-center justify-center hover:bg-amber-400 transition-all shadow-xl shadow-amber-500/10">
-                    <ArrowDownCircle size={28} />
-                  </button>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        setShowSupport(true);
+                      }} 
+                      className="w-10 h-10 bg-white/10 text-white rounded-xl flex items-center justify-center hover:bg-white/20 transition-all border border-white/10"
+                      title="Report Issue"
+                    >
+                      <AlertTriangle size={18} />
+                    </button>
+                    <button onClick={handleWithdrawClick} className="w-14 h-14 bg-amber-500 text-slate-900 rounded-[1.25rem] flex items-center justify-center hover:bg-amber-400 transition-all shadow-xl shadow-amber-500/10">
+                      <ArrowDownCircle size={28} />
+                    </button>
+                  </div>
               </div>
               <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/10 relative z-10 backdrop-blur-sm">
                   <Info size={16} className="text-amber-500 shrink-0" />
@@ -385,24 +400,55 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
               </div>
             </div>
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50">
-               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Payment History</h3>
-               <div className="space-y-3">
-                  {payments.slice(0, 8).map((p, i) => (
-                    <div key={p.id || i} className="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
-                      <div>
-                        <p className={cn("text-xs font-black", p.type === 'earning' ? "text-green-600" : "text-amber-600")}>
-                          {p.type === 'earning' ? '+' : '-'}₹{(p.amount || 0).toLocaleString()}
-                        </p>
-                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">
-                          {p.type === 'earning' ? 'Job Completion' : 'Withdrawal'}
-                        </p>
+                               <div className="space-y-3">
+                  {payments.slice(0, 15).map((p, i) => (
+                    <div key={p.id || i} className="flex flex-col py-4 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 px-2 rounded-xl transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <p className={cn("text-sm font-black", p.type === 'earning' ? "text-green-600" : "text-amber-600")}>
+                            {p.type === 'earning' ? '+' : '-'}₹{(p.amount || 0).toLocaleString()}
+                          </p>
+                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+                            {p.type === 'earning' ? 'Signal Settlement Received' : 'Funds Withdrawal Signal'}
+                          </p>
+                          <div className="flex gap-2 mt-2">
+                             <button 
+                               onClick={() => {
+                                 setShowSupport(true);
+                                 // Logic to pre-fill ticket could go here
+                               }}
+                               className="text-[8px] font-black uppercase text-amber-600 hover:text-amber-700 underline underline-offset-4 tracking-[0.2em]"
+                             >
+                               Raise Signal Error
+                             </button>
+                             {p.status === 'success' || p.status === 'SUCCESS' ? (
+                               <span className="text-[8px] font-black uppercase text-green-500 tracking-[0.2em] flex items-center gap-1">
+                                 <CheckCircle2 size={8} /> Credited
+                               </span>
+                             ) : (
+                               <span className="text-[8px] font-black uppercase text-slate-400 tracking-[0.2em] flex items-center gap-1">
+                                 <RefreshCw size={8} className="animate-spin" /> Processing
+                               </span>
+                             )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className={cn(
+                            "text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md mb-1 block w-fit ml-auto",
+                            p.status === 'success' || p.status === 'SUCCESS' ? "text-green-500 bg-green-50 border border-green-100" : "text-amber-500 bg-amber-50 border border-amber-100"
+                          )}>
+                            {p.status}
+                          </span>
+                          <p className="text-[7px] font-black text-slate-300 uppercase tracking-tighter">
+                            {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : 'Transit Signal'}
+                          </p>
+                        </div>
                       </div>
-                      <span className={cn(
-                        "text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md",
-                        p.status === 'success' ? "text-green-500 bg-green-50" : "text-amber-500 bg-amber-50"
-                      )}>
-                        {p.status}
-                      </span>
+                      {p.transactionId && (
+                        <p className="text-[7px] font-mono font-bold text-slate-400 mt-2 bg-slate-50 p-1 rounded border border-slate-100 w-fit">
+                          TELEMETRY_REF: {p.transactionId}
+                        </p>
+                      )}
                     </div>
                   ))}
                   {payments.length === 0 && (
@@ -434,7 +480,16 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                     <IndianRupee size={80} />
                   </div>
                   <div>
-                    <p className="text-[10px] font-black text-amber-900 uppercase tracking-[0.2em] mb-2">Total Earnings</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black text-amber-900 uppercase tracking-[0.2em] mb-2">Total Earnings</p>
+                      <button 
+                        onClick={() => setActiveTab('WITHDRAW')}
+                        className="flex items-center gap-2 px-4 py-2 bg-white/20 rounded-xl hover:bg-white/40 transition-all border border-white/30 text-amber-900 shadow-sm"
+                      >
+                        <Coins size={16} />
+                        <span className="text-[9px] font-black uppercase tracking-widest leading-none">Wallet</span>
+                      </button>
+                    </div>
                     <h3 className="text-5xl font-black tracking-tighter italic">₹{(totalEarnings || 0).toLocaleString()}</h3>
                   </div>
                   <div className="flex items-center gap-4">
@@ -459,9 +514,26 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                        <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
                           <div className={cn("w-1.5 h-1.5 rounded-full", driverProfile?.terminalId ? "bg-green-500 animate-pulse" : "bg-slate-500")} />
                           <span className={cn("text-[8px] font-black uppercase tracking-widest", driverProfile?.terminalId ? "text-green-500" : "text-slate-500")}>
-                            {driverProfile?.terminalId ? "Provisioned" : "Pending"}
+                            {driverProfile?.terminalId ? "Provisioned" : "Activation Required"}
                           </span>
                        </div>
+                    </div>
+
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl space-y-3">
+                       <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest text-center">Hardware Deployment Credentials</p>
+                       <div className="grid grid-cols-2 gap-4">
+                          <div className="flex flex-col">
+                             <span className="text-[7px] font-black text-slate-500 uppercase">System UID</span>
+                             <span className="text-[10px] font-mono font-black text-white truncate">{user?.uid}</span>
+                          </div>
+                          <div className="flex flex-col text-right">
+                             <span className="text-[7px] font-black text-slate-500 uppercase">Device Password</span>
+                             <span className="text-[10px] font-mono font-black text-amber-500 tracking-widest">{driverProfile?.password || "PENDING"}</span>
+                          </div>
+                       </div>
+                       <p className="text-[7px] text-center text-slate-500 font-bold uppercase italic leading-tight pt-1">
+                          Use these credentials to authenticate your physical display unit (Tab/Terminal).
+                       </p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pb-2">
@@ -824,11 +896,29 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                     onClick={async () => {
                       const desc = (document.getElementById('support-desc') as HTMLTextAreaElement).value;
                       if (!user || !desc.trim()) return;
+                      
+                      let lat = undefined;
+                      let lng = undefined;
+                      
+                      try {
+                        const pos = await new Promise<GeolocationPosition>((res, rej) => 
+                          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true })
+                        );
+                        lat = pos.coords.latitude;
+                        lng = pos.coords.longitude;
+                      } catch (e) {
+                        console.warn("Could not attach location to ticket:", e);
+                      }
+
                       await firebaseService.createSupportTicket({
                         driverId: user.uid,
                         driverName: user.displayName || 'Driver',
-                        title: "System Issue " + new Date().toLocaleDateString(),
-                        description: desc
+                        title: desc.slice(0, 30) + (desc.length > 30 ? "..." : ""),
+                        description: desc,
+                        type: 'DEVICE',
+                        priority: 'MEDIUM',
+                        lat,
+                        lng
                       });
                       (document.getElementById('support-desc') as HTMLTextAreaElement).value = '';
                     }}
@@ -861,14 +951,14 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       </AnimatePresence>
 
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/80 backdrop-blur-xl border border-white/20 p-3 rounded-[2.5rem] z-[90] flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.1)]">
-         <button onClick={() => setActiveTab('EARNINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'EARNINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
-            <BarChart2 size={20} />
-            {activeTab === 'EARNINGS' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Status</span>}
-         </button>
-         <button onClick={() => setActiveTab('WITHDRAW')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'WITHDRAW' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
-            <Wallet size={20} />
+          <button onClick={() => setActiveTab('EARNINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'EARNINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
+            <Activity size={20} />
+            {activeTab === 'EARNINGS' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Dashboard</span>}
+          </button>
+          <button onClick={() => setActiveTab('WITHDRAW')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'WITHDRAW' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
+            <Coins size={20} />
             {activeTab === 'WITHDRAW' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Wallet</span>}
-         </button>
+          </button>
          <button onClick={() => setActiveTab('SETTINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'SETTINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>
             <Settings size={20} />
             {activeTab === 'SETTINGS' && <span className="text-[10px] font-black uppercase tracking-widest leading-none">Setup</span>}
@@ -885,6 +975,16 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
           </div>
         )}
       </AnimatePresence>
+      <AdminAssistant 
+        activeTab={activeTab}
+        role="driver"
+        systemContext={{
+          userName: driverProfile?.name || 'Driver',
+          balance: availableBalance,
+          transactions: payments,
+          activeTickets: supportTickets.filter(t => t.status === 'open').length
+        }}
+      />
     </div>
     </ErrorBoundary>
   );

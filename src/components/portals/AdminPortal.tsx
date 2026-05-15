@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Download,
   CreditCard,
+  Image as ImageIcon,
   Truck,
   Wallet,
   Check,
@@ -30,6 +31,9 @@ import {
   Database,
   Radio,
   RefreshCw,
+  Terminal as TerminalIcon,
+  AlertTriangle,
+  ArrowLeft,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -64,8 +68,11 @@ import {
   Polyline,
   useMap,
 } from "react-leaflet";
+import MarkerClusterGroup from "react-leaflet-markercluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 
 // Fix Leaflet marker icon issue
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -130,6 +137,17 @@ function ChangeView({
   return null;
 }
 
+function InvalidateMap() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 interface AdminPortalProps {
   onRoleJump?: (role: UserRole) => void;
   onLogout: () => void;
@@ -182,9 +200,15 @@ export default function AdminPortal({
   const [approvalForm, setApprovalForm] = useState({
     durationDays: 30,
     hoursPerDay: 8,
+    totalMinutes: 50,
     maxAutos: 5,
-    startDate: "",
-    endDate: "",
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    paymentConfirmed: false,
+    mediaConfirmed: false,
+    targetLat: 12.9716,
+    targetLng: 77.5946,
+    coverageRadius: 5000
   });
   const [selectedDriverForEarning, setSelectedDriverForEarning] =
     useState<any>(null);
@@ -213,6 +237,7 @@ export default function AdminPortal({
     }
   }, [opFeedback]);
 
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   const [purgeInput, setPurgeInput] = useState("");
 
@@ -221,11 +246,23 @@ export default function AdminPortal({
     const lastUpdate = status.updatedAt.toMillis?.() || 0;
     return Date.now() - lastUpdate < 60000; // 1 minute window for live status
   }).length;
+  const [showCoverage, setShowCoverage] = useState(true);
+  const [showIssues, setShowIssues] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState<any>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([
-    20.5937, 78.9629,
+    12.9716, 77.5946, // Default to Bengaluru if no units
   ]);
-  const [mapZoom, setMapZoom] = useState(5);
+  const [mapZoom, setMapZoom] = useState(12);
+
+  // Auto-center map on active units once they are loaded
+  useEffect(() => {
+    const activeUnits = driverLocations.filter(loc => loc.lat && loc.lng && loc.lat !== 0 && loc.isOnline);
+    if (activeUnits.length > 0 && mapZoom === 12 && mapCenter[0] === 12.9716) {
+      // Find bounding box or just center on the first one
+      const first = activeUnits[0];
+      setMapCenter([first.lat, first.lng]);
+    }
+  }, [driverLocations]);
 
   const [currentTime, setCurrentTime] = useState(new Date());
   useEffect(() => {
@@ -290,19 +327,22 @@ export default function AdminPortal({
     try {
       await firebaseService.createCampaign({
         title: formData.get("title") as string,
+        clientName: formData.get("clientName") as string,
         description: (formData.get("description") as string) || "",
         assetUrl: formData.get("assetUrl") as string,
         budget: parseFloat(formData.get("budget") as string),
-        targetLat: parseFloat(formData.get("targetLat") as string) || 0,
-        targetLng: parseFloat(formData.get("targetLng") as string) || 0,
+        targetLat: parseFloat(formData.get("targetLat") as string) || 12.9716,
+        targetLng: parseFloat(formData.get("targetLng") as string) || 77.5946,
         coverageRadius:
           parseFloat(formData.get("coverageRadius") as string) || 5000,
         status: "PENDING",
         customerId: "SYSTEM_ADMIN",
       });
       setShowCampaignModal(false);
+      showToast("Campaign deployed to network.", 'success');
     } catch (err) {
       console.error(err);
+      showToast("Deployment failed.", 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -519,21 +559,18 @@ export default function AdminPortal({
   const [planProposals, setPlanProposals] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchProposals = async () => {
-      const ps = await firebaseService.getPlanProposals();
-      setPlanProposals(ps);
-    };
-    fetchProposals();
+    const unsub = firebaseService.subscribeToPlanProposals(setPlanProposals);
+    return () => unsub();
   }, []);
 
-  const handleApprovePlan = async (proposalId: string, planId: string, newPrice: number) => {
+  const handleApprovePlan = async (proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice' = 'price') => {
     try {
-      await firebaseService.approvePlanProposal(proposalId, planId, newPrice);
+      await firebaseService.approvePlanProposal(proposalId, planId, newValue, type);
       const up = await firebaseService.getPlans();
       setPlans(up);
       const props = await firebaseService.getPlanProposals();
       setPlanProposals(props);
-      showToast("Plan rate updated successfully!", 'success');
+      showToast(`${type === 'price' ? 'Base' : 'Designer'} rate updated successfully!`, 'success');
     } catch (e) {
       console.error(e);
       showToast("Failed to approve plan change.", 'error');
@@ -659,7 +696,13 @@ export default function AdminPortal({
   };
 
   const handleApproveCampaign = async (campaignId: string) => {
+    const campaign = campaigns.find(c => c.id === campaignId);
     setApprovingCampaignId(campaignId);
+    setApprovalForm(prev => ({
+      ...prev,
+      paymentConfirmed: campaign?.paymentReceived || false,
+      mediaConfirmed: campaign?.mediaReceived || (!!campaign?.assetUrl || !!campaign?.mediaUrl)
+    }));
     setShowApprovalModal(true);
     // Reset selection when starting approval
     setSelectedDriverIds([]);
@@ -667,6 +710,13 @@ export default function AdminPortal({
 
   const handleConfirmApproval = async () => {
     if (!approvingCampaignId) return;
+    const campaign = campaigns.find(c => c.id === approvingCampaignId);
+
+    if (!approvalForm.paymentConfirmed || !approvalForm.mediaConfirmed) {
+      showToast("Both Payment and Media must be confirmed before approval.", "error");
+      return;
+    }
+
     if (selectedDriverIds.length === 0) {
       showToast("Please select at least one driver to assign.", 'error');
       return;
@@ -679,10 +729,16 @@ export default function AdminPortal({
         {
           durationDays: approvalForm.durationDays,
           hoursPerDay: approvalForm.hoursPerDay,
+          totalMinutes: approvalForm.totalMinutes,
           maxAutos: approvalForm.maxAutos,
           startDate: approvalForm.startDate,
           endDate: approvalForm.endDate,
           assignedDrivers: selectedDriverIds,
+          paymentConfirmed: approvalForm.paymentConfirmed,
+          mediaConfirmed: approvalForm.mediaConfirmed,
+          targetLat: approvalForm.targetLat,
+          targetLng: approvalForm.targetLng,
+          coverageRadius: approvalForm.coverageRadius
         },
       );
       showToast("Campaign Approved and Drivers Assigned!", 'success');
@@ -769,7 +825,35 @@ export default function AdminPortal({
 
   const [isExtracting, setIsExtracting] = useState(false);
 
-  // Simulation Heartbeat Disabled by request to maintain operational integrity.
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3; // metres
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c; // in metres
+  };
+
+  const getComplianceStatus = (loc: any) => {
+    const activeCampaign = campaigns.find(c => c.assignedDrivers?.includes(loc.id) && c.status === 'ACTIVE');
+    if (!activeCampaign || !activeCampaign.targetLat) return { status: 'idle', distance: 0 };
+
+    const dist = calculateDistance(loc.lat, loc.lng, activeCampaign.targetLat, activeCampaign.targetLng);
+    const isCompliant = dist <= (activeCampaign.coverageRadius || 5000);
+    
+    return { 
+      status: isCompliant ? 'compliant' : 'off-course', 
+      distance: Math.round(dist),
+      campaign: activeCampaign.title,
+      limit: activeCampaign.coverageRadius || 5000
+    };
+  };
   useEffect(() => {
     // Maintenance loop
   }, []);
@@ -905,262 +989,44 @@ export default function AdminPortal({
         )}
       </AnimatePresence>
       <div className="w-20 bg-slate-950 flex flex-col items-center py-8 gap-8 border-r border-slate-800 relative z-30 transition-all duration-300 hidden md:flex overflow-y-auto custom-scrollbar">
-        <div className="flex flex-col gap-5">
-          <button
-            onClick={() => setActiveTab("DASHBOARD")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "DASHBOARD"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Dashboard"
-          >
-            <Activity size={20} />
-            {activeTab === "DASHBOARD" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("MAP")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "MAP"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Live Map"
-          >
-            <MapPin size={20} />
-            {activeTab === "MAP" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("CAMPAIGNS")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "CAMPAIGNS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Ad Campaigns"
-          >
-            <Monitor size={20} />
-            {activeTab === "CAMPAIGNS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("REVIEWS")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "REVIEWS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Campaign Reviews"
-          >
-            <Zap size={20} />
-            {activeTab === "REVIEWS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("MONITOR")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "MONITOR"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Live Unit Screens"
-          >
-            <Smartphone size={20} />
-            {activeTab === "MONITOR" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-            {liveScreensCount > 0 && (
-              <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("TICKETS")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "TICKETS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Support"
-          >
-            <AlertCircle size={20} />
-            {activeTab === "TICKETS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("DASHBOARD")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "DASHBOARD"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Dashboard"
-          >
-            <Activity size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "DASHBOARD" && "opacity-100")}>Stats</span>
-            {activeTab === "DASHBOARD" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("MAP")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "MAP"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Live Tracking Map"
-          >
-            <MapPin size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "MAP" && "opacity-100")}>Map</span>
-            {activeTab === "MAP" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("TERMINAL_HUB")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "TERMINAL_HUB"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Terminal Management"
-          >
-            <Terminal size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "TERMINAL_HUB" && "opacity-100")}>Terminal</span>
-            {activeTab === "TERMINAL_HUB" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("CAMPAIGNS")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "CAMPAIGNS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Campaign Management"
-          >
-            <Monitor size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "CAMPAIGNS" && "opacity-100")}>Ads</span>
-            {activeTab === "CAMPAIGNS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("MONITOR")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "MONITOR"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Live Monitoring"
-          >
-            <Smartphone size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "MONITOR" && "opacity-100")}>Live</span>
-            {activeTab === "MONITOR" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-            {liveScreensCount > 0 && (
-              <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("PRICING")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "PRICING"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Market Pricing"
-          >
-            <IndianRupee size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "PRICING" && "opacity-100")}>Rates</span>
-            {activeTab === "PRICING" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("PAYMENTS")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "PAYMENTS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Payments Registry"
-          >
-            <CreditCard size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "PAYMENTS" && "opacity-100")}>Pay</span>
-            {activeTab === "PAYMENTS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("FLEET")}
-            className={cn(
-              "flex flex-col items-center gap-1 p-3 rounded-2xl transition-all relative group",
-              activeTab === "FLEET"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Fleet Management"
-          >
-            <Truck size={20} />
-            <span className={cn("text-[7px] font-black uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity", activeTab === "FLEET" && "opacity-100")}>Fleet</span>
-            {activeTab === "FLEET" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("WITHDRAWALS")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "WITHDRAWALS"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Withdrawal Requests"
-          >
-            <Wallet size={20} />
-            {activeTab === "WITHDRAWALS" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("NOTICES")}
-            className={cn(
-              "p-3 rounded-2xl transition-all relative group",
-              activeTab === "NOTICES"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-500 hover:bg-white/5 hover:text-white",
-            )}
-            title="Global Offers"
-          >
-            <Gift size={20} />
-            {activeTab === "NOTICES" && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
-            )}
-          </button>
+        <div className="flex flex-col gap-3">
+          {[
+            { id: "DASHBOARD", icon: Activity, title: "Overview" },
+            { id: "MAP", icon: MapPin, title: "Live Tracking" },
+            { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
+            { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests", badge: planProposals.length > 0 },
+            { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
+            { id: "REVIEWS", icon: Zap, title: "QC Queue" },
+            { id: "MONITOR", icon: Smartphone, title: "Live Units", badge: liveScreensCount > 0 },
+            { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
+            { id: "PRICING", icon: IndianRupee, title: "Market Rates" },
+            { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
+            { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
+            { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
+            { id: "NOTICES", icon: Gift, title: "Global Offers" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={cn(
+                "p-3 rounded-2xl transition-all relative group",
+                activeTab === tab.id
+                  ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20"
+                  : "text-slate-500 hover:bg-white/5 hover:text-white",
+              )}
+              title={tab.title}
+            >
+              <tab.icon size={20} />
+              {activeTab === tab.id && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-amber-500 rounded-l-full translate-x-4"></div>
+              )}
+              {tab.badge && (
+                <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
+              )}
+            </button>
+          ))}
         </div>
+
         <div className="mt-auto flex flex-col items-center gap-4 pb-4">
           <div className="bg-white/5 p-2 rounded-xl border border-white/10 flex flex-col items-center gap-1 group relative">
             <span className="text-[7px] font-black uppercase text-slate-500 tracking-widest">
@@ -1180,7 +1046,7 @@ export default function AdminPortal({
         </div>
       </div>
 
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950 border-t border-slate-800 z-50 flex items-center justify-around py-3 px-2">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-t border-slate-200 px-6 flex items-center justify-between z-50 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
         <button
           onClick={() => setActiveTab("DASHBOARD")}
           className={cn(
@@ -1204,6 +1070,20 @@ export default function AdminPortal({
           <MapPin size={20} />
         </button>
         <button
+          onClick={() => setActiveTab("PRICING_APPROVALS")}
+          className={cn(
+            "p-2 rounded-xl transition-all relative",
+            activeTab === "PRICING_APPROVALS"
+              ? "bg-amber-500 text-slate-950"
+              : "text-slate-500",
+          )}
+        >
+          <Check size={20} />
+          {planProposals.length > 0 && (
+            <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" />
+          )}
+        </button>
+        <button
           onClick={() => setActiveTab("CAMPAIGNS")}
           className={cn(
             "p-2 rounded-xl transition-all",
@@ -1215,64 +1095,83 @@ export default function AdminPortal({
           <Monitor size={20} />
         </button>
         <button
-          onClick={() => setActiveTab("MONITOR")}
-          className={cn(
-            "p-2 rounded-xl transition-all relative",
-            activeTab === "MONITOR"
-              ? "bg-amber-500 text-slate-950"
-              : "text-slate-500",
-          )}
-        >
-          <Smartphone size={20} />
-          {liveScreensCount > 0 && (
-            <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("TERMINAL_HUB")}
+          onClick={() => setShowMobileMenu(true)}
           className={cn(
             "p-2 rounded-xl transition-all",
-            activeTab === "TERMINAL_HUB"
-              ? "bg-amber-500 text-slate-950"
-              : "text-slate-500",
+            showMobileMenu ? "bg-amber-500 text-slate-950" : "text-slate-500",
           )}
         >
-          <Terminal size={20} />
-        </button>
-        <button
-          onClick={() => setActiveTab("FLEET")}
-          className={cn(
-            "p-2 rounded-xl transition-all",
-            activeTab === "FLEET"
-              ? "bg-amber-500 text-slate-950"
-              : "text-slate-500",
-          )}
-        >
-          <Truck size={20} />
-        </button>
-        <button
-          onClick={() => setActiveTab("PAYMENTS")}
-          className={cn(
-            "p-2 rounded-xl transition-all",
-            activeTab === "PAYMENTS"
-              ? "bg-amber-500 text-slate-950"
-              : "text-slate-500",
-          )}
-        >
-          <CreditCard size={20} />
-        </button>
-        <button
-          onClick={() => setActiveTab("WITHDRAWALS")}
-          className={cn(
-            "p-2 rounded-xl transition-all",
-            activeTab === "WITHDRAWALS"
-              ? "bg-amber-500 text-slate-950"
-              : "text-slate-500",
-          )}
-        >
-          <Wallet size={20} />
+          <Settings size={20} />
         </button>
       </div>
+
+      {/* Admin Mobile Menu Drawer */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <div className="fixed inset-0 z-[200] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileMenu(false)}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[3rem] p-8 max-h-[80vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-xl font-black italic uppercase text-slate-900">System Command</h3>
+                <button onClick={() => setShowMobileMenu(false)} className="p-2 bg-slate-100 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 xs:grid-cols-3 gap-3 md:gap-4">
+                {[
+                  { id: "DASHBOARD", icon: Activity, title: "Overview" },
+                  { id: "MAP", icon: MapPin, title: "Live Tracking" },
+                  { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
+                  { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests" },
+                  { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
+                  { id: "REVIEWS", icon: Zap, title: "QC Queue" },
+                  { id: "MONITOR", icon: Smartphone, title: "Live Units" },
+                  { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
+                  { id: "PRICING", icon: IndianRupee, title: "Market Rates" },
+                  { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
+                  { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
+                  { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
+                  { id: "NOTICES", icon: Gift, title: "Global Offers" },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id as any);
+                      setShowMobileMenu(false);
+                    }}
+                    className={cn(
+                      "flex flex-col items-center gap-3 p-6 rounded-3xl border transition-all",
+                      activeTab === item.id 
+                        ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
+                        : "bg-slate-50 border-slate-100 text-slate-400"
+                    )}
+                  >
+                    <item.icon size={24} />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-center">{item.title}</span>
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={() => onLogout()}
+                className="w-full mt-8 p-6 bg-red-50 text-red-500 rounded-3xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3"
+              >
+                <LogOut size={20} /> KILL SESSION
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 flex flex-col overflow-hidden pb-20 md:pb-0 relative bg-white">
         {/* Floating Role Switch Button Removed - Unified in App.tsx */}
@@ -1301,10 +1200,6 @@ export default function AdminPortal({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100">
-               <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-               <span className="text-[9px] font-black text-slate-800 uppercase tracking-widest italic">Mayaan Network Live</span>
-            </div>
             <button
               onClick={() => setShowPurgeConfirm(true)}
               className="hidden md:flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-red-400 shadow-lg shadow-red-500/10"
@@ -1715,9 +1610,24 @@ export default function AdminPortal({
                               <h4 className="text-sm font-black text-slate-900 uppercase leading-none mb-1">
                                 {c.title}
                               </h4>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
-                                Assigned: {c.assignedDrivers?.length || 0} Units
-                              </p>
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                                  Active Area: <span className="text-slate-900">{c.targetCity}, {c.targetState}</span>
+                                </p>
+                                {c.assignedDrivers && c.assignedDrivers.length > 0 && (
+                                  <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                    <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1">Live Terminals:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {c.assignedDrivers.map((d: any) => (
+                                        <span key={d.driverId} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-black text-slate-700 shadow-sm">
+                                          {d.terminalId || d.driverId?.slice(-4).toUpperCase()}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1774,15 +1684,24 @@ export default function AdminPortal({
                       </div>
                     </div>
                   ) : null}
-                  <div className="p-4 border-b border-slate-50 bg-slate-50/30">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="p-4 border-b border-slate-50 bg-slate-50/30 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => setSelectedCampaign(null)}
+                        className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl border border-slate-200 transition-all flex items-center gap-2"
+                      >
+                         <ArrowLeft size={16} />
+                         <span className="text-[9px] font-black uppercase tracking-widest hidden xs:inline">Back</span>
+                      </button>
                       <h3 className="text-xs font-black text-slate-900 uppercase italic">
-                        Inventory Configuration
+                        Node Activation Desk
                       </h3>
-                      <span className="px-3 py-1 bg-green-100 text-green-600 text-[8px] font-black uppercase rounded-lg">
-                        Target: Active
-                      </span>
                     </div>
+                    <span className="px-3 py-1 bg-green-100 text-green-600 text-[8px] font-black uppercase rounded-lg">
+                      Cluster: {selectedCampaign?.title.slice(0, 10)}
+                    </span>
+                  </div>
+                  <div className="p-4 border-b border-slate-50 bg-slate-50/10">
                     <div className="relative">
                       <Search
                         size={14}
@@ -1931,7 +1850,18 @@ export default function AdminPortal({
                     Review Docs
                   </button>
                   <button
-                    onClick={() => firebaseService.updateDriverProfile(d.id, { status: 'active', isVerified: true })}
+                    onClick={() => {
+                      const newId = d.terminalId || `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
+                      const newKey = d.accessKey || Math.floor(1000 + Math.random() * 9000).toString();
+                      firebaseService.updateDriverProfile(d.id, { 
+                        status: 'active', 
+                        isVerified: true,
+                        terminalId: newId,
+                        accessKey: newKey,
+                        provisionStatus: 'PROVISIONED'
+                      });
+                      showToast("Driver Approved & Terminal Provisioned", 'success');
+                    }}
                     className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 font-sans"
                   >
                     Quick Approve
@@ -1977,10 +1907,20 @@ export default function AdminPortal({
                             </div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent" />
-                          <div className="absolute top-6 right-6">
+                          <div className="absolute top-6 right-6 flex flex-col items-end gap-2">
                             <span className="bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-500 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-2xl">
-                              Awaiting Review
+                              {(() => {
+                                if (!c.paymentReceived) return "Awaiting Payment";
+                                if ((c as any).needDesigner && !(c as any).designerApproved) return "Waiting for Designer/User Satisfaction";
+                                if (c.mediaReceived || c.mediaUrl || c.assetUrl) return "Admin: Recv Payment & Media Ready";
+                                return "Awaiting Final Review";
+                              })()}
                             </span>
+                            {(c as any).needDesigner && (
+                              <span className="bg-blue-500/20 backdrop-blur-md border border-blue-500/30 text-blue-500 px-3 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest">
+                                Designer Selected
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="p-4 md:p-6 flex flex-col flex-1">
@@ -1992,6 +1932,20 @@ export default function AdminPortal({
                               <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
                               ID: {c.id?.slice(-8).toUpperCase()}
                             </p>
+                            <div className="flex flex-wrap gap-2 pt-2">
+                               <div className={cn(
+                                 "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest border",
+                                 c.paymentReceived ? "bg-green-50 text-green-500 border-green-100" : "bg-red-50 text-red-500 border-red-100"
+                               )}>
+                                  {c.paymentReceived ? "PAID" : "UNPAID"}
+                               </div>
+                               <div className={cn(
+                                 "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest border",
+                                 (c.mediaReceived || c.mediaUrl || c.assetUrl) ? "bg-green-50 text-green-500 border-green-100" : "bg-amber-50 text-amber-600 border-amber-100"
+                               )}>
+                                  {(c.mediaReceived || c.mediaUrl || c.assetUrl) ? "READY" : "PENDING"}
+                               </div>
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 gap-3 mt-8">
                             <button
@@ -2035,6 +1989,77 @@ export default function AdminPortal({
               </div>
             </div>
           </div>
+        ) : activeTab === "PRICING_APPROVALS" ? (
+          <div className="space-y-8">
+            <div className="bg-slate-900 p-8 rounded-[3rem] text-white relative overflow-hidden shadow-2xl border border-slate-800">
+               <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
+               <div className="relative z-10">
+                  <h2 className="text-3xl font-black italic uppercase text-amber-500">Price Change Requests</h2>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Designer & Base Pricing Approvals Queue</p>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+               {planProposals.length === 0 ? (
+                 <div className="col-span-full py-20 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center gap-4">
+                    <Check className="text-slate-200" size={48} />
+                    <h3 className="text-sm font-black text-slate-400 uppercase italic">All Pricing Synced</h3>
+                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">No pending price proposals from support team</p>
+                 </div>
+               ) : (
+                 planProposals.map((prop, i) => {
+                   const plan = plans.find(p => p.id === prop.planId);
+                   return (
+                     <motion.div 
+                       key={i}
+                       initial={{ opacity: 0, scale: 0.95 }}
+                       animate={{ opacity: 1, scale: 1 }}
+                       className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6 relative group"
+                     >
+                        <div className="flex items-center justify-between">
+                           <div className="bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">
+                              {prop.type === 'designerPrice' ? 'Designer Rate' : 'Base Rate'}
+                           </div>
+                           <span className="text-[10px] font-bold text-slate-400">{prop.createdAt?.toDate?.()?.toLocaleDateString() || 'Today'}</span>
+                        </div>
+                        
+                        <div>
+                           <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none">{plan?.name || prop.planId}</h3>
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Proposed by: {prop.proposedBy}</p>
+                        </div>
+
+                        <div className="flex items-baseline gap-4 py-4 bg-slate-50 rounded-2xl px-6">
+                           <div className="flex-1">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Proposed</p>
+                              <p className="text-2xl font-black text-amber-500 italic">₹{prop.newValue || prop.newPrice}</p>
+                           </div>
+                           <div className="w-px h-10 bg-slate-200" />
+                           <div className="flex-1">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current</p>
+                              <p className="text-2xl font-black text-slate-300 italic">₹{prop.type === 'designerPrice' ? plan?.designerPrice : plan?.price}</p>
+                           </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                           <button 
+                             onClick={() => handleRejectPlan(prop.id)}
+                             className="flex-1 px-4 py-3 bg-slate-100 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+                           >
+                              Reject
+                           </button>
+                           <button 
+                             onClick={() => handleApprovePlan(prop.id, prop.planId, prop.newValue || prop.newPrice, prop.type || 'price')}
+                             className="flex-[2] bg-amber-500 text-slate-950 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all"
+                           >
+                              Approve Rate
+                           </button>
+                        </div>
+                     </motion.div>
+                   );
+                 })
+               )}
+            </div>
+          </div>
         ) : activeTab === "TERMINAL_HUB" ? (
           <div className="space-y-8 pb-20">
             {/* Header Stats From Screenshot */}
@@ -2067,8 +2092,14 @@ export default function AdminPortal({
             <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                  <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-tight">Terminal Hub</h2>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Global Device Activation & Monitoring</p>
+                    <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-tight">Terminal Hub</h2>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic flex flex-wrap items-center gap-2">
+                      <span className="text-slate-900">SYSTEM ARCHITECTURE:</span> Every driver requires a Provisioned Terminal to run Ad Campaigns.
+                      <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                      <span className="text-slate-500 underline decoration-slate-200">NOT ASSIGNED:</span> Terminal hardware logic has not been linked to this driver profile yet.
+                      <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                      <span className="text-amber-600 font-bold">AWAITING PROVISIONING:</span> Terminal ID generated but synchronization with physical display unit is pending.
+                    </p>
                 </div>
                 <div className="flex gap-3 w-full md:w-auto">
                   <div className="relative flex-1 md:flex-initial">
@@ -2108,7 +2139,29 @@ export default function AdminPortal({
 
                       <div className="space-y-2">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Hardware Instance</p>
-                        <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">{d.terminalId || "UNASSIGNED"}</h4>
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">
+                             {d.terminalId || "UNASSIGNED"}
+                          </h4>
+                          {!d.terminalId && (
+                            <button 
+                              onClick={() => {
+                                const newId = `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
+                                const newKey = Math.floor(1000 + Math.random() * 9000).toString();
+                                firebaseService.updateDriverProfile(d.uid, { 
+                                  terminalId: newId, 
+                                  accessKey: newKey,
+                                  provisionStatus: 'PROVISIONED' 
+                                })
+                                  .then(() => showToast("Terminal Provisioned", 'info'))
+                                  .catch(e => showToast(e.message, 'error'));
+                              }}
+                              className="text-[8px] font-black bg-amber-500 text-slate-950 px-2 py-1 rounded-md uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                            >
+                              Gen UID
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Live Screen Preview */}
@@ -2130,12 +2183,25 @@ export default function AdminPortal({
                         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Access Key</p>
                           <p className="text-lg font-black text-amber-600 font-mono tracking-[0.2em]">{d.accessKey || "------"}</p>
+                          {!d.accessKey && (
+                            <p className="text-[7px] font-bold text-red-400 uppercase mt-1">Awaiting Provisioning</p>
+                          )}
                         </div>
                         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                          <p className="text-[10px] font-black text-slate-900 uppercase">
-                            {d.provisionStatus || 'IDLE'}
-                          </p>
+                          <div className="flex flex-col">
+                            <p className={cn(
+                              "text-[10px] font-black uppercase",
+                              d.provisionStatus === 'ACTIVE' ? "text-green-600" : "text-amber-500"
+                            )}>
+                              {d.provisionStatus || 'NOT ASSIGNED'}
+                            </p>
+                            <p className="text-[6px] font-bold text-slate-400 mt-0.5 leading-tight">
+                              {d.provisionStatus === 'ACTIVE' ? "Device Fully Synced" : 
+                               d.provisionStatus === 'PROVISIONED' ? "Awaiting First Connection" :
+                               "Pending Admin Provisioning"}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
@@ -2292,19 +2358,57 @@ export default function AdminPortal({
                 {plans.map((plan, i) => (
                   <div
                     key={i}
-                    className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-6"
+                    className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl space-y-6 relative overflow-hidden group"
                   >
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-black text-slate-900 uppercase">
-                        {plan.name}
+                      <h3 className="text-sm font-black text-slate-900 uppercase decoration-amber-500 underline underline-offset-4">
+                        {plan.name} Tier
                       </h3>
-                      <span className="text-xl font-black italic">
+                      <span className="text-2xl font-black italic text-slate-900 tracking-tight">
                         ₹{plan.price}
                       </span>
                     </div>
-                    <div className="space-y-2 text-center opacity-40">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Support Team Proposals Only</p>
-                      <Zap size={16} className="mx-auto mt-2" />
+
+                    <div className="space-y-4 pt-4 border-t border-slate-50">
+                      <div className="space-y-1">
+                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Designer Rate</p>
+                         <p className="text-lg font-black text-slate-900 italic tracking-tight">₹{plan.designerPrice || 1000}</p>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <button 
+                          onClick={() => {
+                            const newVal = window.prompt(`Proposed NEW price for ${plan.name} (Current: ${plan.price})`, plan.price);
+                            if (newVal && !isNaN(parseFloat(newVal))) {
+                              firebaseService.proposePlanChange({
+                                planId: plan.id,
+                                newPrice: parseFloat(newVal),
+                                proposedBy: auth.currentUser?.displayName || 'Support Admin',
+                                type: 'price'
+                              }).then(() => showToast("Price Proposal Sent!", 'info'));
+                            }
+                          }}
+                          className="w-full py-4 bg-slate-50 border border-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                        >
+                          Modify Base Rate
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const newVal = window.prompt(`Proposed Designer Charge for ${plan.name} (Current: ${plan.designerPrice || 1000})`, (plan.designerPrice || 1000).toString());
+                            if (newVal && !isNaN(parseFloat(newVal))) {
+                              firebaseService.proposePlanChange({
+                                planId: plan.id,
+                                newPrice: parseFloat(newVal),
+                                proposedBy: auth.currentUser?.displayName || 'Support Admin',
+                                type: 'designerPrice'
+                              }).then(() => showToast("Designer Rate Proposal Sent!", 'info'));
+                            }
+                          }}
+                          className="w-full py-4 bg-amber-50 border border-amber-100 text-amber-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all shadow-sm italic"
+                        >
+                          Adjust Designer Fee
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2344,16 +2448,44 @@ export default function AdminPortal({
                       {driverLocations.filter((l) => !l.isOnline).length}
                     </span>
                   </div>
+                  <button 
+                    onClick={() => setShowCoverage(!showCoverage)}
+                    className={cn(
+                      "flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all shadow-sm",
+                      showCoverage ? "bg-amber-500 text-slate-950 border-amber-600" : "bg-white text-slate-400 border-slate-100"
+                    )}
+                  >
+                    <div className={cn("w-1.5 h-1.5 rounded-full", showCoverage ? "bg-slate-950" : "bg-slate-300")} />
+                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">
+                      Coverage: {showCoverage ? "ON" : "OFF"}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowIssues(!showIssues)}
+                    className={cn(
+                      "flex items-center gap-3 px-6 py-3 rounded-2xl transition-all shadow-lg active:scale-95 group",
+                      showIssues
+                        ? "bg-red-500 text-white shadow-red-500/20"
+                        : "bg-white text-slate-400 border border-slate-100",
+                    )}
+                  >
+                    <div className={cn("w-1.5 h-1.5 rounded-full", showIssues ? "bg-white" : "bg-slate-300")} />
+                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">
+                      Issues: {showIssues ? "VISIBLE" : "HIDDEN"}
+                    </span>
+                  </button>
                 </div>
               </div>
 
               <div className="flex flex-col md:flex-row gap-4 relative">
-                <div className="bg-slate-100 rounded-[2rem] md:rounded-[2.5rem] relative overflow-hidden border border-slate-100 shadow-xl h-[450px] md:flex-1 md:h-full z-10">
+                <div className="bg-slate-100 rounded-[2rem] md:rounded-[2.5rem] relative overflow-hidden border border-slate-100 shadow-xl h-[500px] md:h-[650px] lg:h-[750px] md:flex-1 z-10">
                   <MapContainer
                     key={activeTab}
                     center={mapCenter}
                     zoom={mapZoom}
                     className="h-full w-full outline-none"
+                    style={{ height: "100%", width: "100%", background: "#f8fafc" }}
                     zoomControl={true}
                     dragging={true}
                     touchZoom={true}
@@ -2362,16 +2494,20 @@ export default function AdminPortal({
                     boxZoom={true}
                     keyboard={true}
                   >
+                    <InvalidateMap />
+                    <div className="absolute top-2 right-12 z-[1000] bg-white/80 backdrop-blur-md px-2 py-1 rounded text-[7px] font-black uppercase text-slate-400">
+                      Map Engine: Leaflet 1.9.4
+                    </div>
                     <TileLayer
-                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     />
                     <ChangeView center={mapCenter} zoom={mapZoom} />
 
                     {/* Render Campaign Coverage Areas */}
                     {campaigns
                       .filter(
-                        (c) => c.status === "ACTIVE",
+                        (c) => c.status === "ACTIVE" && showCoverage,
                       )
                       .map((camp: any) => (
                         <Circle
@@ -2409,67 +2545,185 @@ export default function AdminPortal({
                         </Circle>
                       ))}
 
+                    {/* Render History Polyline */}
+                    {selectedDriverHistory.length > 1 && (
+                      <Polyline
+                        positions={selectedDriverHistory
+                          .filter(h => h.lat && h.lng)
+                          .map(h => [h.lat, h.lng]) as [number, number][]}
+                        pathOptions={{
+                          color: "#3b82f6",
+                          weight: 4,
+                          opacity: 0.6,
+                          dashArray: "10, 10",
+                          lineJoin: "round"
+                        }}
+                      />
+                    )}
+
+                    {/* Render Issue Reports */}
+                    {showIssues && tickets.filter(t => t.type === 'DEVICE' && t.lat && t.lng).map((ticket, i) => (
+                      <Marker 
+                        key={`ticket-${i}`}
+                        position={[ticket.lat!, ticket.lng!]}
+                        icon={L.divIcon({
+                          className: 'custom-issue-icon',
+                          html: `
+                            <div class="relative bg-red-600 w-8 h-8 rounded-lg flex items-center justify-center text-white border-2 border-white shadow-xl animate-bounce">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            </div>
+                          `,
+                          iconSize: [32, 32],
+                          iconAnchor: [16, 16]
+                        })}
+                      >
+                         <Popup>
+                            <div className="p-2">
+                               <h4 className="text-xs font-black text-red-600 uppercase mb-1">Issue Reported</h4>
+                               <p className="text-[10px] font-bold text-slate-900">{ticket.title}</p>
+                               <p className="text-[8px] text-slate-400 mt-1">{ticket.status} • {ticket.priority}</p>
+                            </div>
+                         </Popup>
+                      </Marker>
+                    ))}
+
+                    <MarkerClusterGroup>
                     {/* Render Driver Markers */}
                     {driverLocations
                       .filter(
                         (loc) =>
                           typeof loc.lat === "number" &&
                           typeof loc.lng === "number" &&
-                          loc.lat !== 0 && loc.lng !== 0,
+                          loc.lat !== 0 && loc.lng !== 0 &&
+                          // Strict live check: only show if updated in last 15 minutes
+                          (loc.timestamp ? (Date.now() - new Date(loc.timestamp).getTime() < 900000) : (loc.updatedAt ? (Date.now() - loc.updatedAt.toMillis() < 900000) : true)), // 15 mins
                       )
-                      .map((loc) => (
-                        <Marker
-                          key={loc.id}
-                          position={[loc.lat, loc.lng]}
-                          icon={autoIcon(loc.isOnline)}
-                          eventHandlers={{
-                            click: () => {
-                              setSelectedLocation(loc);
-                              setMapCenter([loc.lat, loc.lng]);
-                              setMapZoom(16);
-                              handleFetchDriverHistory(loc.driverId);
-                            },
-                          }}
-                        >
-                          <Popup closeButton={false}>
-                            <div className="p-3 w-48 font-sans">
-                              {/* Popup content */}
-                              <div className="flex items-center gap-3 mb-3">
-                                <div className="w-10 h-10 bg-slate-950 rounded-lg flex items-center justify-center text-amber-500 shadow-lg border border-white/5">
-                                  <Truck size={20} />
+                      .map((loc) => {
+                        const compliance = getComplianceStatus(loc);
+                        const driverObj = drivers.find((d) => d.uid === loc.driverId);
+                        return (
+                          <Marker
+                            key={loc.id}
+                            position={[loc.lat, loc.lng]}
+                            icon={
+                              L.divIcon({
+                                className: "custom-div-icon",
+                                html: `
+                                <div class="relative group">
+                                  <div class="w-10 h-10 ${loc.isOnline ? "bg-slate-900 shadow-[0_0_20px_rgba(245,158,11,0.4)]" : "bg-slate-800 border-slate-700 opacity-60"} rounded-xl flex items-center justify-center text-white transition-all duration-300 border-2 ${compliance.status === 'compliant' ? 'border-emerald-500' : compliance.status === 'off-course' ? 'border-red-500' : 'border-amber-500'} transform group-hover:scale-110 active:scale-95 shadow-2xl">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9C2.1 11.6 2 11.8 2 12v4c0 .6.4 1 1 1h2"/>
+                                      <circle cx="7" cy="17" r="2"/>
+                                      <path d="M9 17h6"/>
+                                      <circle cx="17" cy="17" r="2"/>
+                                    </svg>
+                                  </div>
+                                  ${loc.isOnline ? `<div class="absolute -top-1.5 -right-1.5 flex h-4 w-4"><span class="animate-ping absolute inline-flex h-full w-full rounded-full ${compliance.status === 'compliant' ? 'bg-emerald-400' : 'bg-green-400'} opacity-75"></span><span class="relative inline-flex rounded-full h-4 w-4 ${compliance.status === 'compliant' ? 'bg-emerald-500' : 'bg-green-500'} border-2 border-white"></span></div>` : ""}
+                                  ${loc.gpsId ? `
+                                    <div class="absolute -bottom-1 -left-1 w-4 h-4 bg-blue-600 rounded-lg flex items-center justify-center border-2 border-white shadow-xl z-50 overflow-hidden" title="HARDWARE GPS ACTIVE: ${loc.gpsId}">
+                                      <div class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+                                      <div class="absolute inset-0 bg-blue-400/20 animate-ping"></div>
+                                    </div>
+                                  ` : ""}
                                 </div>
-                                <div className="min-w-0">
-                                  <p className="text-[11px] font-black italic text-slate-900 uppercase truncate">
-                                    {drivers.find((d) => d.uid === loc.driverId)
-                                      ?.fullName || `Unit (${loc.driverId?.slice(-6)})`}
-                                  </p>
-                                  <div className="flex items-center gap-1.5">
-                                    <div
-                                      className={cn(
-                                        "w-1.5 h-1.5 rounded-full",
-                                        loc.isOnline
-                                          ? "bg-green-500 animate-pulse"
-                                          : "bg-slate-300",
-                                      )}
-                                    />
-                                    <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">
-                                      {loc.isOnline
-                                        ? "TELEMETRY LIVE"
-                                        : "LOST GPS FIX"}
+                              `,
+                                iconSize: [40, 40],
+                                iconAnchor: [20, 20],
+                              })
+                            }
+                            eventHandlers={{
+                              click: () => {
+                                setSelectedLocation({ ...loc, compliance });
+                                setMapCenter([loc.lat, loc.lng]);
+                                setMapZoom(16);
+                                handleFetchDriverHistory(loc.driverId);
+                              },
+                            }}
+                          >
+                            <Popup closeButton={false}>
+                              <div className="p-4 w-64 font-sans bg-white">
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-xl relative overflow-hidden", loc.isOnline ? "bg-slate-900 border border-white/10" : "bg-slate-200")}>
+                                     {driverObj?.profileImage ? (
+                                       <img src={driverObj.profileImage} className="w-full h-full object-cover" />
+                                     ) : (
+                                       <Truck size={24} className={loc.isOnline ? "text-amber-500" : "text-slate-400"} />
+                                     )}
+                                     <div className={cn("absolute top-1 right-1 w-2 h-2 rounded-full border border-white", loc.isOnline ? "bg-green-500" : "bg-red-500")} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[12px] font-black italic text-slate-900 uppercase truncate">
+                                      {driverObj?.fullName || `Node [${loc.id.slice(-6)}]`}
+                                    </p>
+                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">
+                                      ID: {driverObj?.driverCode || 'AUTH_REQD'}
                                     </p>
                                   </div>
                                 </div>
+
+                                <div className="space-y-2 border-t border-slate-50 pt-3">
+                                  {compliance.status !== 'idle' ? (
+                                    <>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Stack</span>
+                                        <span className="text-[10px] font-black text-slate-900 uppercase truncate max-w-[120px]">{compliance.campaign}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Proximity</span>
+                                        <span className={cn("text-[11px] font-black", compliance.status === 'compliant' ? "text-emerald-500" : "text-red-500")}>
+                                          {(compliance.distance / 1000).toFixed(2)} KM
+                                        </span>
+                                      </div>
+                                      
+                                      <div className={cn(
+                                        "p-2 rounded-xl border flex items-center justify-center gap-2 mt-2",
+                                        compliance.status === 'compliant' 
+                                          ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
+                                          : "bg-red-50 border-red-100 text-red-600"
+                                      )}>
+                                        {compliance.status === 'compliant' ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
+                                        <span className="text-[9px] font-black uppercase tracking-widest">
+                                          {compliance.status === 'compliant' ? "Network Compliant" : "Range Violation"}
+                                        </span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="p-3 bg-slate-50 rounded-xl text-center border border-slate-100">
+                                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed">
+                                        STANDBY MODE<br/><span className="text-slate-300">NO ACTIVE PAYLOAD</span>
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 pt-1">
+                                    <span className="uppercase tracking-widest">Velocity</span>
+                                    <span className="text-slate-900">{loc.speed || 0} KM/H</span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 mt-4">
+                                  <button
+                                    onClick={() => handleFetchDriverHistory(loc.driverId)}
+                                    className="px-3 py-2.5 bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
+                                  >
+                                    TRAIL <MapPin size={10} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setMapCenter([loc.lat, loc.lng]);
+                                      setMapZoom(18);
+                                    }}
+                                    className="px-3 py-2.5 bg-slate-950 text-white rounded-xl text-[8px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg active:scale-95"
+                                  >
+                                    FOCUS
+                                  </button>
+                                </div>
                               </div>
-                              <button 
-                                onClick={() => handleFetchDriverHistory(loc.driverId)}
-                                className="w-full py-2 bg-slate-950 text-amber-500 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2"
-                              >
-                                SHOW TRAIL <Zap size={10} />
-                              </button>
-                            </div>
-                          </Popup>
-                        </Marker>
-                      ))}
+                            </Popup>
+                          </Marker>
+                        );
+                      })}
+                    </MarkerClusterGroup>
 
                     {/* Static Markers for Offline Units with Last Known Position */}
                     {driverLocations
@@ -2490,7 +2744,7 @@ export default function AdminPortal({
                     )}
 
                     {/* Map Legend */}
-                    <div className="absolute top-6 left-6 z-[1000] space-y-4">
+                    <div className="absolute top-6 right-16 z-[1000] space-y-4">
                       <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-slate-100 shadow-xl space-y-2 hidden md:block w-48">
                         <div className="flex items-center justify-between mb-2">
                            <span className="text-[10px] font-black uppercase text-slate-900 italic">Map Legend</span>
@@ -2507,6 +2761,12 @@ export default function AdminPortal({
                         <div className="flex items-center gap-2">
                           <div className="w-3 h-3 bg-amber-500/20 border border-amber-500/50 rounded-full" />
                           <span className="text-[8px] font-black uppercase text-slate-600">Ad Coverage Area</span>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
+                          <div className="w-3 h-3 bg-blue-600 rounded-sm flex items-center justify-center">
+                            <div className="w-1 h-1 bg-white rounded-full"></div>
+                          </div>
+                          <span className="text-[8px] font-black uppercase text-slate-600">Hardware GPS</span>
                         </div>
                       </div>
 
@@ -2826,8 +3086,8 @@ export default function AdminPortal({
                 <div className="relative z-10">
                   <h2 className="text-lg md:text-xl font-black italic uppercase text-amber-500">
                     {paymentSubTab === "INCOME"
-                      ? "Revenue Ledger"
-                      : "Expense Ledger"}
+                      ? "Revenue History"
+                      : "Expense History"}
                   </h2>
                   <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest italic opacity-80">
                     {paymentSubTab === "INCOME"
@@ -2865,7 +3125,7 @@ export default function AdminPortal({
                       handleExtractionClick(
                         e,
                         paymentSubTab === "INCOME" ? payments : driverPayments,
-                        `Fleet_${paymentSubTab}_Ledger`,
+                        `Fleet_${paymentSubTab}_History`,
                       )
                     }
                     className="bg-amber-500 text-slate-950 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-amber-400 transition-all flex items-center gap-2"
@@ -2981,7 +3241,10 @@ export default function AdminPortal({
 
               <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden min-h-[500px]">
                 {/* Ticket List */}
-                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
+                <div className={cn(
+                  "bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col",
+                  activeTicketId && "hidden lg:flex"
+                )}>
                   <div className="p-6 border-b border-slate-50 flex justify-between items-center">
                     <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
                       Active Threads
@@ -2992,11 +3255,11 @@ export default function AdminPortal({
                   </div>
                   <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
                     {tickets.map((t) => (
-                      <button
+                      <div
                         key={t.id}
                         onClick={() => setActiveTicketId(t.id!)}
                         className={cn(
-                          "w-full p-6 text-left hover:bg-slate-50 transition-all group relative",
+                          "w-full p-6 text-left hover:bg-slate-50 transition-all group relative cursor-pointer",
                           activeTicketId === t.id && "bg-amber-50",
                         )}
                       >
@@ -3047,7 +3310,7 @@ export default function AdminPortal({
                         {activeTicketId === t.id && (
                           <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full" />
                         )}
-                      </button>
+                      </div>
                     ))}
                     {tickets.length === 0 && (
                       <div className="p-12 text-center">
@@ -3064,18 +3327,29 @@ export default function AdminPortal({
                 </div>
 
                 {/* Chat Window */}
-                <div className="lg:col-span-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm flex flex-col overflow-hidden relative">
+                <div className={cn(
+                  "lg:col-span-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm flex flex-col overflow-hidden relative",
+                  !activeTicketId && "hidden lg:flex"
+                )}>
                   {activeTicketId ? (
                     <>
                       <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                        <div>
-                          <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">
-                            {tickets.find((t) => t.id === activeTicketId)
-                              ?.driverName || "Operator Chat"}
-                          </h3>
-                          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-0.5">
-                            Secure Hub Line
-                          </p>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => setActiveTicketId(null)}
+                            className="p-2.5 bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors rounded-xl hover:bg-slate-200"
+                          >
+                            <ArrowLeft size={18} />
+                          </button>
+                          <div>
+                            <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">
+                              {tickets.find((t) => t.id === activeTicketId)
+                                ?.driverName || "Operator Chat"}
+                            </h3>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-0.5">
+                              Secure Hub Line
+                            </p>
+                          </div>
                         </div>
                         <button
                           onClick={() =>
@@ -3334,7 +3608,10 @@ export default function AdminPortal({
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-100">
                         <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-left">
-                          Operator Name
+                          Operator Info
+                        </th>
+                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">
+                          Network UUID
                         </th>
                         <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">
                           GPS Tracking ID
@@ -3354,9 +3631,17 @@ export default function AdminPortal({
                           className="hover:bg-slate-50/50 transition-all group"
                         >
                           <td className="px-8 py-5">
-                            <span className="text-[11px] md:text-sm font-black text-slate-900 italic tracking-tighter">
-                              {d.name}
-                            </span>
+                            <div className="flex flex-col">
+                              <span className="text-[11px] md:text-sm font-black text-slate-900 italic tracking-tighter leading-none">
+                                {d.name}
+                              </span>
+                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                {d.vNo || "Unspecified Unit"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-8 py-5 text-center font-mono text-[9px] font-black text-slate-500 uppercase">
+                            {d.uid}
                           </td>
                           <td className="px-8 py-5 text-center font-mono text-[9px] font-black text-amber-600 uppercase">
                             {d.gpsId || "UNLINKED"}
@@ -3440,7 +3725,15 @@ export default function AdminPortal({
                             </span>
                           </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 bg-white/50 p-4 rounded-2xl border border-slate-50">
+                        <div className="grid grid-cols-2 gap-2 bg-white/50 p-4 rounded-2xl border border-slate-50">
+                          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
+                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                              Network UUID
+                            </p>
+                            <p className="text-[9px] font-black text-slate-500 font-mono truncate w-full text-center">
+                              {d.uid.slice(0, 8)}...
+                            </p>
+                          </div>
                           <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
                             <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
                               GPS ID
@@ -3896,7 +4189,29 @@ export default function AdminPortal({
                 name="budget"
                 type="number"
                 required
-                placeholder="Budget"
+                placeholder="Budget (INR)"
+                className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  name="targetLat"
+                  type="number"
+                  step="any"
+                  placeholder="Target Lat (e.g. 12.97)"
+                  className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
+                />
+                <input
+                  name="targetLng"
+                  type="number"
+                  step="any"
+                  placeholder="Target Lng (e.g. 77.59)"
+                  className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
+                />
+              </div>
+              <input
+                name="coverageRadius"
+                type="number"
+                placeholder="Radius (Meters, e.g. 5000)"
                 className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
               />
               <button
@@ -4084,6 +4399,23 @@ export default function AdminPortal({
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Total Runtime (Minutes)
+                  </label>
+                  <input
+                    type="number"
+                    value={approvalForm.totalMinutes}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        totalMinutes: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                    placeholder="e.g. 50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                     Unit Quota (Max Autos)
                   </label>
                   <input
@@ -4098,6 +4430,158 @@ export default function AdminPortal({
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Target Center (Lat)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={approvalForm.targetLat}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        targetLat: parseFloat(e.target.value),
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Target Center (Lng)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={approvalForm.targetLng}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        targetLng: parseFloat(e.target.value),
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Radius (Metres)
+                  </label>
+                  <input
+                    type="number"
+                    value={approvalForm.coverageRadius}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        coverageRadius: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Driver Selection Matrix */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between ml-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Select Fleet Nodes ({selectedDriverIds.length}/{approvalForm.maxAutos})
+                  </label>
+                  {selectedDriverIds.length > 0 && (
+                    <button 
+                      onClick={() => setSelectedDriverIds([])}
+                      className="text-[8px] font-black uppercase text-amber-500 hover:text-amber-600"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-4 max-h-[300px] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 custom-scrollbar">
+                  {drivers
+                    .filter(d => d.status === 'active' && d.isVerified)
+                    .map((d) => {
+                      const isSelected = selectedDriverIds.includes(d.uid);
+                      const isOnline = driverLocations.find(l => l.driverId === d.uid)?.isOnline;
+                      
+                      return (
+                        <div 
+                          key={d.uid}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedDriverIds(p => p.filter(id => id !== d.uid));
+                            } else {
+                              if (selectedDriverIds.length < approvalForm.maxAutos) {
+                                setSelectedDriverIds(p => [...p, d.uid]);
+                              } else {
+                                showToast(`Max quota (${approvalForm.maxAutos}) reached.`, 'info');
+                              }
+                            }
+                          }}
+                          className={cn(
+                            "p-3 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden group bg-white",
+                            isSelected ? "border-amber-500 shadow-lg" : "border-transparent hover:border-slate-200"
+                          )}
+                        >
+                          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center relative overflow-hidden px-0", isSelected ? "bg-amber-500 text-slate-950" : "bg-slate-100 text-slate-400")}>
+                            {d.profileImage ? (
+                              <img src={d.profileImage} className="w-full h-full object-cover" />
+                            ) : (
+                              <Users size={18} />
+                            )}
+                            <div className={cn("absolute bottom-1 right-1 w-2 h-2 rounded-full border border-white", isOnline ? "bg-green-500" : "bg-slate-300")} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black text-slate-900 uppercase truncate leading-none mb-1">{d.fullName || d.name}</p>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none">Code: {d.driverCode || '---'}</p>
+                          </div>
+                          {isSelected && (
+                            <div className="ml-auto bg-amber-500 text-slate-950 rounded-full p-1 shadow-sm">
+                              <Check size={12} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div 
+                   onClick={() => setApprovalForm(p => ({ ...p, paymentConfirmed: !p.paymentConfirmed }))}
+                   className={cn(
+                     "p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3",
+                     approvalForm.paymentConfirmed ? "bg-green-50 border-green-500" : "bg-slate-50 border-slate-100"
+                   )}
+                 >
+                    <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center", approvalForm.paymentConfirmed ? "bg-green-500 text-white" : "bg-slate-200")}>
+                       <CreditCard size={14} />
+                    </div>
+                    <div>
+                       <p className="text-[10px] font-black uppercase text-slate-900">Payment Status</p>
+                    </div>
+                    <div className="ml-auto">
+                       {approvalForm.paymentConfirmed ? <Check size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded border border-slate-300" />}
+                    </div>
+                 </div>
+
+                 <div 
+                   onClick={() => setApprovalForm(p => ({ ...p, mediaConfirmed: !p.mediaConfirmed }))}
+                   className={cn(
+                     "p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3",
+                     approvalForm.mediaConfirmed ? "bg-green-50 border-green-500" : "bg-slate-50 border-slate-100"
+                   )}
+                 >
+                    <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center", approvalForm.mediaConfirmed ? "bg-green-500 text-white" : "bg-slate-200")}>
+                       <ImageIcon size={14} />
+                    </div>
+                    <div>
+                       <p className="text-[10px] font-black uppercase text-slate-900">Media Status</p>
+                    </div>
+                    <div className="ml-auto">
+                       {approvalForm.mediaConfirmed ? <Check size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded border border-slate-300" />}
+                    </div>
+                 </div>
               </div>
 
               <div className="space-y-4">
@@ -4211,6 +4695,7 @@ export default function AdminPortal({
       {/* Admin Assistant Bot */}
       <AdminAssistant 
         activeTab={activeTab}
+        role="admin"
         systemContext={{
           driversCount: drivers.length,
           campaignsCount: campaigns.length,

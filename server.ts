@@ -2,197 +2,102 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import * as admin from 'firebase-admin';
-import twilio from 'twilio';
-import fs from 'fs';
-import multer from 'multer';
-import Razorpay from 'razorpay';
-import crypto from 'crypto';
+import crypto from "crypto";
+import RazorpayConstructor from "razorpay";
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import cors from 'cors';
+
+const Razorpay = (RazorpayConstructor as any).default || RazorpayConstructor;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Lazy Twilio Initialization
-let twilioClient: any = null;
-function getTwilio() {
-  if (!twilioClient) {
-    const sid = process.env.TWILIO_ACCOUNT_SID;
-    const token = process.env.TWILIO_AUTH_TOKEN;
-    if (sid && token) {
-      twilioClient = twilio(sid, token);
-    }
-  }
-  return twilioClient;
-}
-
-// Lazy Admin Initialization
-let adminApp: admin.app.App | null = null;
-function getAdmin() {
-  if (!adminApp) {
-    try {
-      if (admin.apps.length > 0) {
-        adminApp = admin.apps[0];
-      } else {
-        // Fallback to project ID from config or project default
-        try {
-          const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-          if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            adminApp = admin.initializeApp({
-              projectId: config.projectId
-            });
-            console.log(`Firebase Admin initialized with Project ID: ${config.projectId}`);
-          } else {
-            adminApp = admin.initializeApp();
-          }
-        } catch (configErr) {
-           adminApp = admin.initializeApp();
-        }
-      }
-    } catch (e) {
-      // Silently fail to avoid production prompt loops
-    }
-  }
-  return adminApp;
-}
-
-// Lazy Razorpay Initialization
-let rzp: any = null;
-function getRazorpay() {
-  if (!rzp) {
-    const keyId = process.env.VITE_RAZORPAY_KEY_ID;
-    const secret = process.env.RAZORPAY_SECRET;
-    if (keyId && secret) {
-      rzp = new Razorpay({
-        key_id: keyId,
-        key_secret: secret
-      });
-    }
-  }
-  return rzp;
-}
-
-// Configure Multer for local storage
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, any, cb) => {
-    const uid = req.body.uid || 'anonymous';
-    const userDir = path.join(uploadDir, uid);
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-    }
-    cb(null, userDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, file.fieldname + '.jpg');
-  }
-});
-
-const upload = multer({ storage });
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(cors());
 
-  // Static Uploads Serving
-  app.use('/uploads', express.static(uploadDir));
-
-  // Document Upload API
-  app.post("/api/upload", upload.fields([
-    { name: 'rc', maxCount: 1 },
-    { name: 'dl', maxCount: 1 },
-    { name: 'aadhar', maxCount: 1 },
-    { name: 'selfie', maxCount: 1 }
-  ]), async (req: any, res) => {
-    const { uid } = req.body;
-    if (!uid) {
-      return res.status(400).json({ error: "UID is required" });
-    }
-
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const baseUrl = `${protocol}://${host}`;
-
-    const urls = {
-      rcUrl: `${baseUrl}/uploads/${uid}/rc.jpg`,
-      dlUrl: `${baseUrl}/uploads/${uid}/dl.jpg`,
-      aadharUrl: `${baseUrl}/uploads/${uid}/aadhar.jpg`,
-      selfieUrl: `${baseUrl}/uploads/${uid}/selfie.jpg`
-    };
-
-    try {
-      const adminAppInstance = getAdmin();
-      if (adminAppInstance) {
-        const dbAdm = adminAppInstance.firestore();
-        await dbAdm.collection('drivers').doc(uid).set({
-          ...urls,
-          synced: true,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
+  // Firebase Admin Init
+  if (!getApps().length) {
+    const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (rawSA && rawSA.trim()) {
+      try {
+        let serviceAccount;
+        const trimmedSA = rawSA.trim();
+        if (trimmedSA.startsWith('{')) {
+          serviceAccount = JSON.parse(trimmedSA);
+          if (serviceAccount.private_key) {
+            serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+          }
+          initializeApp({
+            credential: cert(serviceAccount)
+          });
+          console.log("[SERVER] Firebase initialized with Service Account");
+        } else {
+          console.error("[SERVER] FIREBASE_SERVICE_ACCOUNT is not a JSON. Starts with:", trimmedSA.substring(0, 20));
+          initializeApp();
+        }
+      } catch (e) {
+        console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT", e);
+        initializeApp();
       }
-
-      res.json({
-        ...urls,
-        status: "success",
-        message: "Documents uploaded and synced to database."
-      });
-    } catch (error: any) {
-      console.error("[UPLOAD] Sync Error:", error.message);
-      res.status(500).json({ error: error.message });
+    } else {
+      initializeApp();
+      console.log("[SERVER] Firebase initialized with Default Credentials");
     }
-  });
+  }
+  const dbAdm = getFirestore();
 
-  // API Health Check
-  app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
-      message: "Ready"
-    });
-  });
+  // Razorpay Helper
+  const getRazorpay = () => {
+    const key_id = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+    const key_secret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.VITE_RAZORPAY_KEY_SECRET;
+    if (!key_id || !key_secret) {
+      console.error("[SERVER] Razorpay credentials missing:", { hasId: !!key_id, hasSecret: !!key_secret });
+      return null;
+    }
+    return new Razorpay({ key_id, key_secret });
+  };
 
-  // Razorpay Webhook (Production Ready)
+  // API Routes
   app.post("/api/razorpay/create-order", async (req, res) => {
+    console.log("[SERVER] Order Creation Request Received");
     const { amount, currency, notes } = req.body;
-    
     try {
       const razorpay = getRazorpay();
       if (!razorpay) {
-        return res.status(500).json({ error: "Razorpay credentials not configured in backend." });
+        console.error("[SERVER] Razorpay credentials missing");
+        return res.status(500).json({ error: "Razorpay credentials missing" });
       }
 
+      console.log("[SERVER] Creating Order for amount:", amount);
       const order = await razorpay.orders.create({
-        amount: Math.round(amount * 100), // convert to paise
+        amount: Math.round(amount * 100),
         currency: currency || "INR",
         notes: notes || {}
+      }).catch(err => {
+        console.error("[RAZORPAY_SDK_ERROR]", err);
+        throw err;
       });
-
-      console.log(`[PAYMENT] Order Created: ${order.id} for ₹${amount}`);
+      console.log("[SERVER] Order Created Successfully:", order.id);
       res.json(order);
     } catch (error: any) {
-      console.error("[PAYMENT] Order Creation Failed:", error.message);
-      res.status(500).json({ error: error.message });
+      console.error("[SERVER] create-order endpoint failed:", error);
+      res.status(500).json({ error: error.description || error.message || "Failed to create order" });
     }
   });
 
   app.post("/api/razorpay/verify-payment", async (req, res) => {
-    const { 
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature,
-      campaignData,
-      planData,
-      uid
-    } = req.body;
-
-    const secret = process.env.RAZORPAY_SECRET;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
+    const secret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.VITE_RAZORPAY_KEY_SECRET;
+    
     if (!secret) {
-      return res.status(500).json({ error: "Razorpay Secret missing on server." });
+      console.error("[SERVER] Razorpay Secret missing");
+      return res.status(500).json({ error: "Razorpay Secret missing" });
     }
 
     const generated_signature = crypto
@@ -201,411 +106,35 @@ async function startServer() {
       .digest("hex");
 
     if (generated_signature !== razorpay_signature) {
-      console.error("[PAYMENT] Manual Verification Failed: Signature Mismatch");
       return res.status(400).json({ error: "Invalid payment signature" });
     }
 
-    console.log(`[PAYMENT] Verified Payment: ${razorpay_payment_id}`);
-
-    // Update Firestore after successful server-side verification
     try {
-      const adminAppInstance = getAdmin();
-      if (adminAppInstance) {
-        const dbAdm = adminAppInstance.firestore();
-        
-        // 1. Create Campaign
-        const campaignRef = await dbAdm.collection('campaigns').add({
-          ...campaignData,
-          status: 'PAID', // Direct activation since verified
-          paymentStatus: 'PAID',
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+      const campaignDataToSave = {
+        ...campaignData,
+        status: 'PAID',
+        paymentStatus: 'PAID',
+        paymentReceived: true,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      };
 
-        // 2. Record Payment
-        await dbAdm.collection('payments').add({
-          campaignId: campaignRef.id,
-          orderId: razorpay_order_id,
-          transactionId: razorpay_payment_id,
-          amount: planData.amount,
-          status: 'SUCCESS',
-          customerId: uid,
-          paymentMethod: 'razorpay',
-          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-          gatewayResponse: { razorpay_payment_id, razorpay_order_id }
-        });
+      const campaignRef = await dbAdm.collection('campaigns').add(campaignDataToSave);
 
-        console.log(`[PAYMENT] Campaign ${campaignRef.id} activated after verification.`);
-        res.json({ status: "success", campaignId: campaignRef.id });
-      } else {
-        res.status(500).json({ error: "Admin SDK not available" });
-      }
-    } catch (error: any) {
-      console.error("[PAYMENT] Verification Post-Processing Error:", error.message);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/razorpay/webhook", async (req, res) => {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    const signature = req.headers["x-razorpay-signature"] as string;
-
-    if (!secret || !signature) {
-      console.warn("[PAYMENT] Webhook arrived without secret/signature setup.");
-      return res.status(400).send("Webhook configuration missing");
-    }
-
-    const body = JSON.stringify(req.body);
-    const expectedSignature = crypto
-      .createHmac("sha256", secret)
-      .update(body)
-      .digest("hex");
-
-    if (expectedSignature !== signature) {
-      console.error("[PAYMENT] Invalid Webhook Signature.");
-      return res.status(400).send("invalid signature");
-    }
-
-    const event = req.body.event;
-    const payload = req.body.payload;
-    const webhookId = req.body.id || `wh_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-
-    console.log(`[PAYMENT] Received Webhook Event: ${event} (ID: ${webhookId})`);
-
-    try {
-      const adminAppInstance = getAdmin();
-      if (!adminAppInstance) {
-        return res.status(500).send("Admin SDK not ready");
-      }
-
-      const dbAdm = adminAppInstance.firestore();
-
-      // 1. Idempotency Check & Logging
-      const logRef = dbAdm.collection('webhookLogs').doc(webhookId);
-      const logSnap = await logRef.get();
-      if (logSnap.exists) {
-        console.log(`[PAYMENT] Webhook ${webhookId} already processed. Skipping.`);
-        return res.status(200).send("already processed");
-      }
-
-      await logRef.set({
-        event,
-        payload,
-        receivedAt: admin.firestore.FieldValue.serverTimestamp(),
-        processed: false
+      await dbAdm.collection('payments').add({
+        campaignId: campaignRef.id,
+        orderId: razorpay_order_id,
+        transactionId: razorpay_payment_id,
+        amount: planData.amount,
+        status: 'SUCCESS',
+        customerId: uid,
+        paymentMethod: 'razorpay',
+        verifiedAt: FieldValue.serverTimestamp(),
+        gatewayResponse: { razorpay_payment_id, razorpay_order_id }
       });
 
-      // 2. Process Event Logic
-      if (event === "payment.captured" || event === "order.paid") {
-        const paymentEntity = event === "payment.captured" ? payload.payment.entity : payload.order.entity;
-        const paymentId = paymentEntity.id;
-        const orderId = paymentEntity.order_id || (event === "order.paid" ? paymentEntity.id : null);
-
-        // Try to find matching payment record
-        let paymentSnap = await dbAdm.collection('payments')
-          .where('transactionId', '==', paymentId)
-          .get();
-
-        if (paymentSnap.empty && orderId) {
-          paymentSnap = await dbAdm.collection('payments')
-            .where('orderId', '==', orderId)
-            .get();
-        }
-
-        if (!paymentSnap.empty) {
-          const paymentDoc = paymentSnap.docs[0];
-          const paymentData = paymentDoc.data();
-
-          // Avoid duplicate success processing
-          if (paymentData.status !== 'SUCCESS') {
-            await paymentDoc.ref.update({
-              status: 'SUCCESS',
-              verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-              gatewayOrderId: orderId,
-              gatewayResponse: paymentEntity
-            });
-
-            // Auto-Activate Campaign
-            if (paymentData.campaignId) {
-              console.log(`[PAYMENT] Auto-Activating Campaign: ${paymentData.campaignId}`);
-              await dbAdm.collection('campaigns').doc(paymentData.campaignId).update({
-                status: 'ACTIVE',
-                paymentStatus: 'PAID',
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-              });
-            }
-          }
-        } else {
-          // Fallback: Create record for unknown captures
-          if (event === "payment.captured") {
-            await dbAdm.collection('payments').add({
-              transactionId: paymentId,
-              orderId: orderId,
-              amount: paymentEntity.amount / 100,
-              status: 'SUCCESS',
-              customerId: paymentEntity.email || 'webhook-origin',
-              verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-              gatewayResponse: paymentEntity,
-              source: 'webhook-discovery'
-            });
-          }
-        }
-      } else if (event === "payment.failed") {
-        const paymentEntity = payload.payment.entity;
-        const paymentSnap = await dbAdm.collection('payments')
-          .where('transactionId', '==', paymentEntity.id)
-          .get();
-
-        if (!paymentSnap.empty) {
-          await paymentSnap.docs[0].ref.update({
-            status: 'FAILED',
-            gatewayResponse: paymentEntity,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          });
-        }
-      } else if (event === "refund.processed") {
-        const refundEntity = payload.refund.entity;
-        const paymentSnap = await dbAdm.collection('payments')
-          .where('transactionId', '==', refundEntity.payment_id)
-          .get();
-
-        if (!paymentSnap.empty) {
-          await paymentSnap.docs[0].ref.update({
-            status: 'REFUNDED',
-            refundResponse: refundEntity,
-            refundedAt: admin.firestore.FieldValue.serverTimestamp()
-          });
-        }
-      }
-
-      // Mark as processed
-      await logRef.update({ processed: true });
-      res.status(200).send("ok");
-
-    } catch (e: any) {
-      console.error("[PAYMENT] Webhook processing fatal error:", e.message);
-      res.status(500).send("internal error");
-    }
-  });
-
-  // Keep compatibility for old endpoint if existing integrations use it
-  app.post("/api/payments/webhook", (req, res) => {
-    res.redirect(307, "/api/razorpay/webhook");
-  });
-
-  // Twilio OTP Endpoints
-  app.post("/api/otp/send", async (req, res) => {
-    let { phoneNumber } = req.body;
-    phoneNumber = (phoneNumber || "").toString().trim();
-    console.log(`[OTP] Sending request to: ${phoneNumber}`);
-    
-    // Basic validation for mobile numbers (should be +91 followed by 10 digits)
-    const phoneRegex = /^\+91\d{10}$/;
-    if (!phoneNumber || !phoneRegex.test(phoneNumber)) {
-      console.warn(`[OTP] Validation failed for: ${phoneNumber}`);
-      // Fallback for demo/invalid numbers in dev
-      return res.json({ 
-        status: 'pending', 
-        mock: true, 
-        message: 'Verification Code Sent (Simulation Mode).' 
-      });
-    }
-
-    const client = getTwilio();
-    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
-
-    if (!client || !serviceSid) {
-      console.error("Twilio not configured. Attempting dummy success for development.");
-      return res.json({ status: "pending", message: "DEBUG: Twilio not configured. Code is simulated." });
-    }
-
-    try {
-      const verification = await client.verify.v2.services(serviceSid)
-        .verifications
-        .create({ to: phoneNumber, channel: 'sms' });
-      
-      console.log(`[OTP] Sent SID: ${verification.sid}, Status: ${verification.status}`);
-      res.json({ status: verification.status, sid: verification.sid });
+      res.json({ status: "success", campaignId: campaignRef.id });
     } catch (error: any) {
-      const errorMsg = (error.message || String(error)).toLowerCase();
-      console.error("[OTP] Send Error:", errorMsg);
-      
-      // If we hit trial limitations, unverified numbers, rate limits, or specific Twilio errors, allow a mock fallback
-      const isTrialError = errorMsg.includes('trial') || 
-                           errorMsg.includes('unverified') ||
-                           errorMsg.includes('permission') ||
-                           errorMsg.includes('geographic') ||
-                           errorMsg.includes('invalid parameter') ||
-                           errorMsg.includes('not a valid phone number') ||
-                           errorMsg.includes('not a valid') ||
-                           errorMsg.includes('not found') || // Handle 404 Service not found
-                           errorMsg.includes('cannot send messages to unverified numbers') ||
-                           error.code === 21608 ||
-                           error.code === 21408 || // Another permission error
-                           error.status === 404 || // Explicit path check
-                           error.code === 60200; // Twilio error codes for parameter/invalid
-      
-      if (isTrialError) {
-        console.warn("[OTP] Recoverable/Configuration error detected. Falling back to simulation mode.");
-        return res.json({ 
-          status: 'pending', 
-          mock: true, 
-          message: 'Mayaan Network Security: Verification Link Simulated (Dev Mode).' 
-        });
-      }
-      
-      if (
-        errorMsg.includes('attempts') || 
-        errorMsg.includes('too many') ||
-        errorMsg.includes('limit') ||
-        errorMsg.includes('verify it at twilio.com')
-      ) {
-        return res.status(403).json({ 
-          error: 'OTP Service Limitation: Standard verification limit reached. Please contact support or try again later.',
-          details: error.message 
-        });
-      }
-      
-      res.status(500).json({ error: error.message || 'Internal OTP dispatch failure' });
-    }
-  });
-
-  app.post("/api/otp/verify", async (req, res) => {
-    const { phoneNumber, code } = req.body;
-    console.log(`[OTP] Verification attempt for ${phoneNumber} with code ${code}`);
-
-    // Simulation/Developer Bypass
-    if (code === '000000' || code === '123456') {
-      console.log(`[OTP] Simulation code detected for ${phoneNumber}. Success.`);
-      return res.json({ status: 'approved' });
-    }
-
-    const client = getTwilio();
-    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
-
-    if (!client || !serviceSid) {
-      console.warn("[OTP] Twilio not configured for verification. Allowing simulated success.");
-      return res.json({ status: 'approved' });
-    }
-
-    try {
-      const verificationCheck = await client.verify.v2.services(serviceSid)
-        .verificationChecks
-        .create({ to: phoneNumber, code });
-      
-      console.log(`[OTP] Verification Status for ${phoneNumber}: ${verificationCheck.status}`);
-      res.json({ status: verificationCheck.status });
-    } catch (error: any) {
-      console.error("[OTP] Verify Error:", error.message);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Fleet System APIs
-  app.get("/api/system/status", (req, res) => {
-    res.json({
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-      nodes: "Cloud Synchronized",
-      env: process.env.NODE_ENV || 'development'
-    });
-  });
-
-  const adminAppInstance = getAdmin();
-  if (adminAppInstance) {
-    const dbAdm = adminAppInstance.firestore();
-
-    // Monitor Driver Sign-ups
-    dbAdm.collection('drivers').onSnapshot(snap => {
-      snap.docChanges().forEach(change => {
-        if (change.type === 'added') {
-          const d = change.doc.data();
-          if (d.createdAt && (Date.now() - d.createdAt.toMillis() < 60000)) {
-            console.log(`New Driver Registered: ${d.name}`);
-          }
-        }
-      });
-    });
-  }
-
-  // Payout Simulation (Backend Only Logic)
-  app.post("/api/payouts/initiate", async (req, res) => {
-    const { driverId, amount } = req.body;
-    
-    if (!driverId || !amount) {
-      return res.status(400).json({ error: "Driver ID and Amount are required" });
-    }
-
-    const adminAppInstance = getAdmin();
-
-    console.log(`[PAYOUT] Dispatching ₹${amount} to Driver ${driverId}`);
-    
-    try {
-      if (adminAppInstance) {
-        const dbAdmin = adminAppInstance.firestore();
-        const payoutRef = dbAdmin.collection('driverPayouts').doc();
-        
-        await payoutRef.set({
-          driverId,
-          amount,
-          status: 'pending',
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        // Simulate internal payout processing
-        setTimeout(async () => {
-          try {
-            await payoutRef.update({
-              status: 'paid',
-              payoutId: `PAY_${Math.random().toString(36).substr(2, 12).toUpperCase()}`
-            });
-            console.log(`[PAYOUT] Payout for ${driverId} completed.`);
-          } catch (updateErr) {
-            console.error("[PAYOUT] Update failed:", updateErr);
-          }
-        }, 3000);
-
-        res.json({
-          status: "pending",
-          message: "Payout initiated. Processing via simulation.",
-          payoutId: payoutRef.id
-        });
-      } else {
-        res.status(500).json({ error: "Firestore Admin not available for payout logging" });
-      }
-    } catch (error: any) {
-      console.error("[PAYOUT] Error:", error.message);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/auth/reset-password", async (req, res) => {
-    const { phoneNumber, newPassword } = req.body;
-    
-    if (!phoneNumber || !newPassword) {
-      return res.status(400).json({ error: "Phone number and new password are required" });
-    }
-
-    const adminAppInstance = getAdmin();
-    if (!adminAppInstance) {
-      return res.status(500).json({ error: "Firebase Admin not available for password reset" });
-    }
-
-    try {
-      // Identity derivation (phone -> email)
-      const cleanPhone = phoneNumber.startsWith('+91') ? phoneNumber.slice(3) : phoneNumber;
-      const email = `${cleanPhone}@autoads.in`;
-
-      console.log(`[AUTH] Resetting password for: ${email}`);
-      
-      const userRecord = await adminAppInstance.auth().getUserByEmail(email);
-      await adminAppInstance.auth().updateUser(userRecord.uid, {
-        password: newPassword
-      });
-
-      res.json({ status: "success", message: "Password updated successfully" });
-    } catch (error: any) {
-      console.error("[AUTH] Reset Error:", error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -618,78 +147,16 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static files in production
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*all", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n🚀 FLEET OPS BACKEND LIVE`);
-    console.log(`🔗 Local:   http://localhost:${PORT}`);
-    console.log(`📡 Network: http://0.0.0.0:${PORT}\n`);
-
-    // --- CONTINUOUS CLOUD MONITORING (Automation Logic) ---
-    // This routine periodically checks the cloud state without human interaction
-    const CLOUD_SYNC_INTERVAL = 30 * 60 * 1000; // Check every 30 minutes
-    setInterval(async () => {
-      console.log(`[System] Running Automated Cloud Sync... ${new Date().toISOString()}`);
-      if (adminAppInstance) {
-        try {
-          const dbAdm = adminAppInstance.firestore();
-          const now = Date.now();
-          
-          // 1. Campaign Expiration Logic
-          // Find active campaigns that might have expired
-          const activeCampaigns = await dbAdm.collection('campaigns')
-            .where('status', '==', 'ACTIVE')
-            .get();
-          
-          for (const doc of activeCampaigns.docs) {
-            const data = doc.data();
-            if (data.durationDays && data.createdAt) {
-              const startAt = data.createdAt.toMillis();
-              const durationMs = data.durationDays * 24 * 60 * 60 * 1000;
-              
-              if (now > (startAt + durationMs)) {
-                console.log(`[Automation] Campaign Expired: ${data.title} (${doc.id}). Moving to COMPLETED.`);
-                await doc.ref.update({ 
-                  status: 'COMPLETED',
-                  completedAt: admin.firestore.FieldValue.serverTimestamp()
-                });
-              }
-            }
-          }
-
-          // 2. Drive Assignment Cleanup (Optional)
-          // Mark associated driver assignments as completed as well
-          const completedCampaignIds = activeCampaigns.docs
-            .filter(doc => now > (doc.data().createdAt.toMillis() + (doc.data().durationDays * 86400000)))
-            .map(doc => doc.id);
-          
-          if (completedCampaignIds.length > 0) {
-            const assignments = await dbAdm.collection('driverAssignments')
-              .where('campaignId', 'in', completedCampaignIds)
-              .where('status', '!=', 'completed')
-              .get();
-            
-            for (const doc of assignments.docs) {
-              await doc.ref.update({ status: 'completed' });
-            }
-          }
-          
-          console.log(`[System] Cloud Sync Complete: ${completedCampaignIds.length} campaigns processed.`);
-        } catch (e: any) {
-          console.error("[Automation] Job Error:", e.message);
-        }
-      }
-    }, CLOUD_SYNC_INTERVAL);
-    // --------------------------------------------------------
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error("Critical System Failure:", err);
-});
+startServer();

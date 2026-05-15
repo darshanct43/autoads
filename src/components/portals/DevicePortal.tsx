@@ -48,6 +48,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     return `${h}h ${m}m ${s}s`;
   };
   const videoRef = useRef<HTMLVideoElement>(null);
+  const posRef = useRef({ lat: 12.9716, lng: 77.5946 });
 
   useEffect(() => {
     if (isLogged && driver && !driver.gpsId) {
@@ -182,74 +183,89 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   }, [playlist.length]);
 
-  // Real-time location reporting
+  // Real-time location reporting - Optimized to 12s
   useEffect(() => {
     if (!isLogged || !driver?.uid || !activeTerminal?.id) return;
 
-    // Simulate location movement around Bengaluru
-    let lat = 12.9716;
-    let lng = 77.5946;
-    
-    // Check if there's already a location to start from
-    firebaseService.getDriverLocations().then(locs => {
-       const existing = locs.find(l => l.uid === driver.uid);
-       if (existing && existing.lat && existing.lng) {
-          lat = existing.lat;
-          lng = existing.lng;
-       }
-    });
+    let locationInterval: NodeJS.Timeout | null = null;
 
-    const locationInterval = setInterval(async () => {
-      if (online) {
-        // Only update if we have a valid baseline, no mock movement
+    const reportLocation = async () => {
+      if (!("geolocation" in navigator)) return;
+      
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude, speed } = position.coords;
+        posRef.current = { lat: latitude, lng: longitude };
+
         try {
           const hasAds = playlist.length > 0;
-          // Update local tallies (simulating storage)
           const currentTally = JSON.parse(localStorage.getItem(`metrics_${driver.uid}`) || '{"actualRuntime":0,"idleTime":0,"adRuntime":0}');
-          currentTally.actualRuntime += 10/60; // 10 seconds in minutes
+          
+          const now = Date.now();
+          const lastUpdate = (localStorage.getItem(`last_loc_update_${driver.uid}`) || now);
+          const diffMs = now - Number(lastUpdate);
+
+          // Only update if at least 5 seconds passed since last one
+          if (diffMs < 5000) return;
+
+          const diffMins = diffMs / 60000;
+          localStorage.setItem(`last_loc_update_${driver.uid}`, now.toString());
+
+          currentTally.actualRuntime += diffMins;
           if (hasAds) {
-            currentTally.adRuntime += 10/60;
+            currentTally.adRuntime += diffMins;
           } else {
-            currentTally.idleTime += 10/60;
+            currentTally.idleTime += diffMins;
           }
           localStorage.setItem(`metrics_${driver.uid}`, JSON.stringify(currentTally));
 
-          // Use the correct signatures from firebaseService
+          // Sync to Cloud
           await firebaseService.updateDriverLocation(driver.uid, { 
-            lat, 
-            lng,
+            lat: latitude, 
+            lng: longitude,
             gpsId: driver.gpsId || null,
             actualRuntime: Math.floor(currentTally.actualRuntime),
             idleTime: Math.floor(currentTally.idleTime),
             adRuntime: Math.floor(currentTally.adRuntime),
-            paymentDue: Math.floor(currentTally.adRuntime * 2.5) // Example payout rate ₹2.5 per min
+            paymentDue: Math.floor(currentTally.adRuntime * 2.5),
+            speed: speed ? Math.floor(speed * 3.6) : 0,
+            isOnline: true,
+            lastSeen: new Date().toISOString()
           });
 
-          // Update LIVE STATUS in Terminal Hub
           await firebaseService.syncTerminalPulse(activeTerminal.id, {
             online: true,
             currentAd: playlist[currentIndex]?.title || 'IDLE',
             currentAdImage: playlist[currentIndex]?.imageUrl || null,
-            lat,
-            lng,
+            lat: latitude,
+            lng: longitude,
             battery: Math.floor(80 + Math.random() * 20),
             signal: 'STRONG'
           });
 
           await firebaseService.logLocation({ 
             driverId: driver.uid, 
-            lat: lat, 
-            lng: lng, 
-            speed: 0,
+            lat: latitude, 
+            lng: longitude, 
+            speed: speed ? Math.floor(speed * 3.6) : 0,
             campaignId: playlist[currentIndex]?.id || 'idle'
           });
+          
+          setStatusLogs(prev => [`GPS: FIX - ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, ...prev.slice(0, 5)]);
         } catch (e) {
           console.error("Location sync failed:", e);
         }
-      }
-    }, 10000); // Update every 10 seconds
+      }, (err) => {
+        console.error("GPS Error:", err);
+        setStatusLogs(prev => [`GPS: ERROR ${err.code} - ${err.message}`, ...prev.slice(0, 5)]);
+      }, { enableHighAccuracy: true });
+    };
 
-    return () => clearInterval(locationInterval);
+    reportLocation();
+    locationInterval = setInterval(reportLocation, 12000);
+
+    return () => {
+      if (locationInterval) clearInterval(locationInterval);
+    };
   }, [isLogged, driver?.uid, online, activeTerminal?.id, playlist, currentIndex]);
 
   // Check shared preferences simulation (localStorage)
@@ -568,33 +584,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                   {/* Grid Lines */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]" />
                   
-                  {/* Animated Map Circles */}
+                  {/* Animated Atmosphere */}
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[200%] h-[200%] border border-white/5 rounded-full" />
                   <motion.div 
-                    animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.2, 0.1] }}
-                    transition={{ duration: 10, repeat: Infinity }}
+                    animate={{ scale: [1, 1.1, 1], opacity: [0.05, 0.1, 0.05] }}
+                    transition={{ duration: 15, repeat: Infinity }}
                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] border border-white/5 rounded-full" 
                   />
-                  
-                  {/* Random Map Markers (Simulated) */}
-                  {[...Array(12)].map((_, i) => (
-                    <motion.div 
-                      key={i}
-                      initial={{ opacity: 0 }}
-                      animate={{ 
-                        opacity: [0, 0.5, 0],
-                        scale: [0.5, 1, 0.5],
-                        x: Math.sin(i) * 300,
-                        y: Math.cos(i) * 300
-                      }}
-                      transition={{ 
-                        duration: 5 + Math.random() * 5, 
-                        repeat: Infinity,
-                        delay: i * 0.5
-                      }}
-                      className="absolute top-1/2 left-1/2 w-2 h-2 bg-amber-500 rounded-full blur-[1px]"
-                    />
-                  ))}
                </div>
 
                <div className="w-full max-w-5xl px-4 md:px-10 flex flex-col md:grid md:grid-cols-12 gap-6 md:gap-12 items-center relative z-10 py-20 md:py-0 h-full md:h-auto overflow-y-auto md:overflow-visible no-scrollbar">

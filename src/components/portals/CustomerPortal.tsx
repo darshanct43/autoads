@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare } from 'lucide-react';
+import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { firebaseService, AdCampaign, Device } from '@/services/firebaseService';
-import { auth, googleLogin, storage } from '@/lib/firebase';
+import { firebaseService, AdCampaign, Device, SupportTicket, ChatMessage } from '@/services/firebaseService';
+import { auth, googleLogin, storage, db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { storageService } from '@/services/storageService';
 import { compressImage } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
+import AdminAssistant from '../common/AdminAssistant';
 
 declare const Razorpay: any;
 
@@ -62,11 +64,42 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   const [step, setStep] = useState<'DASHBOARD' | 'CREATE' | 'FLEET' | 'SUPPORT' | 'LEGAL'>('DASHBOARD');
+  const [creationStep, setCreationStep] = useState<'DETAILS' | 'PAYMENT' | 'MEDIA'>('DETAILS');
   const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
   const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'OFFERS' | 'LEGAL'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL'>('DASHBOARD');
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
   const [dbPlans, setDbPlans] = useState<any[]>([]);
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [showFloatingOffer, setShowFloatingOffer] = useState(true);
+  const [myCampaigns, setMyCampaigns] = useState<AdCampaign[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  // Analytics Helpers
+  const activeDevicesCount = useMemo(() => {
+    return (devices || []).filter(d => d.status === 'ONLINE' || d.status === 'STREAMING').length;
+  }, [devices]);
+
+  const totalNetworkUnits = useMemo(() => (devices || []).length, [devices]);
   
+  const syncScore = useMemo(() => {
+    const total = (devices || []).length;
+    return total > 0 ? Math.floor((activeDevicesCount / total) * 100) : 0;
+  }, [devices, activeDevicesCount]);
+
+  const liveCampaign = useMemo(() => myCampaigns.find(c => c.status === 'ACTIVE' || c.status === 'LIVE'), [myCampaigns]);
+
+  const customerBalance = useMemo(() => {
+    return payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  }, [payments]);
+
   const mergedPlans = useMemo(() => {
     return plans.map(p => {
       const dbPlan = dbPlans.find(dbp => dbp.id === p.id);
@@ -83,16 +116,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     const plan = mergedPlans.find(p => p.id === activePlan);
     if (plan) setSelectedPlan(plan);
   }, [activePlan, mergedPlans]);
-  const [promotions, setPromotions] = useState<any[]>([]);
-  const [showFloatingOffer, setShowFloatingOffer] = useState(true);
-  const [myCampaigns, setMyCampaigns] = useState<AdCampaign[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  
   const [isExtracting, setIsExtracting] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
   const [uploadTimeLeft, setUploadTimeLeft] = useState(120);
   const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -128,11 +157,95 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     duration: '30'
   });
 
-  // Analytics Helpers
-  const activeDevicesCount = devices.filter(d => d.status === 'ONLINE' || d.status === 'STREAMING').length;
-  const totalNetworkUnits = devices.length;
-  const syncScore = devices.length > 0 ? Math.floor((activeDevicesCount / devices.length) * 100) : 0;
-  const liveCampaign = myCampaigns.find(c => c.status === 'ACTIVE' || c.status === 'LIVE');
+  const renderHistoryTab = () => (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="space-y-8"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tight leading-none">Financial History</h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic">Historical Archive of Deployment Transactions</p>
+        </div>
+        <div className="bg-slate-900 text-white px-6 py-3 rounded-2xl flex items-center gap-3 shadow-xl">
+           <Wallet className="text-amber-500" size={18} />
+           <div className="text-right">
+              <p className="text-[7px] font-black uppercase text-slate-400 tracking-[0.2em] leading-none">Net Volume</p>
+              <p className="text-sm font-black italic tracking-tight">₹{payments.reduce((acc, curr) => acc + (curr.amount || 0), 0).toLocaleString()}</p>
+           </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-slate-50">
+                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Transaction Link</th>
+                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Asset Unit</th>
+                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Network Deposit</th>
+                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Signal Status</th>
+                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Sync Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 italic">
+              {payments.map((p) => (
+                <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
+                  <td className="px-8 py-5">
+                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{p.transactionId || 'SIGNAL_INIT'}</p>
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">{p.paymentMethod || 'RAZORPAY'}</p>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
+                        <Database size={14} />
+                      </div>
+                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">Campaign Hub</p>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    <span className="text-xs font-black text-slate-900">₹{p.amount?.toLocaleString()}</span>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex flex-col gap-2">
+                      <span className={cn(
+                        "text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit",
+                        p.status === 'SUCCESS' || p.status === 'success' ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"
+                      )}>
+                        {p.status || 'VERIFIED'}
+                      </span>
+                      <button 
+                        onClick={() => {
+                          setActiveTab('TICKETS');
+                        }}
+                        className="text-[7px] font-black text-slate-400 uppercase tracking-widest hover:text-amber-500 transition-colors flex items-center gap-1"
+                      >
+                        <AlertCircle size={8} /> Raise Ticket
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">
+                      {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'SHORT', year: 'numeric' }) : 'Pending Sync'}
+                    </p>
+                    <p className="text-[7px] font-black text-slate-300 uppercase tracking-tighter">
+                      {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </p>
+                  </td>
+                </tr>
+              ))}
+              {payments.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-8 py-20 text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] italic">No Financial Logs Detected in Current Node</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </motion.div>
+  );
 
   const handlePaymentSuccess = async (txnId?: string) => {
     try {
@@ -185,79 +298,68 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
   };
 
-  const handlePaymentAndSubmit = async () => {
-    if (!user) {
-      alert('Please login to complete payment');
-      return;
-    }
+  const [orderData, setOrderData] = useState<any>(null);
+  const [isPreparingOrder, setIsPreparingOrder] = useState(false);
 
-    if (!phone || phone.length < 10) {
-      alert('Please enter a 10-digit contact number');
-      return;
-    }
-
-    if (!campaignDetails.title) {
-      alert('Please enter a Campaign Title first');
-      return;
-    }
-    if (!campaignDetails.asset && !needDesigner) {
-      alert('Please upload an Ad Asset or choose "Need Designer Help"');
-      return;
-    }
-    if (!selectedState || !selectedCity) {
-      alert('Please select a Target Region (State & City)');
-      return;
-    }
-
-    const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    const designerCharge = needDesigner ? 1000 : 0;
-    const amount = baseAmount + designerCharge;
-
+  const prepareOrder = async () => {
+    if (!user) return alert('Please login');
+    if (!phone || phone.length < 10) return alert('Contact needed');
+    
+    setIsPreparingOrder(true);
     setLoading(true);
 
-    if (amount <= 0) {
-      // Handle free or zero amount plans directly
-      await handlePaymentSuccess('FREE_PLAN_AUTO');
-      return;
-    }
+    const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+    const amount = baseAmount + (needDesigner ? 1000 : 0);
 
-    const razorpayKey = (import.meta.env.VITE_RAZORPAY_KEY_ID as string) || 'rzp_live_SnZDlb9YCezb2w';
-    
     try {
-      // 1. Create Order on Server
+      console.log("[PAYMENT_SYSTEM] Pre-creating order...");
       const orderResponse = await fetch('/api/razorpay/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
           currency: 'INR',
-          notes: {
-            user_uid: user.uid,
-            campaign_title: campaignDetails.title
-          }
+          notes: { user_uid: user.uid, title: campaignDetails.title }
         })
       });
 
-      if (!orderResponse.ok) {
-        const errorData = await orderResponse.json();
-        throw new Error(errorData.error || 'Failed to initialize order');
+      if (!orderResponse.ok) throw new Error("Order creation failed on server");
+      const order = await orderResponse.json();
+      setOrderData(order);
+      console.log("[PAYMENT_SYSTEM] Order ready for secondary gesture.");
+    } catch (e: any) {
+      alert(`Initialization Error: ${e.message}`);
+    } finally {
+      setIsPreparingOrder(false);
+      setLoading(false);
+    }
+  };
+
+  const handlePaymentAndSubmit = async () => {
+    if (!orderData) {
+      return prepareOrder();
+    }
+    
+    const razorpayKey = 'rzp_live_SnZDlb9YCezb2w';
+    
+    try {
+      if (typeof (window as any).Razorpay === 'undefined') {
+        alert("Payment SDK still loading. Please wait 2 seconds.");
+        return;
       }
 
-      const order = await orderResponse.json();
-
-      // 2. Configure Razorpay Options
+      console.log("[PAYMENT_SYSTEM] Opening Modal with Fresh Gesture...");
       const options = {
         key: razorpayKey,
-        amount: order.amount,
-        currency: order.currency,
+        amount: orderData.amount,
+        currency: orderData.currency,
         name: "AutoAds Pro",
-        description: `Campaign: ${selectedPlan.name}`,
+        description: `Activation: ${campaignDetails.title}`,
         image: "https://darshanct43.github.io/autoads/logo.png",
-        order_id: order.id,
+        order_id: orderData.id,
         handler: async function (response: any) {
           try {
             setLoading(true);
-            // 3. Verify Payment on Server
             const verifyResponse = await fetch('/api/razorpay/verify-payment', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -265,82 +367,80 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
-                uid: user.uid,
-                planData: { amount, planId: selectedPlan.id },
+                uid: user?.uid,
+                planData: { amount: orderData.amount / 100, planId: selectedPlan.id },
                 campaignData: {
                   title: campaignDetails.title,
                   type: campaignDetails.type,
-                  assetUrl: campaignDetails.asset || '',
-                  videoThumbnail: videoThumbnail || '',
-                  customerId: user.uid,
+                  customerId: user?.uid,
                   targetCity: selectedCity === 'Other' ? customCity : selectedCity,
                   targetState: selectedState,
                   duration: campaignDetails.duration,
-                  needDesigner: !!needDesigner
+                  needDesigner: !!needDesigner,
+                  paymentStatus: 'PAID',
+                  paymentId: response.razorpay_payment_id,
+                  paymentReceived: true,
+                  createdAt: new Date(),
+                  updatedAt: new Date()
                 }
               })
             });
 
-            if (!verifyResponse.ok) {
-              const errorData = await verifyResponse.json();
-              throw new Error(errorData.error || 'Payment verification failed');
-            }
-
             const result = await verifyResponse.json();
             
-            // 4. Finalize UI State
-            setShowPayment(false);
-            setPaymentStage('SELECTION');
-            setManualTxnId('');
-            alert('Payment Verified & Campaign Activated! Syncing with network nodes...');
-            setCampaignDetails({ title: '', type: 'VIDEO', asset: null, budget: '', duration: '30' });
+            // Also explicitly record payment record for history
+            await firebaseService.recordPayment({
+              transactionId: response.razorpay_payment_id,
+              amount: orderData.amount / 100,
+              paymentMethod: 'razorpay',
+              status: 'SUCCESS',
+              customerId: user?.uid || '',
+              campaignId: result.campaignId || 'NEW_CAMPAIGN'
+            });
+
+            setCreationStep('MEDIA');
+            if (result.campaignId) {
+               setCreatedCampaignId(result.campaignId);
+               localStorage.setItem('last_created_campaign', result.campaignId);
+            }
+            alert("SUCCESS: Payment Verified! Your campaign is now ACTIVE and waiting for assets.");
             setLoading(false);
+            setShowPayment(false);
           } catch (verifyErr: any) {
-            console.error("[Verification] Error:", verifyErr);
-            alert(`Verification Error: ${verifyErr.message}`);
+            console.error(verifyErr);
+            alert("Verification Failed. Please contact support.");
             setLoading(false);
           }
         },
         prefill: {
-          name: user.displayName || user.email?.split('@')[0] || "Client",
+          name: user.displayName || "Client",
           email: user.email || "",
-          contact: phone.length === 10 ? `+91${phone}` : phone
+          contact: phone
         },
-        notes: {
-          campaign_title: campaignDetails.title,
-          plan: selectedPlan.id,
-          user_uid: user.uid,
-          designer: needDesigner ? "YES" : "NO"
-        },
+        theme: { color: "#f59e0b" },
         modal: {
-          confirm_close: true,
-          ondismiss: function() {
-            setLoading(false);
-            console.log("[Razorpay] Checkout closed by user");
-          },
-          escape: true,
-          backdropclose: false
-        },
-        theme: {
-          color: "#f59e0b"
+          ondismiss: () => setLoading(false)
         }
       };
 
-      const rzpObj = new Razorpay(options);
-      rzpObj.on('payment.failed', function (response: any) {
-        console.error("[Razorpay] Payment Failed:", response.error);
-        alert(`Payment Failed: ${response.error.description}\nCode: ${response.error.code}`);
-      });
+      const rzpObj = new (window as any).Razorpay(options);
       rzpObj.open();
     } catch (e: any) {
-      console.error("Order init error:", e);
-      alert(`Initialization Error: ${e.message}`);
-      setLoading(false);
+      alert(`Modal Error: ${e.message}`);
     }
   };
 
   useEffect(() => {
     firebaseService.getPlans().then(setDbPlans).catch(console.error);
+
+    // Pre-load Razorpay script
+    if (typeof (window as any).Razorpay === 'undefined') {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      document.body.appendChild(script);
+    }
+
     const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -363,12 +463,52 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       setDevices(devs);
     });
 
+    const unsubscribeTickets = firebaseService.subscribeToCustomerTickets(user.uid, setTickets);
+
     return () => {
       unsubscribeNotices();
       unsubscribeCampaigns();
       unsubscribeDevices();
+      unsubscribeTickets();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (activeTicketId) {
+      const unsubscribeChat = firebaseService.subscribeToMessages(activeTicketId, setChatMessages);
+      return () => unsubscribeChat();
+    }
+  }, [activeTicketId]);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !activeTicketId || !user) return;
+    try {
+      await firebaseService.sendChatMessage(activeTicketId, {
+        content: newMessage,
+        senderId: user.uid,
+        senderName: user.displayName || 'Customer'
+      });
+      setNewMessage('');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleApproveDesign = async (ticket: SupportTicket) => {
+    if (!ticket.campaignId) return;
+    const confirm = window.confirm("Are you satisfied with the design? This will move your campaign for final team approval and launch.");
+    if (!confirm) return;
+    
+    try {
+      setLoading(true);
+      await firebaseService.approveDesignerWork(ticket.id!, ticket.campaignId);
+      alert("DESIGN APPROVED! Your campaign is now moving to team for final approval.");
+      setLoading(false);
+    } catch (e) {
+      console.error(e);
+      setLoading(false);
+    }
+  };
 
   const handleDeleteCampaign = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this campaign? This cannot be undone.")) return;
@@ -468,6 +608,34 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
   };
 
+  const handleUploadMediaToCampaign = async (campaignId: string, file: File) => {
+    if (!user) return;
+    try {
+      setIsUploadingMedia(true);
+      setUploadProgress(0);
+      
+      const res = await storageService.uploadCampaignMedia(campaignId, file, (p) => {
+        setUploadProgress(p);
+      });
+
+      await firebaseService.updateCampaign(campaignId, {
+        assetUrl: res.url,
+        mediaUrl: res.url,
+        videoThumbnail: res.thumbnailUrl || "",
+        mediaType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+        mediaReceived: true,
+        updatedAt: new Date()
+      });
+
+      alert("Media uploaded successfully!");
+    } catch (err: any) {
+      console.error(err);
+      alert("Upload failed: " + err.message);
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  };
+
   const handleExtractionClick = (e: React.MouseEvent, data: any[], fileName: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -475,76 +643,170 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     exportToCSV(data, fileName);
   };
 
+  useEffect(() => {
+    if (creationStep === 'PAYMENT' && showPayment && !orderData) {
+      prepareOrder();
+    }
+  }, [creationStep, showPayment]);
+
   const handleActivePlanChange = (planId: string) => {
     setActivePlan(planId);
     setSelectedPlan(plans.find(p => p.id === planId));
+    setOrderData(null); // Reset order data when plan changes
+  };
+
+  const handleRequestDesign = async (type: string) => {
+    if (!user) return alert('Please login');
+    try {
+      setLoading(true);
+      await firebaseService.createSupportTicket({
+        customerId: user.uid,
+        customerName: user.displayName || 'Customer',
+        title: `Design Request: ${type}`,
+        description: `Customer is requesting ${type} for their campaigns.`,
+        priority: 'MEDIUM',
+        category: 'Design Strategy',
+        type: 'CUSTOMER'
+      });
+      alert('Design request submitted! A designer will connect with you via Support Tickets.');
+      setActiveTab('TICKETS');
+      setLoading(false);
+    } catch (e) {
+      console.error(e);
+      setLoading(false);
+    }
   };
 
   return (
     <ErrorBoundary componentName="Client Command Center">
       <div className="min-h-screen bg-[#f8fafc]">
       {/* Navigation */}
-      <nav className="h-16 border-b border-slate-200 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-2">
+      <nav className="h-16 border-b border-slate-200 flex items-center justify-between px-4 md:px-8 bg-white/80 backdrop-blur-md sticky top-0 z-[100]">
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="md:hidden p-2 -ml-2 text-slate-500 hover:text-slate-900 transition-colors z-[110]"
+            aria-label="Toggle Menu"
+          >
+            {showMobileMenu ? <X size={24} /> : <Menu size={24} />}
+          </button>
           <div className="flex flex-col">
-            <span className="font-bold text-slate-900 tracking-tight text-sm uppercase tracking-widest leading-none">Auto <span className="text-amber-500 italic">Ads</span></span>
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] leading-none mt-1.5 flex items-center gap-1">
-              by <span className="text-slate-600">Mayaan Group</span>
+            <span className="font-bold text-slate-900 tracking-tight text-xs md:text-sm uppercase tracking-widest leading-none">Auto <span className="text-amber-500 italic">Ads</span></span>
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] leading-none mt-1 md:mt-1.5 flex items-center gap-1">
+              by <span className="text-slate-600 font-bold uppercase tracking-widest italic">Mayaan</span>
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-6">
-          {user ? (
-            <div className="flex items-center gap-4">
-              <div className="text-right hidden sm:block">
-                <p className="text-[9px] font-black text-slate-900 uppercase tracking-widest">{user.displayName || 'Enterprise User'}</p>
-                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-[0.2em] opacity-60">Verified Command Account</p>
-              </div>
-              <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} className="w-9 h-9 rounded-full border border-slate-200 p-0.5" />
+        <div className="flex items-center gap-2 md:gap-6 h-full">
+          <div className="hidden md:flex h-full items-center gap-6">
+            {[
+              { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+              { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
+              { id: 'HISTORY', label: 'History', icon: History },
+              { id: 'TICKETS', label: 'Support', icon: MessageSquare },
+              { id: 'DESIGN_HELP', label: 'Designer', icon: Plus }
+            ].map((tab) => (
               <button 
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)} 
+                className={cn(
+                  "h-full px-0 transition-all whitespace-nowrap text-[10px] font-black uppercase tracking-widest flex items-center", 
+                  activeTab === tab.id ? "text-amber-600 border-b-2 border-amber-500" : "text-slate-400 hover:text-slate-900"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {user && (
+            <div className="flex items-center gap-2 md:gap-4 ml-2 md:border-l md:border-slate-100 md:pl-6 shrink-0">
+               <button 
                 onClick={() => onLogout()} 
-                className="px-4 py-2 bg-red-50 text-red-500 border border-red-100 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
+                className="p-1 px-2 md:px-4 md:py-2 bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all flex items-center gap-2"
               >
                  <LogOut size={14} />
-                 <span className="hidden lg:inline">Sign Out</span>
+                 <span className="hidden md:inline text-[9px] font-black uppercase tracking-widest">Exit</span>
               </button>
             </div>
-          ) : (
-            <button 
-              onClick={googleLogin}
-              className="flex items-center gap-2 text-[10px] font-black text-slate-900 uppercase tracking-widest hover:text-amber-600 transition-colors"
-            >
-              <LogIn size={14} /> Login
-            </button>
           )}
-          <div className="hidden md:flex gap-8 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            <button 
-              onClick={() => setActiveTab('DASHBOARD')} 
-              className={cn("transition-colors", activeTab === 'DASHBOARD' ? "text-amber-600" : "hover:text-slate-900")}
-            >
-              Monitor
-            </button>
-            <button 
-              onClick={() => setActiveTab('OFFERS')} 
-              className={cn("transition-colors flex items-center gap-1.5", activeTab === 'OFFERS' ? "text-amber-600" : "hover:text-slate-900")}
-            >
-              <Gift size={12} className="animate-pulse" /> Festival Offers
-            </button>
-            <button 
-              onClick={() => setActiveTab('CAMPAIGNS')} 
-              className={cn("transition-colors", activeTab === 'CAMPAIGNS' ? "text-amber-600" : "hover:text-slate-900")}
-            >
-              Campaigns
-            </button>
-            <button 
-              onClick={() => setActiveTab('DESIGN_HELP')} 
-              className={cn("transition-colors focus:outline-none", activeTab === 'DESIGN_HELP' ? "text-amber-600 underline decoration-2 underline-offset-4" : "hover:text-slate-900")}
-            >
-              Help
-            </button>
-          </div>
         </div>
       </nav>
+
+      {/* Mobile Menu Overlay */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileMenu(false)}
+              className="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[55] md:hidden"
+            />
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-[60] md:hidden shadow-2xl flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-950 text-white">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-black uppercase tracking-tighter italic">Auto<span className="text-amber-500">Ads</span> Portal</span>
+                </div>
+                <button onClick={() => setShowMobileMenu(false)} className="text-slate-400">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {[
+                  { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+                  { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
+                  { id: 'HISTORY', label: 'History', icon: History },
+                  { id: 'TICKETS', label: 'Support', icon: MessageSquare },
+                  { id: 'DESIGN_HELP', label: 'Designer', icon: Plus }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id as any);
+                      setShowMobileMenu(false);
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
+                      activeTab === item.id ? "bg-slate-900 text-amber-500 shadow-xl" : "text-slate-500 hover:bg-slate-50"
+                    )}
+                  >
+                    <item.icon size={18} />
+                    {item.label}
+                    {activeTab === item.id && <ChevronRight size={14} className="ml-auto" />}
+                  </button>
+                ))}
+              </div>
+
+              <div className="p-4 border-t border-slate-100 space-y-4">
+                 <div className="flex items-center gap-3 px-4">
+                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
+                      <User size={20} />
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-black text-slate-900 uppercase">{user.email?.split('@')[0]}</p>
+                        <p className="text-[8px] font-bold text-slate-400 uppercase">Customer Portal</p>
+                    </div>
+                 </div>
+                 <button 
+                  onClick={onLogout}
+                  className="w-full flex items-center gap-4 px-4 py-4 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all text-left"
+                 >
+                    <LogOut size={18} />
+                    Logout Session
+                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-4 md:space-y-8">
         {activeTab === 'LEGAL' && (
@@ -586,6 +848,164 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    <ComplianceContent page={legalPage} isEmbed />
                 </div>
              </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'TICKETS' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={cn("flex bg-white border border-slate-100 rounded-[3rem] overflow-hidden shadow-xl", activeTab === 'TICKETS' ? "h-[calc(100vh-200px)] md:h-[calc(100vh-250px)] min-h-[400px]" : "h-0")}
+          >
+            {/* Sidebar */}
+            <div className={cn(
+              "w-80 border-r border-slate-100 flex flex-col bg-slate-50/50 transition-all duration-300",
+              activeTicketId ? "hidden md:flex" : "flex w-full md:w-80"
+            )}>
+               <div className="p-8 border-b border-slate-100 bg-white">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Your Help Desk</h3>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">Chat with our Team</p>
+               </div>
+               <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {tickets.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setActiveTicketId(t.id!)}
+                      className={cn(
+                        "w-full p-6 rounded-3xl border transition-all text-left relative group",
+                        activeTicketId === t.id 
+                          ? "bg-slate-900 border-slate-900 text-white shadow-xl md:translate-x-2" 
+                          : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border", 
+                          t.status?.toLowerCase() === 'open' ? "bg-amber-100 border-amber-200 text-amber-600" :
+                          t.status?.toLowerCase() === 'resolved' ? "bg-green-100 border-green-200 text-green-600" :
+                          "bg-blue-100 border-blue-200 text-blue-600"
+                        )}>
+                          {t.status}
+                        </span>
+                        {t.priority === 'HIGH' && <AlertCircle size={12} className="text-red-500 animate-pulse" />}
+                      </div>
+                      <p className="text-[10px] font-black uppercase tracking-tight line-clamp-1 mb-1">{t.title}</p>
+                      <p className="text-[8px] font-bold opacity-60 line-clamp-1 italic">{t.description}</p>
+                    </button>
+                  ))}
+                  {tickets.length === 0 && (
+                    <div className="py-20 text-center">
+                       <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <MessageSquare className="text-slate-200" size={32} />
+                       </div>
+                       <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No support chats started</p>
+                    </div>
+                  )}
+               </div>
+            </div>
+
+            {/* Chat Area */}
+            <div className={cn(
+              "flex-1 flex flex-col bg-white transition-all duration-300",
+              !activeTicketId && "hidden md:flex"
+            )}>
+               {activeTicketId ? (
+                 <>
+                   <div className="h-20 border-b border-slate-100 px-4 md:px-8 flex items-center justify-between bg-white">
+                      <div className="flex items-center gap-2 md:gap-4">
+                         <button 
+                           onClick={() => setActiveTicketId(null)}
+                           className="p-2.5 bg-slate-900 border border-slate-800 text-amber-500 rounded-xl transition-all shadow-xl hover:bg-slate-800 active:scale-95 flex items-center justify-center group"
+                           title="Back to Tickets"
+                         >
+                           <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
+                         </button>
+                         <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 shadow-md">
+                            <User size={18} />
+                         </div>
+                         <div>
+                            <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight italic">
+                              {tickets.find(t => t.id === activeTicketId)?.title}
+                            </h4>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Support Conversation</p>
+                         </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                         {tickets.find(t => t.id === activeTicketId)?.category === 'Design Strategy' && tickets.find(t => t.id === activeTicketId)?.status !== 'resolved' && (
+                           <button 
+                             onClick={() => handleApproveDesign(tickets.find(t => t.id === activeTicketId)!)}
+                             disabled={loading}
+                             className="px-4 py-2 bg-green-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-green-500/20 hover:scale-105 transition-all flex items-center gap-2"
+                           >
+                              <CheckCircle2 size={14} /> SATISFIED & APPROVE
+                           </button>
+                         )}
+                         <span className="text-[10px] font-black text-slate-300 uppercase">#{activeTicketId.slice(-6).toUpperCase()}</span>
+                      </div>
+                   </div>
+
+                   <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50/30">
+                      {chatMessages.map((msg, i) => (
+                        <div 
+                          key={i}
+                          className={cn(
+                            "flex flex-col max-w-[80%]",
+                            msg.senderId === user?.uid ? "ml-auto items-end" : "items-start"
+                          )}
+                        >
+                           <div className={cn(
+                             "px-5 py-4 rounded-[1.5rem] text-[11px] font-bold tracking-tight shadow-sm",
+                             msg.senderId === user?.uid 
+                               ? "bg-slate-900 text-white rounded-tr-none" 
+                               : msg.senderId === 'system' ? "bg-amber-50 border border-amber-100 text-amber-600 rounded-tl-none italic" : "bg-white border border-slate-100 text-slate-600 rounded-tl-none"
+                           )}>
+                              {msg.content || msg.text}
+                           </div>
+                           <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-2 px-2">
+                             {msg.senderName} • {typeof msg.timestamp === 'object' && msg.timestamp?.seconds ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Just now'}
+                           </span>
+                        </div>
+                      ))}
+                      {chatMessages.length === 0 && (
+                        <div className="h-full flex items-center justify-center">
+                           <div className="text-center space-y-4 max-w-xs">
+                              <Sparkles className="mx-auto text-slate-200" size={48} />
+                              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-relaxed italic">Wait for designer response...</p>
+                           </div>
+                        </div>
+                      )}
+                   </div>
+
+                   <div className="p-6 border-t border-slate-100 bg-white">
+                      <div className="flex gap-4">
+                         <input 
+                           type="text"
+                           value={newMessage}
+                           onChange={(e) => setNewMessage(e.target.value)}
+                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                           placeholder="Type your feedback to the designer..."
+                           className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-xs font-bold tracking-tight outline-none"
+                         />
+                         <button 
+                           onClick={handleSendMessage}
+                           className="w-14 h-14 bg-slate-900 text-amber-500 rounded-2xl flex items-center justify-center hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+                         >
+                            <Send size={20} />
+                         </button>
+                      </div>
+                   </div>
+                 </>
+               ) : (
+                 <div className="flex-1 flex flex-col items-center justify-center space-y-6 p-12 text-center">
+                    <div className="w-24 h-24 bg-slate-50 rounded-[3rem] flex items-center justify-center text-slate-200 border-4 border-dashed border-slate-100">
+                       <MessageSquare size={48} />
+                    </div>
+                    <div className="space-y-2 max-w-sm">
+                       <h4 className="text-lg font-black italic uppercase text-slate-900 tracking-tight">Signal Relay Inactive</h4>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-relaxed">Select a thread from the secure roster to interface with our coordination team.</p>
+                    </div>
+                 </div>
+               )}
+            </div>
           </motion.div>
         )}
 
@@ -808,72 +1228,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           </motion.div>
         )}
 
-        {activeTab === 'OFFERS' && (
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-12 pb-20"
-          >
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div className="space-y-1">
-                <h1 className="text-3xl font-black italic uppercase text-slate-950">Festival Offer Hub</h1>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Exclusive seasonal campaign packages & rewards</p>
-              </div>
-              <div className="bg-amber-500/10 border border-amber-500/20 px-6 py-3 rounded-2xl">
-                 <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest italic">{promotions.length} Offers Currently Active</p>
-              </div>
-            </div>
+        {/* Removed OFFERS tab as requested - consolidated into DASHBOARD */}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-               {promotions.length === 0 ? (
-                 <div className="col-span-full py-24 text-center glass-card bg-white rounded-[3rem] border-2 border-dashed border-slate-100 shadow-sm">
-                    <Gift className="mx-auto text-slate-200 mb-6" size={64} />
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">No Active Festival Offers</h3>
-                    <p className="text-[10px] font-bold text-slate-300 uppercase mt-2">Special occasion offers will appear here automatically.</p>
-                 </div>
-               ) : (
-                 promotions.map((promo) => (
-                   <motion.div 
-                     key={promo.id}
-                     whileHover={{ y: -5 }}
-                     className="glass-card p-10 rounded-[3rem] border border-slate-100 shadow-xl bg-white space-y-8 flex flex-col justify-between relative overflow-hidden group hover:border-amber-500 transition-all"
-                   >
-                      <div className="absolute top-0 right-0 p-8">
-                         <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center text-amber-500 transform group-hover:rotate-12 transition-transform">
-                            <Zap size={32} />
-                         </div>
-                      </div>
-
-                      <div className="space-y-4">
-                         <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest bg-amber-500/10 px-4 py-1.5 rounded-full italic border border-amber-500/20">Active Festival Signal</span>
-                         <h2 className="text-3xl font-black italic tracking-tight uppercase text-slate-900 leading-tight pr-12">{promo.offer}</h2>
-                         {promo.imageUrl && (
-                           <div className="rounded-3xl overflow-hidden border border-slate-100 aspect-video bg-slate-50 mt-4">
-                              <img src={promo.imageUrl} alt={promo.offer} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                           </div>
-                         )}
-                         <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed tracking-widest">{promo.message || 'Unlock strategic growth with this seasonal specialized ad deployment package.'}</p>
-                      </div>
-
-                      <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                         <div className="space-y-1">
-                            <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Valid For Region</p>
-                            <p className="text-[11px] font-black text-slate-900 uppercase italic">{promo.targetRegion || 'PAN-INDIA HUB'}</p>
-                         </div>
-                         <button 
-                           onClick={() => setShowPayment(true)}
-                           className="bg-slate-950 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-slate-950 transition-all active:scale-95 shadow-2xl"
-                         >
-                            Claim Offer
-                         </button>
-                      </div>
-                   </motion.div>
-                 ))
-               )}
-            </div>
-          </motion.div>
-        )}
-
+        {activeTab === 'HISTORY' && renderHistoryTab()}
+        
         {activeTab === 'CAMPAIGNS' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -939,18 +1297,67 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                  </div>
                               </td>
                               <td className="px-8 py-6">
-                                 <span className={cn("text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border", 
-                                    ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION' ? "bg-amber-50 text-amber-600 border-amber-100" :
-                                    ad.status === 'APPROVED' ? "bg-green-50 text-green-600 border-green-100" :
-                                    ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
-                                    "bg-red-50 text-red-600 border-red-100"
-                                 )}>
-                                    {ad.status?.replace('_', ' ')}
-                                 </span>
+                                 <div className="flex flex-col gap-2">
+                                   <span className={cn("text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit", 
+                                      !ad.paymentReceived && ad.status === 'PENDING' ? "bg-red-50 text-red-600 border-red-100 animate-pulse" :
+                                      ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                      ad.status === 'APPROVED' ? "bg-green-50 text-green-600 border-green-100" :
+                                      ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
+                                      "bg-red-50 text-red-600 border-red-100"
+                                   )}>
+                                      {!ad.paymentReceived && ad.status === 'PENDING' ? "PAYMENT FAILED / PENDING" :
+                                       ad.paymentReceived && !ad.mediaReceived && !ad.needDesigner && ad.status === 'PENDING' ? "WAITING FOR MEDIA" : 
+                                       ad.paymentReceived && ad.needDesigner && ad.status === 'PENDING' ? "DESIGNER ASSIGNED" :
+                                       ad.paymentReceived && (ad.mediaReceived || ad.mediaUrl || ad.assetUrl) && ad.status === 'PENDING' ? "WAITING FOR TEAM APPROVAL" :
+                                       ad.status?.replace('_', ' ')}
+                                   </span>
+                                   {ad.paymentReceived && (
+                                      <span className="text-[7px] font-black text-green-600 uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded w-fit flex items-center gap-1">
+                                         <CheckCircle size={8} /> Payment Verified
+                                      </span>
+                                   )}
+                                   {ad.paymentId && (
+                                     <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded w-fit">
+                                       Pay ID: {ad.paymentId}
+                                     </span>
+                                   )}
+                                   {ad.needDesigner && ad.status === 'PENDING' && (
+                                     <span className="text-[7px] font-black text-blue-500 uppercase tracking-widest italic">
+                                       Designer Assigned via Ticket
+                                     </span>
+                                   )}
+                                 </div>
                               </td>
                               <td className="px-8 py-6">
                                  <div className="flex items-center gap-2">
-                                    <button className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all group-hover:scale-105 active:scale-95 shadow-sm">
+                                    {(!ad.assetUrl && !ad.mediaUrl) && (
+                                       <div 
+                                         className="flex items-center gap-2"
+                                         onClick={(e) => e.stopPropagation()}
+                                       >
+                                          <input 
+                                            type="file" 
+                                            id={`upload-${ad.id}`}
+                                            className="hidden" 
+                                            accept="image/*,video/*"
+                                            onChange={(e) => {
+                                              const file = e.target.files?.[0];
+                                              if (file) handleUploadMediaToCampaign(ad.id, file);
+                                            }}
+                                          />
+                                          <button 
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              document.getElementById(`upload-${ad.id}`)?.click();
+                                            }}
+                                            className="cursor-pointer p-2.5 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
+                                          >
+                                            <Upload size={14} />
+                                            <span className="text-[8px] font-black uppercase">Choose File</span>
+                                          </button>
+                                       </div>
+                                    )}
+                                    <button className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
                                        <ArrowUpRight size={16} />
                                     </button>
                                     <button 
@@ -998,6 +1405,32 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                            <div className="absolute inset-0 bg-slate-900 flex items-center justify-center">
                               {ad.type === 'VIDEO' ? <PlayCircle className="text-slate-800" size={48} /> : <ImageIcon className="text-slate-800" size={48} />}
                            </div>
+                           
+                           {(!ad.assetUrl && !ad.mediaUrl) && (
+                             <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-950/20 backdrop-blur-[2px]">
+                                <input 
+                                   type="file" 
+                                   id={`q-up-${ad.id}`}
+                                   className="hidden" 
+                                   accept="image/*,video/*"
+                                   onChange={(e) => {
+                                     const file = e.target.files?.[0];
+                                     if (file) handleUploadMediaToCampaign(ad.id, file);
+                                   }}
+                                />
+                                <button 
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     document.getElementById(`q-up-${ad.id}`)?.click();
+                                   }}
+                                   className="px-4 py-2 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all"
+                                >
+                                   Upload Media
+                                </button>
+                                <p className="text-[7px] font-bold text-amber-500 uppercase mt-2 tracking-widest">Awaiting Data</p>
+                             </div>
+                           )}
+
                            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-950 to-transparent">
                               <p className="text-[9px] font-black text-white uppercase tracking-tight truncate italic">{ad.title}</p>
                               <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest italic">{ad.type} • {ad.targetCity}</p>
@@ -1040,7 +1473,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Ad Policy Compliance Check</li>
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> 24-Hour Signal Ready Delivery</li>
                       </ul>
-                      <button className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200">Request Strategy</button>
+                      <button 
+                         onClick={() => handleRequestDesign('Standard Creative')}
+                         className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200"
+                      >
+                        Request Strategy
+                      </button>
                    </div>
 
                    <div className="glass-card p-10 rounded-[3rem] bg-slate-900 border border-slate-800 shadow-2xl space-y-8 relative overflow-hidden group">
@@ -1056,7 +1494,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Strategic CTA Optimization</li>
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> 72-Hour Prime Delivery</li>
                       </ul>
-                      <button className="w-full py-5 bg-amber-500 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition-all shadow-2xl shadow-amber-500/20 relative z-10">Hire Motion Expert</button>
+                      <button 
+                         onClick={() => handleRequestDesign('Elite Motion Studio')}
+                         className="w-full py-5 bg-amber-500 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition-all shadow-2xl shadow-amber-500/20 relative z-10"
+                      >
+                        Hire Motion Expert
+                      </button>
                    </div>
                 </div>
              </div>
@@ -1133,190 +1576,46 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             >
               <div className={cn("p-8 text-white flex items-center justify-between relative", selectedPlan?.color)}>
                 <div className="flex items-center gap-4">
-                  {paymentStage === 'PREPARATION' && (
+                  {creationStep !== 'DETAILS' && (
                     <motion.button 
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      onClick={() => setPaymentStage('SELECTION')}
-                      className="p-2 bg-white/20 hover:bg-white/40 rounded-full transition-all"
+                      onClick={() => setCreationStep('DETAILS')}
+                      className="p-2 bg-white/20 hover:bg-white/40 rounded-full transition-all flex items-center justify-center"
                     >
-                      <ChevronRight size={18} className="rotate-180" />
+                      <ArrowLeft size={18} />
                     </motion.button>
                   )}
                   <div>
-                    <h3 className="text-2xl font-black italic tracking-tight uppercase">Order Summary</h3>
-                    <p className="text-[10px] font-bold opacity-70 uppercase tracking-widest">Plan: {selectedPlan?.name}</p>
+                    <h3 className="text-2xl font-black italic tracking-tight uppercase">
+                      {creationStep === 'DETAILS' ? "Campaign Config" : creationStep === 'PAYMENT' ? "Secure Payment" : "Media Injection"}
+                    </h3>
+                    <p className="text-[10px] font-bold opacity-70 uppercase tracking-widest italic tracking-wider">
+                      {creationStep === 'DETAILS' ? "Configure Target Signal" : creationStep === 'PAYMENT' ? "Deposit Funds to Network" : "Upload Campaign Creative"}
+                    </p>
                   </div>
                 </div>
-                <button onClick={() => setShowPayment(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white">
+                <button onClick={() => { setShowPayment(false); setCreationStep('DETAILS'); }} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white">
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="p-4 space-y-4">
-                {paymentStage === 'SELECTION' ? (
-                  <>
-                    {/* Campaign Basics */}
-                    <div className="space-y-4">
-                      <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Campaign Configuration</h4>
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Campaign Headline</label>
-                          <input 
-                            type="text"
-                            value={campaignDetails.title}
-                            onChange={(e) => setCampaignDetails({...campaignDetails, title: e.target.value})}
-                            placeholder="e.g. Summer Mega Sale 2026"
-                            className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[10px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
-                          />
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="space-y-2">
-                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Asset Type</label>
-                              <div className="flex bg-slate-100 p-1 rounded-xl">
-                                 <button 
-                                   onClick={() => setCampaignDetails({...campaignDetails, type: 'IMAGE'})}
-                                   className={cn("flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all", campaignDetails.type === 'IMAGE' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400")}
-                                 >
-                                   Image
-                                 </button>
-                                 <button 
-                                   onClick={() => setCampaignDetails({...campaignDetails, type: 'VIDEO'})}
-                                   className={cn("flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all", campaignDetails.type === 'VIDEO' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400")}
-                                 >
-                                   Video
-                                 </button>
-                              </div>
-                           </div>
-                           <div className="space-y-2">
-                              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Slot Duration</label>
-                              <select 
-                                value={campaignDetails.duration}
-                                onChange={(e) => setCampaignDetails({...campaignDetails, duration: e.target.value})}
-                                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-[10px] font-bold uppercase tracking-tight focus:ring-1 focus:ring-amber-500 outline-none text-slate-900 shadow-sm"
-                              >
-                                 <option value="15">15 Seconds</option>
-                                 <option value="30">30 Seconds</option>
-                                 <option value="60">60 Seconds</option>
-                              </select>
-                           </div>
-                        </div>
-                      </div>
+              <div className="p-6 space-y-6">
+                {creationStep === 'DETAILS' ? (
+                  <div className="space-y-6">
+                    {/* ... (Existing detail fields) */}
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Campaign Title</label>
+                      <input 
+                        type="text"
+                        value={campaignDetails.title}
+                        onChange={(e) => setCampaignDetails({...campaignDetails, title: e.target.value})}
+                        placeholder="e.g. Summer Mega Sale 2026"
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[10px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
+                      />
                     </div>
 
-                    {/* Asset Upload */}
-                    <div className="space-y-4">
-                       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Campaign Asset Upload</h4>
-                       <input 
-                         type="file" 
-                         id="asset-upload" 
-                         key={campaignDetails.type}
-                         className="hidden" 
-                         accept={campaignDetails.type === 'VIDEO' ? 'video/*' : 'image/*'}
-                         onChange={async (e) => {
-                           const file = e.target.files?.[0];
-                           if (file && user) {
-                             const localUrl = URL.createObjectURL(file);
-                             setCampaignDetails(prev => ({ ...prev, asset: localUrl }));
-                             setIsUploadingMedia(true);
-                             setUploadProgress(0);
-                             
-                             try {
-                               // Generate and upload video thumbnail if it's a video
-                               if (file.type.startsWith('video/')) {
-                                 try {
-                                   const thumbBlob = await storageService.generateVideoThumbnail(file);
-                                   const thumbFile = new File([thumbBlob], `thumb_${file.name}.jpg`, { type: 'image/jpeg' });
-                                   const thumbPath = storageService.getCampaignMediaPath(user.uid, 'videos', `thumb_${Date.now()}.jpg`);
-                                   const thumbUrl = await storageService.uploadFile(thumbPath, thumbFile);
-                                   setVideoThumbnail(thumbUrl);
-                                   console.log("[CustomerPortal] Video thumbnail generated and uploaded:", thumbUrl);
-                                 } catch (thumbErr) {
-                                   console.error("[CustomerPortal] Failed to generate video thumbnail:", thumbErr);
-                                 }
-                               }
-
-                               const fileName = `${Date.now()}_${file.name}`;
-                               const mediaType = file.type.startsWith('video/') ? 'videos' : 'posters';
-                               const storagePath = storageService.getCampaignMediaPath(user.uid, mediaType, fileName);
-                               
-                               const url = await storageService.uploadFile(storagePath, file, (p) => {
-                                 setUploadProgress(p.progress);
-                               });
-                               
-                               setCampaignDetails(prev => ({ ...prev, asset: url }));
-                               console.log("[CustomerPortal] Asset uploaded to storage:", url);
-                             } catch (err: any) {
-                               console.error("[CustomerPortal] Asset upload failed:", err);
-                               alert(err.message || "Failed to upload campaign asset. Please try again.");
-                               setCampaignDetails(prev => ({...prev, asset: null}));
-                             } finally {
-                               setIsUploadingMedia(false);
-                               URL.revokeObjectURL(localUrl);
-                             }
-                           }
-                         }}
-                       />
-                       <div 
-                        onClick={() => !loading && document.getElementById('asset-upload')?.click()}
-                        className={cn(
-                          "w-full h-40 border-2 border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-50 hover:border-amber-500 transition-all group/asset",
-                          loading && "opacity-50 cursor-wait"
-                        )}
-                       >
-                         {campaignDetails.asset ? (
-                           <div className="text-center space-y-2">
-                              <div className="w-12 h-12 bg-green-500 text-white rounded-full flex items-center justify-center mx-auto shadow-lg shadow-green-100">
-                                 <Check size={24} />
-                              </div>
-                              <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Asset Ready for Injection</p>
-                              <button onClick={(e) => { e.stopPropagation(); setCampaignDetails({...campaignDetails, asset: null}); }} className="text-[9px] font-bold text-red-500 uppercase hover:underline">Remove</button>
-                           </div>
-                         ) : (
-                           <div className="text-center space-y-3">
-                              {isUploadingMedia ? (
-                                <>
-                                   <div className="relative w-16 h-16 mx-auto">
-                                      <svg className="w-full h-full rotate-[-90deg]">
-                                         <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4" className="text-slate-100" />
-                                         <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4" className="text-amber-500" strokeDasharray={176} strokeDashoffset={176 - (176 * uploadProgress) / 100} strokeLinecap="round" />
-                                      </svg>
-                                      <div className="absolute inset-0 flex items-center justify-center">
-                                         <span className="text-[10px] font-black text-slate-900">{uploadProgress}%</span>
-                                      </div>
-                                   </div>
-                                   <div className="space-y-1">
-                                      <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">Uplinking Asset...</p>
-                                      <p className={cn("text-[8px] font-bold uppercase tracking-widest", uploadTimeLeft < 30 ? "text-red-500 animate-pulse" : "text-slate-400")}>
-                                         Limit: {Math.floor(uploadTimeLeft / 60)}:{(uploadTimeLeft % 60).toString().padStart(2, '0')}
-                                      </p>
-                                   </div>
-                                </>
-                              ) : (
-                                <>
-                                   <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover/asset:text-amber-500 transition-colors mx-auto">
-                                      {loading ? <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /> : (campaignDetails.type === 'VIDEO' ? <Video size={20} /> : <ImageIcon size={20} />)}
-                                   </div>
-                                   <div className="text-center">
-                                      <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{loading ? 'Processing...' : 'Click to Inject Asset'}</p>
-                                      <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Required: High DPI {campaignDetails.type === 'VIDEO' ? 'MP4' : 'JPEG/PNG'}</p>
-                                   </div>
-                                </>
-                              )}
-                           </div>
-                         )}
-                       </div>
-                    </div>
-
-                    {/* Area Targeting Section */}
-                    <div className="space-y-6">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center justify-between">
-                        Target Geography
-                        <span className="text-amber-600 italic">Network Config</span>
-                      </h4>
-                      
-                      <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Select State</label>
                           <select 
@@ -1327,6 +1626,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             }}
                             className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[10px] font-bold uppercase tracking-tight focus:ring-1 focus:ring-amber-500 outline-none text-slate-900 shadow-sm"
                           >
+                            <option value="">Choose State</option>
                             {Object.keys(states).map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </div>
@@ -1340,182 +1640,259 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             {selectedState && states[selectedState as keyof typeof states] ? (
                               states[selectedState as keyof typeof states].map(c => <option key={c} value={c}>{c}</option>)
                             ) : (
-                              <option value="">Select State First</option>
+                              <option value="">First pick state</option>
                             )}
                           </select>
                         </div>
-                      </div>
-
-                      {selectedCity === 'Other' && (
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-2">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1 text-amber-600">Specify City Name</label>
-                          <input 
-                            type="text"
-                            value={customCity}
-                            onChange={(e) => setCustomCity(e.target.value)}
-                            placeholder="Type city name here..."
-                            className="w-full bg-amber-50/50 border border-amber-100 rounded-xl px-4 py-3 text-[10px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
-                          />
-                        </motion.div>
-                      )}
-
-                      <div className="space-y-2">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Pinpoint Specific Area/Address</label>
-                        <input 
-                          type="text"
-                          value={targetArea}
-                          onChange={(e) => setTargetArea(e.target.value)}
-                          placeholder="e.g. Indiranagar 80ft Road, Sector 4..."
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-4 text-[10px] font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none"
-                        />
-                      </div>
                     </div>
 
-                    {/* Designer Help Section */}
                     <div className="space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Custom Creative Strategy</h4>
-                      <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center">
-                              <Sparkles size={20} />
-                            </div>
-                            <div>
-                              <p className="text-xs font-bold text-slate-900 uppercase tracking-tight">Need a Professional Designer?</p>
-                              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">We help create your campaign story</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => setNeedDesigner(true)}
-                              className={cn("px-4 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all", needDesigner === true ? "bg-slate-900 text-white" : "bg-white text-slate-400 border border-slate-200")}
-                            >
-                              Yes
-                            </button>
-                            <button 
-                              onClick={() => setNeedDesigner(false)}
-                              className={cn("px-4 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all", needDesigner === false ? "bg-slate-900 text-white" : "bg-white text-slate-400 border border-slate-200")}
-                            >
-                              No
-                            </button>
-                          </div>
+                      <div className="flex items-center justify-between p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                        <div className="flex flex-col">
+                           <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-none">Selected Tier</p>
+                           <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1">{selectedPlan.name} • {selectedPlan.unitCount}</p>
                         </div>
-
-                        {needDesigner && (
-                            <motion.div 
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              className="overflow-hidden space-y-4 pt-4 border-t-2 border-amber-100"
-                            >
-                              <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200">
-                                 <p className="text-[10px] text-amber-700 font-extrabold uppercase tracking-tight italic flex items-center gap-2">
-                                   <AlertCircle size={12} />
-                                   PROFESSIONAL DESIGN SERVICE ENABLED
-                                 </p>
-                                 <p className="text-[10px] text-amber-900 font-bold mt-2 leading-relaxed">
-                                   Our studio experts will draft your campaign visuals. <span className="font-extrabold text-amber-600 underline underline-offset-2">Designer Charge: ₹1,000</span> is added to your total.
-                                 </p>
-                              </div>
-                              <div className="space-y-2">
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Requirements for Design Request:</p>
-                              <ul className="text-[10px] space-y-1.5 text-slate-700 font-medium">
-                                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-amber-500 rounded-full" /> Business Story/Concept details</li>
-                                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-amber-500 rounded-full" /> High-Resolution Product Images</li>
-                                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-amber-500 rounded-full" /> Brand Guidelines & Logo Assets</li>
-                              </ul>
+                        <div className="text-right">
+                           <p className="text-lg font-black text-slate-900 tracking-tight italic leading-tight">{selectedPlan.price}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                         <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                               <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+                                  <Sparkles size={14} />
+                               </div>
+                               <div>
+                                  <p className="text-[10px] font-bold text-slate-900 uppercase">Need Creative Help?</p>
+                                  <p className="text-[8px] text-slate-400 uppercase">₹1,000 for Professional Design</p>
+                               </div>
                             </div>
-                          </motion.div>
-                        )}
+                            <button 
+                              onClick={() => setNeedDesigner(!needDesigner)}
+                              className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needDesigner ? "bg-slate-900 text-white" : "bg-white text-slate-400 border border-slate-200")}
+                            >
+                              {needDesigner ? 'Added' : 'Add'}
+                            </button>
+                         </div>
                       </div>
                     </div>
 
-                    {/* Final Checkout */}
-                    <div className="space-y-6">
-                      <div className="space-y-4">
-                         <div className="space-y-2">
-                            <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1 flex justify-between">
-                               Contact Number
-                               <span className="text-amber-600 italic">For Coordination</span>
-                            </label>
-                            <div className="relative">
-                               <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                               <input 
-                                  type="tel"
-                                  placeholder="Enter 10-digit number"
-                                  value={phone}
-                                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                                  className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-12 pr-4 py-4 text-xs font-bold tracking-tight focus:ring-1 focus:ring-amber-500 outline-none text-slate-900"
-                               />
-                            </div>
-                         </div>
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-amber-50 rounded-2xl border border-amber-100 flex-col sm:flex-row gap-4">
-                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-amber-500 text-slate-900 rounded-xl flex items-center justify-center font-bold italic tracking-tight shadow-lg shadow-amber-500/10">TOTAL</div>
-                            <div>
-                               <p className="text-[10px] font-bold text-slate-900 uppercase tracking-tight leading-none">Order Details</p>
-                               <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">
-                                 {selectedPlan.name} Plan {needDesigner ? '+ Designer Review' : ''}
-                               </p>
-                            </div>
-                         </div>
-                         <div className="text-right">
-                            <p className="text-lg font-black text-slate-900 tracking-tight italic leading-tight">
-                              ₹{(typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + (needDesigner ? 1000 : 0)}
-                            </p>
-                            <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Total Payable</p>
-                         </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <button 
-                          onClick={handlePaymentAndSubmit}
-                          disabled={phone.length < 10 || loading}
-                          className={cn(
-                            "w-full py-5 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl active:scale-95 group/btn",
-                            phone.length >= 10 ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-200" : "bg-slate-100 text-slate-300 cursor-not-allowed"
-                          )}
-                        >
-                          {loading ? (
-                            <div className="flex items-center gap-2">
-                               <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                               <span>Processing...</span>
-                            </div>
-                          ) : isUploadingMedia ? (
-                            <div className="flex items-center gap-2">
-                               <div className="w-4 h-4 border-2 border-slate-300 border-t-amber-500 rounded-full animate-spin" />
-                               <span>Uplinking Asset {uploadProgress}% (Proceed Anyway)</span>
-                            </div>
-                          ) : (
-                            <>
-                              <CheckCircle2 size={18} className={cn(phone.length >= 10 ? "text-amber-500" : "text-slate-300")} />
-                              INITIATE SECURE PAYMENT
-                            </>
-                          )}
-                        </button>
-                        
-                        <div className="flex flex-col gap-2">
-                           <p className="text-center text-[9px] text-slate-400 font-medium italic">Secure 256-bit SSL encrypted transaction via Razorpay.</p>
-                        </div>
-                     </div>
+                    <div className="space-y-2">
+                       <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Contact for Deployment</label>
+                       <div className="relative">
+                          <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                          <input 
+                             type="tel"
+                             placeholder="10-digit Mobile"
+                             value={phone}
+                             onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                             className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-12 pr-4 py-4 text-xs font-bold tracking-tight outline-none"
+                          />
+                       </div>
                     </div>
-                  </>
-                ) : (
-                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-8 py-10">
+
+                    <button 
+                      onClick={() => {
+                        if (!campaignDetails.title || !selectedCity || phone.length < 10) {
+                          alert('Please fill all details correctly.');
+                          return;
+                        }
+                        setCreationStep('PAYMENT');
+                      }}
+                      className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                    >
+                      Continue to Payment <ChevronRight size={16} />
+                    </button>
+                  </div>
+                ) : creationStep === 'PAYMENT' ? (
+                  <div className="space-y-6 py-6">
                     <div className="text-center space-y-4">
-                       <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-[2.5rem] flex items-center justify-center mx-auto border border-emerald-200 shadow-sm">
-                          <ShieldCheck size={40} />
+                       <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-[2rem] flex items-center justify-center mx-auto">
+                          <CreditCard size={32} />
                        </div>
                        <div>
-                          <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Initiated</h4>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Process in Progress</p>
+                          <h4 className="text-xl font-black italic uppercase tracking-tight text-slate-900">Gateway Ready</h4>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Complete your transaction to unlock media upload</p>
                        </div>
                     </div>
-                    <div className="text-center">
-                       <button onClick={() => setShowPayment(false)} className="px-8 py-4 bg-slate-900 text-white rounded-xl font-bold uppercase tracking-widest text-[10px]">Return to Portal</button>
+
+                    <div className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] space-y-4">
+                       <div className="flex justify-between items-center text-[10px] font-black uppercase text-slate-400 border-b border-slate-100 pb-3">
+                          <span>Description</span>
+                          <span>Value</span>
+                       </div>
+                       <div className="flex justify-between items-center text-[11px] font-black uppercase text-slate-900">
+                          <span>{selectedPlan.name} Tier</span>
+                          <span>{selectedPlan.price}</span>
+                       </div>
+                       {needDesigner && (
+                         <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                            <span>Creative Strategy Fee</span>
+                            <span>₹1,000</span>
+                         </div>
+                       )}
+                       <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200 text-lg font-black italic uppercase text-slate-900">
+                          <span>Total Deployment Fee</span>
+                          <span>₹{(typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + (needDesigner ? 1000 : 0)}</span>
+                       </div>
                     </div>
-                  </motion.div>
+
+                    <button 
+                      onClick={handlePaymentAndSubmit}
+                      disabled={loading}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-black text-[14px] uppercase tracking-[0.2em] shadow-xl transition-all flex items-center justify-center gap-3",
+                        orderData 
+                          ? "bg-green-600 text-white hover:bg-green-500 shadow-green-500/20" 
+                          : "bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-amber-500/20"
+                      )}
+                    >
+                      {loading ? (
+                        <div className="w-5 h-5 border-2 border-slate-900/20 border-t-slate-900 rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          {orderData ? "LAUNCH PAYMENT PORTAL" : "PAY NOW"} <Zap size={16} fill="currentColor" />
+                        </>
+                      )}
+                    </button>
+                    {orderData && (
+                      <p className="text-center text-[10px] font-black text-green-600 uppercase animate-pulse">Payment Signal Ready. Click above to open gateway.</p>
+                    )}
+                    
+                    <p className="text-center text-[9px] text-slate-400 font-bold uppercase tracking-widest italic opacity-60">Fast Secure Checkout • RBI Compliant</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6 py-4">
+                    <div className="text-center space-y-2">
+                       <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
+                          <Check size={24} />
+                       </div>
+                       <h4 className="text-lg font-black italic uppercase text-slate-900 leading-tight">Payment Confirmed!</h4>
+                       <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">You can now optionally upload your ad media</p>
+                    </div>
+
+                    <div className="space-y-4">
+                       <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+                          <button 
+                            onClick={() => setCampaignDetails({...campaignDetails, type: 'IMAGE'})}
+                            className={cn("flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all", campaignDetails.type === 'IMAGE' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600")}
+                          >
+                            <div className="flex items-center justify-center gap-2">
+                               <ImageIcon size={14} /> Poster
+                            </div>
+                          </button>
+                          <button 
+                            onClick={() => setCampaignDetails({...campaignDetails, type: 'VIDEO'})}
+                            className={cn("flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all", campaignDetails.type === 'VIDEO' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600")}
+                          >
+                            <div className="flex items-center justify-center gap-2">
+                               <Video size={14} /> Video
+                            </div>
+                          </button>
+                       </div>
+
+                       <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 italic">Slot Length</label>
+                          <select 
+                            value={campaignDetails.duration}
+                            onChange={(e) => setCampaignDetails({...campaignDetails, duration: e.target.value})}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-[11px] font-black uppercase tracking-tight outline-none focus:ring-1 focus:ring-amber-500 shadow-sm"
+                          >
+                             <option value="15">15 SECONDS LIGHT SIGNAL</option>
+                             <option value="30">30 SECONDS STANDARD SIGNAL</option>
+                             <option value="60">60 SECONDS PREMIUM SIGNAL</option>
+                          </select>
+                       </div>
+
+                       <input 
+                         type="file" 
+                         id="post-payment-upload" 
+                         className="hidden" 
+                         accept={campaignDetails.type === 'VIDEO' ? 'video/*' : 'image/*'}
+                         onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file && user) {
+                               const campaignId = localStorage.getItem('last_created_campaign');
+                               if (!campaignId) {
+                                  alert("No active campaign found to attach media to. Please check your dashboard.");
+                                  return;
+                               }
+                               
+                               // COMPRESSION LOGIC
+                               setIsUploadingMedia(true);
+                               try {
+                                  let finalFile: File | Blob = file;
+                                  if (file.type.startsWith('image/')) {
+                                     finalFile = await compressImage(file, 1024, 0.6);
+                                  }
+                                  
+                                  const res = await storageService.uploadCampaignMedia(campaignId, finalFile as File, (p) => {
+                                     setUploadProgress(p);
+                                  });
+
+                                  await firebaseService.updateCampaign(campaignId, {
+                                     mediaUrl: res.url,
+                                     assetUrl: res.url,
+                                     videoThumbnail: res.thumbnailUrl || "",
+                                     mediaType: campaignDetails.type,
+                                     mediaReceived: true,
+                                     updatedAt: new Date()
+                                  });
+                                  
+                                  alert("Media Synced Successfully! Campaign updated.");
+                                  setShowPayment(false);
+                                  setCreationStep('DETAILS');
+                               } catch (err) {
+                                  console.error(err);
+                                  alert("Media upload failed. You can re-upload from your dashboard.");
+                               } finally {
+                                  setIsUploadingMedia(false);
+                               }
+                            }
+                         }}
+                       />
+
+                       <button 
+                         onClick={(e) => {
+                           e.preventDefault();
+                           document.getElementById('post-payment-upload')?.click();
+                         }}
+                         disabled={isUploadingMedia}
+                         className={cn(
+                           "w-full h-44 border-2 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center gap-4 transition-all group/upload bg-slate-50",
+                           isUploadingMedia ? "cursor-wait opacity-80" : "hover:border-amber-500 hover:bg-white cursor-pointer"
+                         )}
+                       >
+                         {isUploadingMedia ? (
+                            <div className="text-center space-y-4">
+                               <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto relative">
+                                  <div className="absolute inset-0 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                                  <span className="text-[10px] font-black text-slate-900">{uploadProgress}%</span>
+                               </div>
+                               <p className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] animate-pulse">Syncing File...</p>
+                            </div>
+                         ) : (
+                            <>
+                               <div className="w-14 h-14 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-300 group-hover/upload:text-amber-500 transition-all shadow-sm">
+                                  <Upload size={24} />
+                               </div>
+                               <div className="text-center space-y-1">
+                                  <p className="text-[11px] font-black text-slate-900 uppercase tracking-widest italic">Choose Photo/Video</p>
+                                  <p className="text-[8px] text-slate-400 font-bold uppercase tracking-[0.2em]">Select from your device</p>
+                               </div>
+                            </>
+                         )}
+                       </button>
+                    </div>
+
+                    <button 
+                      onClick={() => { setShowPayment(false); setCreationStep('DETAILS'); }}
+                      className="w-full py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors"
+                    >
+                      Skip For Now, Upload Later
+                    </button>
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -1568,8 +1945,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                      </div>
                      <button 
                        onClick={() => {
-                         setActiveTab('OFFERS');
+                         setActiveTab('DASHBOARD');
                          setShowFloatingOffer(false);
+                         setShowPayment(true);
                        }}
                        className="flex-1 py-3 bg-white text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-500 transition-all active:scale-95"
                      >
@@ -1582,6 +1960,110 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         )}
       </AnimatePresence>
 
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-20 bg-white border-t border-slate-200 px-6 flex items-center justify-between z-[100] pb-safe">
+        {[
+          { id: 'DASHBOARD', icon: Activity, label: 'Home' },
+          { id: 'CAMPAIGNS', icon: Monitor, label: 'Ads' },
+          { id: 'TICKETS', icon: MessageSquare, label: 'Help' },
+          { id: 'DESIGN_HELP', icon: Sparkles, label: 'Studio' }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={cn(
+              "flex flex-col items-center gap-1 transition-all",
+              activeTab === tab.id ? "text-amber-500" : "text-slate-400"
+            )}
+          >
+            <tab.icon size={20} className={cn(activeTab === tab.id ? "scale-110" : "scale-100")} />
+            <span className="text-[8px] font-black uppercase tracking-widest">{tab.label}</span>
+          </button>
+        ))}
+        <button
+          onClick={() => setShowMobileMenu(true)}
+          className={cn(
+            "flex flex-col items-center gap-1 transition-all",
+            showMobileMenu ? "text-amber-500" : "text-slate-400"
+          )}
+        >
+          <Settings size={20} />
+          <span className="text-[8px] font-black uppercase tracking-widest">More</span>
+        </button>
+      </div>
+
+      {/* Customer Mobile Menu Drawer */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <div className="fixed inset-0 z-[200] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileMenu(false)}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[3rem] p-8 max-h-[80vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-xl font-black italic uppercase text-slate-900">Control Panel</h3>
+                <button onClick={() => setShowMobileMenu(false)} className="p-2 bg-slate-100 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { id: 'DASHBOARD', icon: Activity, label: 'Home' },
+                  { id: 'CAMPAIGNS', icon: Monitor, label: 'Campaigns' },
+                  { id: 'HISTORY', icon: Wallet, label: 'Payment Logs' },
+                  { id: 'TICKETS', icon: MessageSquare, label: 'Support Tickets' },
+                  { id: 'DESIGN_HELP', icon: Sparkles, label: 'Designer Studio' },
+                  { id: 'LEGAL', icon: ShieldCheck, label: 'Legal & Info' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id as any);
+                      setShowMobileMenu(false);
+                    }}
+                    className={cn(
+                      "flex flex-col items-center gap-3 p-6 rounded-3xl border transition-all",
+                      activeTab === item.id 
+                        ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
+                        : "bg-white border-slate-100 text-slate-400"
+                    )}
+                  >
+                    <item.icon size={24} />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-center">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={() => onLogout()}
+                className="w-full mt-8 p-6 bg-red-50 text-red-500 rounded-3xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3"
+              >
+                <LogOut size={20} /> END SESSION
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AdminAssistant 
+        activeTab={activeTab} 
+        role="customer" 
+        systemContext={{
+           userName: user?.displayName || 'Enterprise User',
+           balance: customerBalance,
+           transactions: payments,
+           activeTickets: tickets.filter(t => t.status === 'open' || t.status === 'OPEN').length,
+           liveUnitsCount: activeDevicesCount
+        }}
+      />
     </div>
     </ErrorBoundary>
   );

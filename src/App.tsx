@@ -14,7 +14,7 @@ import DevicePortal from './components/portals/DevicePortal';
 import BootAnimation from './components/common/BootAnimation';
 import BrandIntroduction from './components/common/BrandIntroduction';
 import BrandPopup from './components/common/BrandPopup';
-import ChatBot from './components/common/ChatBot';
+import AdminAssistant from './components/common/AdminAssistant';
 import { AnimatePresence, motion } from 'motion/react';
 import { LogOut, Layout, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -249,13 +249,6 @@ export default function App() {
             
             {/* Brand Popup (Mayaan) */}
             <BrandPopup />
-            
-            {/* Global Features */}
-            {(role === 'CUSTOMER' || role === 'DRIVER') && (
-              <ErrorBoundary componentName="ChatBot">
-                <ChatBot />
-              </ErrorBoundary>
-            )}
           </motion.div>
         )}
       </AnimatePresence>

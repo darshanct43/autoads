@@ -74,6 +74,32 @@ export const storageService = {
   },
 
   /**
+   * specialized helper for campaign media that handles video thumbnails
+   */
+  async uploadCampaignMedia(campaignId: string, file: File, onProgress?: (p: number) => void) {
+    const isVideo = file.type.startsWith('video/');
+    const path = `campaigns/${campaignId}/${isVideo ? 'videos' : 'posters'}/${Date.now()}_${file.name}`;
+    
+    // Upload main file
+    const url = await this.uploadFile(path, file, (p) => {
+      if (onProgress) onProgress(p.progress);
+    });
+
+    let thumbnailUrl = "";
+    if (isVideo) {
+      try {
+        const thumbnailBlob = await this.generateVideoThumbnail(file);
+        const thumbPath = `campaigns/${campaignId}/thumbnails/${Date.now()}_thumb.jpg`;
+        thumbnailUrl = await this.uploadFile(thumbPath, new File([thumbnailBlob], "thumb.jpg", { type: 'image/jpeg' }));
+      } catch (err) {
+        console.warn("Could not generate thumbnail", err);
+      }
+    }
+
+    return { url, thumbnailUrl };
+  },
+
+  /**
    * Uploads a file with progress tracking and compression
    */
   uploadFile(
