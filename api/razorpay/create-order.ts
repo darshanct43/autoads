@@ -1,31 +1,52 @@
-import { VercelRequest, VercelResponse } from '@vercel/node';
-import { getRazorpay } from '../_lib';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import Razorpay from "razorpay";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+const razorpay = new Razorpay({
+  key_id: process.env.VITE_RAZORPAY_KEY_ID || "",
+  key_secret: process.env.RAZORPAY_KEY_SECRET || "",
+});
+
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  // Allow only POST
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      success: false,
+      error: "Method not allowed",
+    });
   }
 
-  const { amount, currency, notes } = req.body;
-
   try {
-    const razorpay = getRazorpay();
-    if (!razorpay) {
-      return res.status(500).json({ error: "Razorpay credentials not configured in backend." });
+    const { amount, currency, notes } = req.body;
+
+    // Validation
+    if (!amount) {
+      return res.status(400).json({
+        success: false,
+        error: "Amount is required",
+      });
     }
 
+    // Create Razorpay order
     const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100), // convert to paise
+      amount: Number(amount) * 100,
       currency: currency || "INR",
-      notes: notes || {}
-    }).catch(err => {
-      console.error("[SERVERLESS RAZORPAY ERROR]", err);
-      throw err;
+      receipt: `rcpt_${Date.now()}`,
+      notes: notes || {},
     });
 
-    return res.status(200).json(order);
+    return res.status(200).json({
+      success: true,
+      order,
+    });
   } catch (error: any) {
-    console.error("[PAYMENT] Order Creation Failed:", error.description || error.message);
-    return res.status(500).json({ error: error.description || error.message || "Order creation failed" });
+    console.error("RAZORPAY ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error?.message || "Order creation failed",
+    });
   }
 }
