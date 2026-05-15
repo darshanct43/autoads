@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import * as admin from "firebase-admin";
-import { getAdmin } from "../_lib";
+import { getAdmin } from "../_lib/index";
 
 export default async function handler(
   req: VercelRequest,
@@ -63,7 +63,7 @@ export default async function handler(
       });
     }
 
-    const db = adminApp.db;
+    const db = admin.firestore();
 
     // Create Campaign
     const campaignRef = await db.collection("campaigns").add({
