@@ -56,14 +56,15 @@ export default async function handler(
     // Firebase Admin
     const adminApp = getAdmin();
 
-    if (!adminApp) {
-      return res.status(500).json({
-        success: false,
-        error: "Firebase Admin not initialized",
-      });
-    }
+    if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(
+      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT as string)
+    ),
+  });
+}
 
-    const db = admin.firestore();
+const db = admin.firestore();
 
     // Create Campaign
     const campaignRef = await db.collection("campaigns").add({
