@@ -193,10 +193,13 @@ export default function Auth({ onLogin }: AuthProps) {
               if (createErr.code === 'auth/email-already-in-use') {
                 throw new Error("Demo account exists but password mismatch. Please use the correct password or administrative recovery.");
               }
+              if (createErr.code === 'auth/operation-not-allowed' || createErr.code === 'auth/invalid-credential' || (createErr.message && createErr.message.toLowerCase().includes('invalid-credential'))) {
+                throw new Error(`AUTHENTICATION ERROR: The 'Email/Password' sign-in provider is disabled or restricted in your Firebase project '${firebaseConfig.projectId}'. Go to the Firebase Console > Authentication > Sign-in method, add/edit "Email/Password" and enable it.`);
+              }
               throw createErr;
             }
           } else {
-            throw new Error("Invalid credentials. Please check your account ID and password.");
+            throw new Error("Invalid credentials. If this is a new account, please sign up via the 'Register' tab first. (If this is your own project, make sure 'Email/Password' is enabled in the Firebase Console under Authentication > Sign-in method).");
           }
         } else {
           throw authErr;
@@ -405,8 +408,8 @@ export default function Auth({ onLogin }: AuthProps) {
       console.error("[Auth] Signup Error:", err);
       const errorMessage = err.message || '';
       
-      if (err.code === 'auth/operation-not-allowed') {
-        setError(`CRITICAL: The 'Email/Password' provider is disabled in Firebase for project '${firebaseConfig.projectId}'. You MUST enable it in the Firebase Console (Authentication > Sign-in method) to create accounts with a phone/ID.`);
+      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/invalid-credential' || errorMessage.toLowerCase().includes('invalid-credential')) {
+        setError(`CRITICAL: The 'Email/Password' provider is disabled or restricted in Firebase for project '${firebaseConfig.projectId}'. You MUST enable the Email/Password sign-in provider in the Firebase Console (Authentication > Sign-in method > Email/Password) to create accounts.`);
         return;
       }
 

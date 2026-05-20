@@ -98,13 +98,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   // Check if campaign is active and within scheduled time/day
   const isRunTimeCompliant = (campaign: AdCampaign) => {
     const now = new Date();
-    console.log(`[DevicePortal] Checking compliance for: ${campaign.title}, now: ${now.toLocaleTimeString()}`);
     
     // 1. Day of Week Check
     if (campaign.daysOfWeek && campaign.daysOfWeek.length > 0) {
       const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
       const today = days[now.getDay()];
-      console.log(`[DevicePortal] Day check: ${today} in [${campaign.daysOfWeek.join(', ')}]`);
       if (!campaign.daysOfWeek.includes(today)) return false;
     }
     
@@ -119,11 +117,9 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       const endTimeDate = new Date(now);
       endTimeDate.setHours(endH, endM, 0);
       
-      console.log(`[DevicePortal] Time check: ${now.toLocaleTimeString()} between ${startTimeDate.toLocaleTimeString()} and ${endTimeDate.toLocaleTimeString()}`);
       if (now < startTimeDate || now > endTimeDate) return false;
     }
     
-    console.log(`[DevicePortal] Compliance check PASSED for: ${campaign.title}`);
     return true;
   };
   const sessionUptime = Math.floor((currentTime.getTime() - startTime) / 1000);
@@ -173,19 +169,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     setLoading(true);
     // Subscribe directly to campaigns that are ACTIVE and assigned to this driver
     const unsubscribe = firebaseService.subscribeToActiveAssignedCampaigns(driver.uid, (campaigns) => {
-      console.log("CAMPAIGN FETCHED");
-      console.log("[DevicePortal] Received campaigns count:", campaigns.length);
-      console.log("[DevicePortal] Current driver UID:", driver.uid);
-      if (campaigns.length === 0) {
-        console.error("[DevicePortal] NO CAMPAIGNS RECEIVED FOR DRIVER:", driver.uid);
-      } else {
-        console.log("[DevicePortal] Campaigns received:", campaigns.map(c => `${c.title} (${c.status})`));
-        campaigns.forEach(c => {
-           console.log(`[DevicePortal] Campaign ${c.title} assignedDrivers:`, c.assignedDrivers);
-        });
-      }
-      console.log("[DevicePortal] Assigned Drivers list of first campaign:", campaigns.length > 0 ? campaigns[0].assignedDrivers : 'none');
-
       // Flatten ads from all assigned campaigns
       let allAds: any[] = [];
       const compliantCampaigns = campaigns.filter(c => isRunTimeCompliant(c));
@@ -200,7 +183,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         
         // Use the primary media link if it exists
         const mainUrl = campaign.mediaUrl || campaign.assetUrl;
-        console.log("[DevicePortal] Campaign title:", campaign.title, "mainUrl:", mainUrl);
         if (mainUrl) {
           campaignAds.push({
             id: `${campaign.id}_primary`,
@@ -240,13 +222,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       setLoading(false);
       
       if (validAds.length > 0) {
-        console.log("LIVE CAMPAIGN RENDERED");
         setStatusLogs(prev => [`HUB: manifest received (${campaigns.length} campaigns)`, `AD_SRV: ${allAds.length} assets ready`, ...prev]);
         setShowComplianceNotice(false);
         
         const isTerminalMode = localStorage.getItem('auto_ads_is_terminal') === 'true';
         if (isTerminalMode && allAds.length > 0) {
-           console.log("KIOSK MODE ACTIVE");
            // Auto-trigger video start if possible
            if (videoRef.current) {
              videoRef.current.play().catch(() => {});
@@ -736,8 +716,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       const adUrl = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || '';
       const isVideo = isVideoMedia(currentAd);
-      
-      console.log(`[Terminal] Playing ad: ${currentAd?.title} (${isVideo ? 'VIDEO' : 'IMAGE'}) - URL: ${adUrl}`);
       
       // Auto-start is handled by the video tag having 'autoPlay'
       // If it's a static image, we need a timer.

@@ -21,7 +21,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Use memoryLocalCache for Firestore to avoid persistence issues in iframes
 export const db: Firestore = initializeFirestore(app, {
   localCache: memoryLocalCache(),
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId === '(default)' ? undefined : firebaseConfig.firestoreDatabaseId);
 
 // Explicitly initialize Auth with local persistence and popup resolver

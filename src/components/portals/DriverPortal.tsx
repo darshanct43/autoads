@@ -180,7 +180,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       unsubWithdraws();
       unsubTickets();
     };
-  }, [user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!activeTicketId) {

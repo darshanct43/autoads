@@ -1537,7 +1537,7 @@ export default function AdminPortal({
             <div className="hidden lg:flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                {(liveUnitsCount || 0).toLocaleString()} Nodes Online
+                {(liveUnitsCount || 0).toLocaleString()} Screens Online
               </span>
             </div>
             <div className="w-8 h-8 md:w-9 md:h-9 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center text-slate-400">
@@ -1818,14 +1818,14 @@ export default function AdminPortal({
                         <div className="flex items-center gap-2">
                            <span className="w-2 h-2 bg-slate-800 rounded-full"></span>
                            <span className="text-[11px] font-black uppercase opacity-40">
-                             Awaiting New Node Sync...
+                             Awaiting Active Screens...
                            </span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 bg-slate-950 rounded-full animate-ping"></span>
                           <span className="text-[11px] font-black uppercase">
-                            Processing Live Nodes...
+                            Updating Active Screens...
                           </span>
                         </div>
                       )}
@@ -1855,14 +1855,6 @@ export default function AdminPortal({
                     >
                       {isExtracting ? <RefreshCw size={14} className="animate-spin text-amber-500" /> : <Download size={14} className="text-amber-500" />}
                       {isExtracting ? "Extracting..." : "Extract Matrix"}
-                    </button>
-                    <button
-                      onClick={handleSystemTest}
-                      disabled={isSubmitting}
-                      className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-3 rounded-xl border border-amber-500 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50"
-                    >
-                      {isSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                      {isSubmitting ? "Running Test..." : "Sync Demo Campaign"}
                     </button>
                     {(activeTab === "CAMPAIGNS" || activeTab === "REVIEWS") && (
                       <div className="hidden sm:flex items-center gap-4">
@@ -2039,7 +2031,7 @@ export default function AdminPortal({
                     {/* Media Edit Section */}
                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Asset Sync (AWS/CDN)</h4>
+                        <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Media Content & Type</h4>
                         {!isEditingMedia ? (
                           <button 
                             onClick={() => {
@@ -2049,7 +2041,7 @@ export default function AdminPortal({
                             }}
                             className="text-[8px] font-black text-amber-600 uppercase hover:underline"
                           >
-                            Update AWS Link
+                            Edit Media link
                           </button>
                         ) : (
                           <button 

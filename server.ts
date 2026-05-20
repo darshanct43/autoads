@@ -75,7 +75,38 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
-  app.use(cors());
+  
+  app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization"
+    ]
+  }));
+
+  app.options("*all", cors({
+    origin: true,
+    credentials: true,
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization"
+    ]
+  }));
 
   // Firebase Admin Init
   let adminApp;
@@ -237,6 +268,12 @@ async function startServer() {
   app.post("/api/razorpay/create-order", async (req, res) => {
     console.log("[SERVER] Order Creation Request Received");
     const { amount, currency, notes } = req.body;
+    
+    // STEP 1 — CREATE ORDER: Log campaignId & notes payload
+    console.log("[STEP 1 — CREATE ORDER]");
+    console.log("  - campaignId:", notes?.campaignId || "none");
+    console.log("  - Razorpay notes payload:", JSON.stringify(notes || {}));
+
     try {
       const razorpay = getRazorpay();
       if (!razorpay) {
@@ -254,6 +291,11 @@ async function startServer() {
         throw err;
       });
       console.log("[SERVER] Order Created Successfully:", order.id);
+
+      // STEP 1 — CREATE ORDER: Log orderId
+      console.log("[STEP 1 — CREATE ORDER SUCCESS]");
+      console.log("  - orderId:", order.id);
+
       res.json({ ...order, key_id: process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID });
     } catch (error: any) {
       console.error("[SERVER] create-order endpoint failed:", error);
@@ -263,10 +305,25 @@ async function startServer() {
 
   app.post("/api/razorpay/verify-payment", async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
+    
+    // STEP 2 — PAYMENT SUCCESS: Log key receipt parameters on server entry
+    console.log("[STEP 2 — PAYMENT SUCCESS]");
+    console.log("  - razorpay_payment_id:", razorpay_payment_id);
+    console.log("  - razorpay_order_id:", razorpay_order_id);
+    console.log("  - razorpay_signature:", razorpay_signature);
+
+    // STEP 3 — VERIFY ENDPOINT: Log request parameters and initialization
+    console.log("[STEP 3 — VERIFY ENDPOINT]");
+    console.log("  - Request received. Path: /api/razorpay/verify-payment");
+    const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
+    console.log("  - Extracted campaignId:", finalCampaignId);
+    console.log("  - Extracted orderId:", razorpay_order_id);
+    console.log("  - Extracted paymentId:", razorpay_payment_id);
+
     const secret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.VITE_RAZORPAY_KEY_SECRET;
     
     if (!secret) {
-      console.error("[SERVER] Razorpay Secret missing");
+      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Razorpay Secret missing");
       return res.status(500).json({ success: false, status: "FAILED", error: "Razorpay Secret missing" });
     }
 
@@ -275,7 +332,11 @@ async function startServer() {
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (generated_signature !== razorpay_signature) {
+    const isVerified = generated_signature === razorpay_signature;
+    console.log("  - Signature verification result:", isVerified ? "SUCCESS" : "FAILED");
+
+    if (!isVerified) {
+      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Invalid signature verification.");
       return res.status(400).json({ success: false, status: "FAILED", error: "Invalid payment signature" });
     }
 
@@ -301,35 +362,47 @@ async function startServer() {
       console.log("[SERVER] Signature verified successfully. Saving to Firestore...");
       
       const paymentsRef = dbAdm.collection('payments');
+      const paymentsPath = "payments";
+      console.log("  - Firestore path targeted (payments):", paymentsPath);
+
       const paymentRecord = {
         transactionId: razorpay_payment_id,
         orderId: razorpay_order_id,
-        amount: planData.amount,
+        amount: planData?.amount || 0,
         status: 'SUCCESS',
         paymentMethod: 'razorpay',
         createdAt: FieldValue.serverTimestamp(),
         verifiedAt: FieldValue.serverTimestamp(),
         customerId: uid || 'UNKNOWN',
-        campaignId: campaignData?.title || 'PENDING',
+        campaignId: finalCampaignId || campaignData?.title || 'PENDING',
         isWebhookTriggered: false
       };
       
       console.log("[SERVER] Payment record to save:", JSON.stringify(paymentRecord));
-      await paymentsRef.add(paymentRecord);
-      console.log("[SERVER] Payment record saved to Firestore successfully.");
+      const payDocRef = await paymentsRef.add(paymentRecord);
+      console.log("  - Firestore write result (payments): Document stored successfully with generated ID:", payDocRef.id);
 
-      if (campaignData) {
-          console.log("[SERVER] Activating campaign:", campaignData.title);
+      if (finalCampaignId) {
+          const docPath = `campaigns/${finalCampaignId}`;
+          console.log("  - Firestore path targeted (campaigns):", docPath);
+          await dbAdm.collection('campaigns').doc(finalCampaignId).set({
+            status: 'ACTIVE',         // STEP 7: MUST be ACTIVE
+            paymentStatus: 'PAID',
+            paymentReceived: true,    // STEP 7: paymentReceived=true
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+          console.log("  - Firestore write result (campaigns merge): Successfully updated exact campaign as ACTIVE, paymentReceived = true under path:", docPath);
+      } else if (campaignData) {
           const campaignDataToSave = {
             ...campaignData,
-            status: 'PAID',
+            status: 'ACTIVE',         // STEP 7: MUST be ACTIVE
             paymentStatus: 'PAID',
-            paymentReceived: true,
+            paymentReceived: true,    // STEP 7: paymentReceived=true
             updatedAt: FieldValue.serverTimestamp()
           };
-          console.log("[SERVER] Saving campaign data:", JSON.stringify(campaignDataToSave));
-          await dbAdm.collection('campaigns').add(campaignDataToSave);
-          console.log("[SERVER] Campaign activated successfully.");
+          console.log("  - Firestore path targeted (campaigns new add): campaigns (collection)");
+          const campDocRef = await dbAdm.collection('campaigns').add(campaignDataToSave);
+          console.log("  - Firestore write result (campaigns new add): Document added successfully with generated ID:", campDocRef.id);
       }
 
       console.log("[SERVER] Generating success response...");
@@ -346,7 +419,7 @@ async function startServer() {
       console.log("[SERVER] Sending success response:", JSON.stringify(responseBody));
       return res.status(200).json(responseBody);
     } catch (error: any) {
-      console.error("[SERVER] Verification Runtime Error:", error);
+      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Exceptions/Errors details:", error);
       return res.status(500).json({ 
         success: false, 
         status: "FAILED", 
@@ -358,6 +431,10 @@ async function startServer() {
 
   // Razorpay Webhook Handler
   app.post("/api/razorpay/webhook", express.json(), async (req, res) => {
+    // STEP 4 — WEBHOOK: Log raw payload receipt
+    console.log("[STEP 4 — WEBHOOK]");
+    console.log("  - raw webhook payload:", JSON.stringify(req.body));
+
     try {
       const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
       if (!secret) return res.status(500).json({ error: "Webhook secret not configured" });
@@ -376,10 +453,24 @@ async function startServer() {
       }
 
       console.log("[WEBHOOK] Valid Signature Received");
-      console.log("[WEBHOOK] Request body:", JSON.stringify(req.body));
+      
       const event = req.body.event;
+      // STEP 4 — WEBHOOK: Log event type
+      console.log("  - event type:", event);
+
       const paymentEntity = req.body.payload?.payment?.entity;
-      console.log("[WEBHOOK] Processing event:", event, "Payment ID:", paymentEntity?.id);
+      const notes = paymentEntity?.notes || req.body.payload?.payment?.entity?.notes || req.body.payload?.order?.entity?.notes || {};
+      
+      // STEP 4 — WEBHOOK: Log payment entity notes
+      console.log("  - payment entity notes:", JSON.stringify(notes));
+
+      const campaignIdFromNotes = notes.campaignId || notes.campaign_id;
+      // STEP 4 — WEBHOOK: Log campaignId from notes
+      console.log("  - campaignId from notes:", campaignIdFromNotes || "none");
+
+      const orderIdFromPayload = paymentEntity?.order_id || req.body.payload?.order?.entity?.id;
+      // STEP 4 — WEBHOOK: Log orderId from payload
+      console.log("  - orderId from payload:", orderIdFromPayload);
 
       if (!paymentEntity) {
         console.error("[WEBHOOK] No payment payload found.");
@@ -415,15 +506,16 @@ async function startServer() {
            await paymentsRef.add(newRecord);
            console.log("[WEBHOOK] New payment record saved successfully.");
            
-           if (paymentEntity.notes?.campaignId) {
-              console.log("[WEBHOOK] Updating campaign status for:", paymentEntity.notes.campaignId);
-              await dbAdm.collection('campaigns').doc(paymentEntity.notes.campaignId).update({
-                status: 'PAID',
+           if (campaignIdFromNotes) {
+              const targetPath = `campaigns/${campaignIdFromNotes}`;
+              console.log("  - Firestore document path targeted by Webhook (late payment capture):", targetPath);
+              await dbAdm.collection('campaigns').doc(campaignIdFromNotes).update({
+                status: 'ACTIVE',         // STEP 7: MUST be ACTIVE
                 paymentStatus: 'PAID',
-                paymentReceived: true,
+                paymentReceived: true,    // STEP 7: paymentReceived=true
                 updatedAt: FieldValue.serverTimestamp()
               });
-              console.log("[WEBHOOK] Campaign status updated to PAID.");
+              console.log("  - update result: Successfully updated campaign with status=ACTIVE, paymentReceived=true on path:", targetPath);
            }
         } else {
            console.log("[WEBHOOK] Payment record already exists. Payment already verified. Updating record if needed.");
@@ -436,6 +528,19 @@ async function startServer() {
                });
                console.log("[WEBHOOK] Existing record updated successfully.");
            });
+
+           // STEP 6 — Webhook fallback to activate campaign anyway (even if verify-payment fails or was stale)
+           if (campaignIdFromNotes) {
+              const targetPath = `campaigns/${campaignIdFromNotes}`;
+              console.log("  - [FALLBACK GUARD] Firestore document path targeted by Webhook:", targetPath);
+              await dbAdm.collection('campaigns').doc(campaignIdFromNotes).update({
+                status: 'ACTIVE',         // STEP 7: Status must be ACTIVE
+                paymentStatus: 'PAID',
+                paymentReceived: true,    // STEP 7: paymentReceived=true
+                updatedAt: FieldValue.serverTimestamp()
+              });
+              console.log("  - [FALLBACK GUARD] update result: Campaign status updated to ACTIVE, paymentReceived = true under path:", targetPath);
+           }
         }
       } else if (event === 'payment.failed') {
          console.log(`[WEBHOOK] Payment Failed for ${paymentEntity.id}`);
@@ -599,6 +704,33 @@ async function startServer() {
     }
   });
 
+  // Emergency manual activation route
+  app.post("/debug/activate-campaign", async (req, res) => {
+    console.log("[SERVER] [EMERGENCY DEBUG ENDPOINT] Manual activation request received");
+    const { campaignId } = req.body;
+    console.log("  - campaignId targeted:", campaignId);
+    try {
+      if (!campaignId) {
+        return res.status(400).json({ error: "Missing campaignId" });
+      }
+      
+      const targetPath = `campaigns/${campaignId}`;
+      console.log("  - Firestore path targeted for manual activation:", targetPath);
+      
+      await dbAdm.collection('campaigns').doc(campaignId).set({
+        status: 'ACTIVE',
+        paymentReceived: true,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      
+      console.log("  - Firestore write result: SUCCESS manually activated campaign:", campaignId);
+      return res.status(200).json({ success: true, message: "activated" });
+    } catch (error: any) {
+      console.error("  - Firestore write error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
   // 404 for API
   app.all("/api/*all", (req, res) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
@@ -621,6 +753,15 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log("[MANDATORY CHECK STAGE 1] Registered backend startup payment routes:");
+    console.log("  - POST /api/razorpay/create-order");
+    console.log("  - POST /api/razorpay/verify-payment");
+    console.log("  - POST /api/razorpay/webhook");
+    console.log("  - POST /debug/activate-campaign (Emergency Manual Activation)");
+    
+    console.log("[MANDATORY CHECK STAGE 7/8] Backend Firebase Project Settings:");
+    console.log("  - Project ID from config/env:", firebaseProjectId);
+    console.log("  - Firestore Database ID in use:", firebaseDatabaseId);
   });
 }
 
