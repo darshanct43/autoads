@@ -201,6 +201,14 @@ async function startServer() {
   };
 
   // API Routes
+  app.get("/health", (req, res) => {
+    res.json({
+      success: true,
+      server: "running",
+      time: new Date().toISOString()
+    });
+  });
+
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
