@@ -61,13 +61,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model: "gemini-3.5-flash", 
       config: {
         systemInstruction: systemInstruction 
-      }
+      },
+      history: (history || []).map((h: any) => ({
+        role: h.role,
+        parts: [{ text: h.content || (h.parts && h.parts[0]?.text) || h.message || "" }]
+      })),
     });
 
-    const result = await chat.sendMessage({
-      message: message
-    });
-    
+    const result = await chat.sendMessage({ message: message });
     const text = result.text;
     
     res.status(200).json({ text });

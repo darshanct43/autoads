@@ -10,19 +10,33 @@ import {
 } from 'firebase/auth';
 import { initializeFirestore, memoryLocalCache, doc, getDocFromServer, Firestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
-import firebaseConfig from '../../firebase-applet-config.json';
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
+};
 
-// Log the Project ID on initialization to confirm correct connection
-console.log("[Firebase] Initializing with Project ID:", firebaseConfig.projectId);
+console.log("Firebase ENV Check:", firebaseConfig);
+
+Object.entries(firebaseConfig).forEach(([key, value]) => {
+  if (!value) {
+    console.error("Missing Firebase ENV:", key);
+  }
+});
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 (window as any)._firebaseApp = app;
+
+const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || '(default)');
 
 // Use memoryLocalCache for Firestore to avoid persistence issues in iframes
 export const db: Firestore = initializeFirestore(app, {
   localCache: memoryLocalCache(),
   experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId === '(default)' ? undefined : firebaseConfig.firestoreDatabaseId);
+}, firestoreDbId === '(default)' ? undefined : firestoreDbId);
 
 // Explicitly initialize Auth with local persistence and popup resolver
 // This helps resolve "Pending promise was never set" assertion errors in v11 SDK

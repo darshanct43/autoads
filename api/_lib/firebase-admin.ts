@@ -1,36 +1,54 @@
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 
-if (!admin.apps.length) {
+function getAdminApp() {
+  if (admin.apps.length > 0) return admin.apps[0];
+
   try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
+    const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (sa && sa.startsWith('{')) {
+      const serviceAccount = JSON.parse(sa);
+      return admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
       });
-    } else if (process.env.FIREBASE_PROJECT_ID) {
-      admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID
-      });
     } else {
-      console.warn("Firebase Admin initialized without explicit credentials. Ensure you're in a supported environment.");
-      admin.initializeApp();
+      const projectId = sa || process.env.FIREBASE_PROJECT_ID;
+      if (projectId) {
+        return admin.initializeApp({
+          projectId: projectId
+        });
+      } else {
+        return admin.initializeApp();
+      }
     }
   } catch (error) {
-    console.error('Firebase admin initialization error', error);
+    console.warn("Firebase Admin fallback initialization");
+    try {
+      return admin.initializeApp();
+    } catch (finalError) {
+      console.error("Firebase Admin initialization failed completely", finalError);
+      throw finalError;
+    }
   }
 }
 
-const getDb = () => {
-  try {
+export const dbAdm = {
+  collection: (name: string) => {
+    const app = getAdminApp();
     const dbId = process.env.FIRESTORE_DATABASE_ID || '(default)';
-    // Correct way to get a named database in firebase-admin
-    return getFirestore(admin.apps[0], dbId);
-  } catch (e) {
-    return admin.firestore();
+    return getFirestore(app, dbId).collection(name);
+  },
+  doc: (path: string) => {
+    const app = getAdminApp();
+    const dbId = process.env.FIRESTORE_DATABASE_ID || '(default)';
+    return getFirestore(app, dbId).doc(path);
   }
-};
-export const dbAdm = getDb();
-export const authAdm = admin.auth();
+} as any;
+
+export const authAdm = {
+  getUser: (uid: string) => getAdminApp().auth().getUser(uid),
+  verifyIdToken: (token: string) => getAdminApp().auth().verifyIdToken(token)
+} as any;
+
 export { admin };
