@@ -72,8 +72,6 @@ try {
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  app.use(express.json());
   
   app.use(cors({
     origin: true,
@@ -91,21 +89,7 @@ async function startServer() {
     ]
   }));
 
-  app.options("*all", cors({
-    origin: true,
-    credentials: true,
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "DELETE",
-      "OPTIONS"
-    ],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization"
-    ]
-  }));
+  app.use(express.json());
 
   // Firebase Admin Init
   let adminApp;
@@ -272,171 +256,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/razorpay/create-order", async (req, res) => {
-    console.log("[SERVER] Received POST /api/razorpay/create-order");
-    console.log("[SERVER] Order Creation Request Received");
-    const { amount, currency, notes } = req.body;
-    
-    // STEP 1 — CREATE ORDER: Log campaignId & notes payload
-    console.log("[STEP 1 — CREATE ORDER]");
-    console.log("  - campaignId:", notes?.campaignId || "none");
-    console.log("  - Razorpay notes payload:", JSON.stringify(notes || {}));
 
-    try {
-      const razorpay = getRazorpay();
-      if (!razorpay) {
-        console.error("[SERVER] Razorpay credentials missing");
-        return res.status(500).json({ error: "Razorpay credentials missing" });
-      }
-
-      console.log("[SERVER] Creating Order for amount:", amount);
-      const order = await razorpay.orders.create({
-        amount: Math.round(amount * 100),
-        currency: currency || "INR",
-        notes: notes || {}
-      }).catch(err => {
-        console.error("[RAZORPAY_SDK_ERROR]", err);
-        throw err;
-      });
-      console.log("[SERVER] Order Created Successfully:", order.id);
-
-      // STEP 1 — CREATE ORDER: Log orderId
-      console.log("[STEP 1 — CREATE ORDER SUCCESS]");
-      console.log("  - orderId:", order.id);
-
-      res.json({ ...order, key_id: process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID });
-    } catch (error: any) {
-      console.error("[SERVER] create-order endpoint failed:", error);
-      res.status(500).json({ error: error.description || error.message || "Failed to create order" });
-    }
-  });
-
-  app.post("/api/razorpay/verify-payment", async (req, res) => {
-    console.log("[SERVER] Received POST /api/razorpay/verify-payment");
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
-    
-    // STEP 2 — PAYMENT SUCCESS: Log key receipt parameters on server entry
-    console.log("[STEP 2 — PAYMENT SUCCESS]");
-    console.log("  - razorpay_payment_id:", razorpay_payment_id);
-    console.log("  - razorpay_order_id:", razorpay_order_id);
-    console.log("  - razorpay_signature:", razorpay_signature);
-
-    // STEP 3 — VERIFY ENDPOINT: Log request parameters and initialization
-    console.log("[STEP 3 — VERIFY ENDPOINT]");
-    console.log("  - Request received. Path: /api/razorpay/verify-payment");
-    const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
-    console.log("  - Extracted campaignId:", finalCampaignId);
-    console.log("  - Extracted orderId:", razorpay_order_id);
-    console.log("  - Extracted paymentId:", razorpay_payment_id);
-
-    const secret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.VITE_RAZORPAY_KEY_SECRET;
-    
-    if (!secret) {
-      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Razorpay Secret missing");
-      return res.status(500).json({ success: false, status: "FAILED", error: "Razorpay Secret missing" });
-    }
-
-    const generated_signature = crypto
-      .createHmac("sha256", secret)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-
-    const isVerified = generated_signature === razorpay_signature;
-    console.log("  - Signature verification result:", isVerified ? "SUCCESS" : "FAILED");
-
-    if (!isVerified) {
-      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Invalid signature verification.");
-      return res.status(400).json({ success: false, status: "FAILED", error: "Invalid payment signature" });
-    }
-
-    try {
-      console.log("[SERVER] Verifying payment for:", razorpay_payment_id);
-      console.log("[SERVER] Payload Check:", { razorpay_order_id, razorpay_payment_id, hasSignature: !!razorpay_signature });
-      console.log("[SERVER] Request body:", JSON.stringify(req.body));
-      
-      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-        console.error("[SERVER] Verification failed: Missing parameters. Params:", { razorpay_order_id, razorpay_payment_id, razorpay_signature });
-        return res.status(400).json({ 
-          success: false, 
-          status: "FAILED", 
-          error: "Missing required verification parameters (id/signature)",
-          message: "Could not verify payment due to missing data"
-        });
-      }
-
-      console.log("[SERVER] Generated signature:", generated_signature);
-      console.log("[SERVER] Received signature:", razorpay_signature);
-      
-      // Return success JSON immediately to the frontend to unblock the UI
-      console.log("[SERVER] Signature verified successfully. Saving to Firestore...");
-      
-      const paymentsRef = dbAdm.collection('payments');
-      const paymentsPath = "payments";
-      console.log("  - Firestore path targeted (payments):", paymentsPath);
-
-      const paymentRecord = {
-        transactionId: razorpay_payment_id,
-        orderId: razorpay_order_id,
-        amount: planData?.amount || 0,
-        status: 'SUCCESS',
-        paymentMethod: 'razorpay',
-        createdAt: FieldValue.serverTimestamp(),
-        verifiedAt: FieldValue.serverTimestamp(),
-        customerId: uid || 'UNKNOWN',
-        campaignId: finalCampaignId || campaignData?.title || 'PENDING',
-        isWebhookTriggered: false
-      };
-      
-      console.log("[SERVER] Payment record to save:", JSON.stringify(paymentRecord));
-      const payDocRef = await paymentsRef.add(paymentRecord);
-      console.log("  - Firestore write result (payments): Document stored successfully with generated ID:", payDocRef.id);
-
-      if (finalCampaignId) {
-          const docPath = `campaigns/${finalCampaignId}`;
-          console.log("  - Firestore path targeted (campaigns):", docPath);
-          await dbAdm.collection('campaigns').doc(finalCampaignId).set({
-            status: 'ACTIVE',         // STEP 7: MUST be ACTIVE
-            paymentStatus: 'PAID',
-            paymentReceived: true,    // STEP 7: paymentReceived=true
-            updatedAt: FieldValue.serverTimestamp()
-          }, { merge: true });
-          console.log("  - Firestore write result (campaigns merge): Successfully updated exact campaign as ACTIVE, paymentReceived = true under path:", docPath);
-      } else if (campaignData) {
-          const campaignDataToSave = {
-            ...campaignData,
-            status: 'ACTIVE',         // STEP 7: MUST be ACTIVE
-            paymentStatus: 'PAID',
-            paymentReceived: true,    // STEP 7: paymentReceived=true
-            updatedAt: FieldValue.serverTimestamp()
-          };
-          console.log("  - Firestore path targeted (campaigns new add): campaigns (collection)");
-          const campDocRef = await dbAdm.collection('campaigns').add(campaignDataToSave);
-          console.log("  - Firestore write result (campaigns new add): Document added successfully with generated ID:", campDocRef.id);
-      }
-
-      console.log("[SERVER] Generating success response...");
-      
-      const responseBody = { 
-        success: true, 
-        status: "SUCCESS", 
-        paymentId: razorpay_payment_id, 
-        orderId: razorpay_order_id,
-        message: "Payment signature verified and record saved",
-        serverTime: new Date().toISOString()
-      };
-      
-      console.log("[SERVER] Sending success response:", JSON.stringify(responseBody));
-      return res.status(200).json(responseBody);
-    } catch (error: any) {
-      console.error("[SERVER] [STEP 3 — VERIFY ENDPOINT ERROR] Exceptions/Errors details:", error);
-      return res.status(500).json({ 
-        success: false, 
-        status: "FAILED", 
-        error: error.message || "Internal server error during verification",
-        message: "Server encountered an error during verification"
-      });
-    }
-  });
 
   // Razorpay Webhook Handler
   app.post("/api/razorpay/webhook", express.json(), async (req, res) => {
@@ -776,9 +596,6 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log("[MANDATORY CHECK STAGE 1] Registered backend startup payment routes:");
-    console.log("  - POST /api/razorpay/create-order");
-    console.log("  - POST /api/razorpay/verify-payment");
-    console.log("  - POST /api/razorpay/webhook");
     console.log("  - POST /debug/activate-campaign (Emergency Manual Activation)");
     
     console.log("[MANDATORY CHECK STAGE 7/8] Backend Firebase Project Settings:");
