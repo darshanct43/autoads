@@ -1,7 +1,5 @@
 # Build and Environment
 node_modules/
-dist/
-build/
 .env
 .env.local
 .env.*.local
@@ -40,5 +38,3 @@ yarn-error.log*
 *.rar
 tmp/
 temp/
-.vercel
-.env*.local

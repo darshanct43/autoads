@@ -32,7 +32,8 @@ export default function App() {
     // Initial check for device simulator session
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.has('terminalId') || localStorage.getItem('auto_ads_terminal_id')) {
+      // Only default to DEVICE if explicitly in terminal mode
+      if (params.has('terminalId') || localStorage.getItem('auto_ads_is_terminal') === 'true') {
         return 'DEVICE';
       }
     }
@@ -41,7 +42,8 @@ export default function App() {
   const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.has('terminalId') || localStorage.getItem('auto_ads_terminal_id')) {
+      // If we have a terminal session, skip the intros and go straight to Portal
+      if (params.has('terminalId') || localStorage.getItem('auto_ads_is_terminal') === 'true') {
         return 'PORTAL';
       }
     }
@@ -51,6 +53,21 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isOfflineVerified, setIsOfflineVerified] = useState(false);
+
+  const handleBootComplete = () => {
+    setSystemState(prev => {
+      if (prev === 'BOOT') return 'INTRO';
+      return prev;
+    });
+  };
+
+  const handleIntroComplete = () => {
+    setSystemState(prev => {
+      // If onAuthStateChanged already set us to PORTAL, don't revert to AUTH
+      if (prev === 'INTRO') return 'AUTH';
+      return prev;
+    });
+  };
 
   const checkOfflineVerification = async () => {
     const sessionUid = auth.currentUser?.uid || localStorage.getItem('auto_ads_terminal_id');
@@ -116,8 +133,8 @@ export default function App() {
       
       await checkOfflineVerification();
       
-      // Do not overwrite role if we are in Device Simulator mode
-      if (localStorage.getItem('auto_ads_terminal_id')) {
+      // Only force DEVICE mode if explicitly in terminal mode via toggle
+      if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
         setRole('DEVICE');
         setSystemState('PORTAL');
         setAuthReady(true);
@@ -136,28 +153,26 @@ export default function App() {
           let userRole: UserRole = 'CUSTOMER';
           
           // Role Priority Resolution (Trust Firestore Profile First)
-          if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
+          if (profile?.role === 'ADMIN' || emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
             userRole = 'ADMIN';
-          } else if (emailLower === 'vijayathrishu@gmail.com') {
+          } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
             userRole = 'SUPPORT';
-          } else if (profile?.role === 'ADMIN') {
-            userRole = 'ADMIN';
-          } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF') {
-            userRole = 'SUPPORT';
-          } else if (profile?.role === 'DRIVER') {
-            userRole = 'DRIVER';
-          } else if (emailLower.includes('support') || emailLower.includes('staff')) {
-            userRole = 'SUPPORT';
-          } else if (emailLower.includes('driver') || driverProfile) {
-            userRole = 'DRIVER';
+          } else if (emailLower === '8861574729@autoads.in' || profile?.role === 'DRIVER' || driverProfile || emailLower.includes('driver')) {
+            userRole = 'DRIVER'; 
           } else if (profile?.role) {
             userRole = profile.role as UserRole;
+          }
+          
+          // Final check for terminal switch
+          if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
+            userRole = 'DEVICE';
           }
           
           console.log("[App] Final Resolved Role:", userRole, "from profile:", profile?.role);
           
           // If driver profile is missing critical details, redirect to profile setup in Auth
-          if (userRole === 'DRIVER' && !driverProfile) {
+          // DEMO BYPASS: Never force profile setup for the demo user
+          if (userRole === 'DRIVER' && !driverProfile && emailLower !== '8861574729@autoads.in') {
             console.log("[App] Driver record missing, redirecting to Auth setup");
             setRole(userRole);
             setSystemState('AUTH');
@@ -166,9 +181,17 @@ export default function App() {
             setSystemState('PORTAL');
           }
         } catch (e) {
-          console.warn("[App] Session recovery silent failure:", e);
-          if (emailLower === 'admin@autoads.in') {
+          console.warn("[App] Session recovery failure details:", e);
+          const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com';
+          const isStaffEmail = emailLower === 'vijayathrishu@gmail.com';
+          
+          if (isAdminEmail) {
+            console.log("[App] Rescuing admin session via email fallback");
             setRole('ADMIN');
+            setSystemState('PORTAL');
+          } else if (isStaffEmail) {
+            console.log("[App] Rescuing staff session via email fallback");
+            setRole('SUPPORT');
             setSystemState('PORTAL');
           }
         }
@@ -198,6 +221,8 @@ export default function App() {
   const handleLogout = async () => {
     try {
       localStorage.removeItem('auto_ads_terminal_id');
+      localStorage.removeItem('auto_ads_is_terminal');
+      localStorage.removeItem('auto_ads_access_key');
       await signOut(auth);
       setRole(null);
       setSystemState('AUTH');
@@ -213,11 +238,11 @@ export default function App() {
     <div className="min-h-screen font-sans selection:bg-amber-500/30 overflow-x-hidden">
       <AnimatePresence mode="wait">
         {systemState === 'BOOT' && (
-          <BootAnimation onComplete={() => setSystemState('INTRO')} />
+          <BootAnimation onComplete={handleBootComplete} />
         )}
 
         {systemState === 'INTRO' && (
-          <BrandIntroduction onComplete={() => setSystemState('AUTH')} />
+          <BrandIntroduction onComplete={handleIntroComplete} />
         )}
 
         {systemState === 'AUTH' && (

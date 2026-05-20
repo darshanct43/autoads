@@ -1,5 +1,6 @@
 {
   "name": "Auto Ads Driver & Fleet",
   "description": "Real-time driver earnings dashboard, fleet tracking, and automated ad campaign assignment system with simplified driver tasks and live location updates.",
-  "requestFramePermissions": ["geolocation", "camera"]
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

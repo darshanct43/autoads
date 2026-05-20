@@ -5,6 +5,7 @@ import { Camera, CheckCircle2, AlertCircle, ShieldCheck, XCircle, RefreshCw, Clo
 import { cn } from '@/lib/utils';
 import { offlineStorageService, DocMeta } from '@/services/offlineStorageService';
 import { compressImage } from '@/lib/utils';
+import { firebaseService } from '@/services/firebaseService';
 
 interface StrictVerificationSystemProps {
   uid: string;
@@ -17,7 +18,7 @@ const REQUIRED_DOCS = [
   { id: 'dl', label: 'Driving License (DL)', fileName: 'dl.jpg' },
   { id: 'aadhar', label: 'Aadhar Card', fileName: 'aadhar.jpg' },
   { id: 'pan', label: 'PAN Card', fileName: 'pan.jpg' },
-  { id: 'insurance', label: 'Insurance Copy', fileName: 'insurance.jpg' },
+  { id: 'insurance', label: 'Vehicle Insurance', fileName: 'insurance.jpg' },
   { id: 'selfie', label: 'Driver Selfie', fileName: 'selfie.jpg' },
 ] as const;
 
@@ -116,19 +117,33 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
         }
       };
 
+      // Implementation of timeout for getUserMedia to handle "Timeout starting video source" error
+      const getUserMediaWithTimeout = (c: any, timeoutMs: number) => {
+        return Promise.race([
+          navigator.mediaDevices.getUserMedia(c),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout starting video source')), timeoutMs)
+          )
+        ]);
+      };
+
       try {
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (firstErr) {
-        console.warn("First camera attempt failed, trying fallback:", firstErr);
+        mediaStream = await getUserMediaWithTimeout(constraints, 8000);
+      } catch (firstErr: any) {
+        console.warn("First camera attempt failed or timed out, trying fallback:", firstErr);
         // Fallback to basic video without complex constraints
-        mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        mediaStream = await getUserMediaWithTimeout({ video: true }, 5000);
       }
 
       setStream(mediaStream);
       setActiveStep(step);
-    } catch (err) {
-      setError("Camera access denied. Please enable camera in settings.");
-      console.error(err);
+    } catch (err: any) {
+      if (err.message === 'Timeout starting video source') {
+        setError("Camera initialization timed out. Please check permissions or hardware.");
+      } else {
+        setError("Camera access denied. Please enable camera in settings.");
+      }
+      console.error("[StrictVerification] Camera Failure:", err);
     }
   };
 
@@ -143,45 +158,126 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
   const capturePhoto = async () => {
     if (!videoRef.current || !activeStep) return;
     
+    // Ensure video is ready
+    if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      setError("Camera not ready. Please wait a moment.");
+      return;
+    }
+    
     setIsCapturing(true);
     try {
       const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      const video = videoRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
-      ctx.drawImage(videoRef.current, 0, 0);
+      // Handle mirroring for selfie
+      if (activeStep === 'selfie') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      }
+      
+      ctx.drawImage(video, 0, 0);
       
       // Convert to blob
-      const blob = await new Promise<Blob>((resolve) => {
-        canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.9);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error("Canvas toBlob failed"));
+        }, 'image/jpeg', 0.85); // High quality capture
       });
       
-      // Resize and compress as per specs (1024px, 50-60%)
-      // We'll use a file wrapper to pass to compressImage
-      const file = new File([blob], `${activeStep}.jpg`, { type: 'image/jpeg' });
-      const compressed = await compressImage(file, 1024, 0.55);
+      await handleProcessFile(blob);
+      showToast(`${activeStep.toUpperCase()} captured and secured`, 'success');
+    } catch (err) {
+      setError("Document capture failed. Ensure camera permissions and try again.");
+      console.error("[StrictVerification] Capture Error:", err);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, forcedStep?: DocId) => {
+    const file = e.target.files?.[0];
+    const stepToUse = forcedStep || activeStep;
+    if (!file || !stepToUse) return;
+    
+    setIsCapturing(true);
+    try {
+      await handleProcessFile(file, stepToUse);
+      showToast(`${stepToUse.toUpperCase()} uploaded successfully`, 'success');
+    } catch (err) {
+      setError("File transmission failed. Check your network.");
+      console.error("[StrictVerification] Upload Error:", err);
+    } finally {
+      setIsCapturing(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleProcessFile = async (data: File | Blob, stepOverride?: DocId) => {
+    const stepToUse = stepOverride || activeStep;
+    if (!stepToUse) return;
+
+    try {
+      // 1. Optimized Compression for Professional Payload Standards
+      const compressed = await compressImage(data, 1200, 0.65);
       
-      // Save to offline storage
-      await offlineStorageService.saveDocument(uid, activeStep, compressed as Blob);
+      // 2. Encryption & Local Persistence (Offline-First Pipeline)
+      await offlineStorageService.saveDocument(uid, stepToUse, compressed as Blob);
       
-      // Update meta
-      const newMeta = await offlineStorageService.updateMeta(uid, { [activeStep]: 'uploaded' });
+      // 3. Cloud Integration Tunnel (Async sync)
+      // Map internal keys to backend API standard keys
+      const typeMap: Record<string, 'RC' | 'DL' | 'AADHAR' | 'PAN' | 'PROFILE' | 'INSURANCE'> = {
+        rc: 'RC',
+        dl: 'DL',
+        aadhar: 'AADHAR',
+        pan: 'PAN',
+        insurance: 'INSURANCE',
+        selfie: 'PROFILE'
+      };
+
+      const apiType = typeMap[stepToUse];
+      
+      // Attempt immediate sync but don't block main UI flow if network jitter exists
+      firebaseService.uploadDriverDocument(uid, apiType, compressed as Blob)
+        .then(url => {
+          console.log(`[StrictVerification] Real-time cloud sync active for ${stepToUse}: ${url}`);
+        })
+        .catch(cloudErr => {
+          console.warn("[StrictVerification] Cloud sync deferred. Unit in local-only mode.", cloudErr);
+          showToast("Sync deferred (Offline). Background daemon active.", 'info');
+        });
+      
+      // 4. Update Protocol Meta
+      const newMeta = await offlineStorageService.updateMeta(uid, { [stepToUse]: 'uploaded' });
       setMeta(newMeta);
       
       stopCamera();
       
-      // If all completed, finish
-      if (newMeta.rc === 'uploaded' && newMeta.dl === 'uploaded' && newMeta.aadhar === 'uploaded' && newMeta.selfie === 'uploaded' && newMeta.pan === 'uploaded' && newMeta.insurance === 'uploaded') {
+      // Finalization Logic: Check if all primary nodes are active
+      const isDone = newMeta.rc === 'uploaded' && 
+                     newMeta.dl === 'uploaded' && 
+                     newMeta.aadhar === 'uploaded' && 
+                     newMeta.selfie === 'uploaded' && 
+                     newMeta.pan === 'uploaded' &&
+                     newMeta.insurance === 'uploaded';
+
+      if (isDone) {
         onComplete();
       }
-    } catch (err) {
-      setError("Capture failed. Try again.");
-      console.error(err);
-    } finally {
-      setIsCapturing(false);
+    } catch (err: any) {
+      setError(`Critical parsing error: ${err.message || 'Check telemetry logs'}`);
+      throw err;
     }
+  };
+
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
   if (loading || !meta) return null;
@@ -276,12 +372,25 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
                   </div>
                   
                   {!isUploaded ? (
-                    <button 
-                      onClick={() => startCamera(doc.id)}
-                      className="px-5 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-amber-500/10 hover:shadow-amber-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                    >
-                      Capture
-                    </button>
+                      <div className="flex flex-col gap-2">
+                        <button 
+                          onClick={() => startCamera(doc.id)}
+                          className="px-5 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-amber-500/10 hover:shadow-amber-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 justify-center"
+                        >
+                          <Camera size={14} /> Capture
+                        </button>
+                        <label className="px-5 py-2.5 bg-slate-800 text-slate-400 rounded-xl text-[8px] font-black uppercase tracking-widest border border-white/5 hover:border-white/10 cursor-pointer flex items-center gap-2 justify-center transition-all">
+                          <CloudUpload size={14} /> Upload File
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              handleFileUpload(e, doc.id);
+                            }} 
+                          />
+                        </label>
+                      </div>
                   ) : (
                     <CheckCircle2 size={24} className="text-emerald-500 opacity-50" />
                   )}
@@ -385,18 +494,26 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
                   )}
                </div>
 
-               {error && (
-                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4/5 p-6 bg-red-500 text-white rounded-3xl text-center shadow-2xl">
-                    <XCircle size={40} className="mx-auto mb-3" />
-                    <p className="font-bold uppercase tracking-widest text-xs">{error}</p>
-                    <button 
-                      onClick={() => startCamera(activeStep)}
-                      className="mt-4 px-6 py-2 bg-white text-red-500 rounded-xl font-black text-[10px] uppercase tracking-widest"
-                    >
-                      Retry Camera
-                    </button>
-                 </div>
-               )}
+                {error && (
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4/5 p-6 bg-slate-900 border border-white/10 text-white rounded-[2rem] text-center shadow-2xl z-[150]">
+                     <AlertCircle size={32} className="mx-auto mb-3 text-amber-500" />
+                     <p className="font-bold uppercase tracking-widest text-[9px] mb-6 leading-relaxed px-4">{error}</p>
+                     
+                     <div className="flex flex-col gap-3">
+                        <button 
+                          onClick={() => startCamera(activeStep)}
+                          className="w-full py-4 bg-amber-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest"
+                        >
+                          Retry Camera
+                        </button>
+                        <div className="flex items-center gap-2"><div className="flex-1 h-px bg-white/5" /><span className="text-[8px] font-black text-slate-600">OR</span><div className="flex-1 h-px bg-white/5" /></div>
+                        <label className="w-full py-4 bg-slate-800 text-slate-300 rounded-2xl font-black text-[10px] uppercase tracking-widest cursor-pointer border border-white/5 flex items-center justify-center gap-2">
+                           <CloudUpload size={14} /> Choose from Gallery
+                           <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                        </label>
+                     </div>
+                  </div>
+                )}
             </div>
 
             <div className="p-10 bg-slate-950/80 backdrop-blur-md flex flex-col items-center">
@@ -412,6 +529,23 @@ export default function StrictVerificationSystem({ uid, onComplete, onLogout }: 
               </button>
               <p className="mt-4 text-[10px] font-black text-slate-500 uppercase tracking-widest italic tracking-[0.2em]">Capture Document</p>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className={cn(
+              "fixed bottom-24 left-6 right-6 p-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-2xl z-[200] text-center",
+              toast.type === 'success' ? "bg-emerald-600 text-white" : "bg-slate-900 text-amber-500"
+            )}
+          >
+            {toast.message}
           </motion.div>
         )}
       </AnimatePresence>

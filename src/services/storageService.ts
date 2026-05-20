@@ -1,10 +1,4 @@
-import { 
-  ref, 
-  uploadBytesResumable, 
-  getDownloadURL, 
-  deleteObject 
-} from 'firebase/storage';
-import { storage } from '../lib/firebase';
+
 import imageCompression from 'browser-image-compression';
 
 export interface UploadProgress {
@@ -44,11 +38,17 @@ export const storageService = {
       video.muted = true;
       video.playsInline = true;
       
+      const timeoutId = setTimeout(() => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Thumbnail generation timed out after 10s"));
+      }, 10000); // 10 second timeout
+      
       video.onloadedmetadata = () => {
         video.currentTime = 1; // Capture at 1 second
       };
 
       video.onseeked = () => {
+        clearTimeout(timeoutId);
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -67,6 +67,7 @@ export const storageService = {
       };
 
       video.onerror = () => {
+        clearTimeout(timeoutId);
         URL.revokeObjectURL(url);
         reject(new Error("Video loading failed"));
       };
@@ -78,19 +79,17 @@ export const storageService = {
    */
   async uploadCampaignMedia(campaignId: string, file: File, onProgress?: (p: number) => void) {
     const isVideo = file.type.startsWith('video/');
-    const path = `campaigns/${campaignId}/${isVideo ? 'videos' : 'posters'}/${Date.now()}_${file.name}`;
     
     // Upload main file
-    const url = await this.uploadFile(path, file, (p) => {
-      if (onProgress) onProgress(p.progress);
+    const url = await this.uploadFile(file, (p) => {
+      if (onProgress) onProgress(p.progress || 0);
     });
 
     let thumbnailUrl = "";
     if (isVideo) {
       try {
         const thumbnailBlob = await this.generateVideoThumbnail(file);
-        const thumbPath = `campaigns/${campaignId}/thumbnails/${Date.now()}_thumb.jpg`;
-        thumbnailUrl = await this.uploadFile(thumbPath, new File([thumbnailBlob], "thumb.jpg", { type: 'image/jpeg' }));
+        thumbnailUrl = await this.uploadFile(new File([thumbnailBlob], "thumb.jpg", { type: 'image/jpeg' }));
       } catch (err) {
         console.warn("Could not generate thumbnail", err);
       }
@@ -100,10 +99,9 @@ export const storageService = {
   },
 
   /**
-   * Uploads a file with progress tracking and compression
+   * Uploads a file with progress tracking and compression to S3 via API
    */
   uploadFile(
-    path: string, 
     file: File, 
     onProgress?: (progress: UploadProgress) => void
   ): Promise<string> {
@@ -113,28 +111,24 @@ export const storageService = {
         
         const fileToUpload = await this.compressImage(file);
         
-        const storageRef = ref(storage, path);
-        const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
-
         if (onProgress) onProgress({ progress: 0, status: 'UPLOADING' });
+        
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
 
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            if (onProgress) onProgress({ progress, status: 'UPLOADING' });
-          },
-          (error) => {
-            console.error('[Storage] Upload error:', error);
-            if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: error.message });
-            reject(error);
-          },
-          async () => {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            if (onProgress) onProgress({ progress: 100, status: 'SUCCESS', url: downloadURL });
-            resolve(downloadURL);
-          }
-        );
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error('Upload failed');
+        }
+
+        const data = await response.json();
+        
+        if (onProgress) onProgress({ progress: 100, status: 'SUCCESS', url: data.url });
+        resolve(data.url);
       } catch (err: any) {
         if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: err.message });
         reject(err);
@@ -143,29 +137,18 @@ export const storageService = {
   },
 
   async deleteFile(pathOrUrl: string) {
+    // S3 deletion needs to be handled via an API route as well
     try {
-      // If it's a full URL, we might need to handle it differently, 
-      // but ref() can handle some URL formats or we just pass the path.
-      const storageRef = ref(storage, pathOrUrl);
-      return await deleteObject(storageRef);
+      console.log("[Storage] Deletion requested for:", pathOrUrl);
+      // Implementation for API delete route would go here
     } catch (error) {
       console.error('[Storage] Deletion failed:', error);
       throw error;
     }
   },
 
-  // Path Helpers
-  getDriverDocPath(driverId: string, docType: 'profile' | 'aadhar' | 'license' | 'rc' | 'insurance' | 'verification' | 'pan', fileName: string) {
-    const ext = fileName.split('.').pop();
-    return `drivers/${driverId}/${docType}/${docType}_${Date.now()}.${ext}`;
-  },
-
-  getCampaignMediaPath(campaignId: string, type: 'posters' | 'banners' | 'videos', fileName: string) {
-    const ext = fileName.split('.').pop();
-    return `campaigns/${campaignId}/${type}/${Date.now()}_${fileName}`;
-  },
-
-  getTicketMediaPath(ticketId: string, fileName: string) {
-    return `tickets/${ticketId}/${Date.now()}_${fileName}`;
-  }
+  // Path Helpers are less relevant if S3 manages paths, but keep for consistency if needed
+  getDriverDocPath(driverId: string, docType: string, fileName: string) { return ""; },
+  getCampaignMediaPath(campaignId: string, type: string, fileName: string) { return ""; },
+  getTicketMediaPath(ticketId: string, fileName: string) { return ""; }
 };

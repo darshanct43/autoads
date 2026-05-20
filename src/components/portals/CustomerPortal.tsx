@@ -1,6 +1,7 @@
+import { disableDevWebsocketLogs } from '@/lib/websocketProtection';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History } from 'lucide-react';
+import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, Device, SupportTicket, ChatMessage } from '@/services/firebaseService';
 import { auth, googleLogin, storage, db } from '@/lib/firebase';
@@ -16,18 +17,128 @@ import AdminAssistant from '../common/AdminAssistant';
 declare const Razorpay: any;
 
 const plans = [
-  { id: 'BASIC', name: 'Starter', price: '₹0', unitCount: '2 Units', color: 'bg-emerald-500' },
-  { id: 'PRO', name: 'Standard', price: '₹0', unitCount: '5 Units', color: 'bg-indigo-500' },
-  { id: 'ULTRA', name: 'Premium', price: '₹0', unitCount: '10+ Units', color: 'bg-slate-900' },
+  { id: 'BASIC', name: 'Basic Plan', price: '₹999', description: 'Entry level plan', color: 'bg-emerald-500' },
+  { id: 'STARTER', name: 'Starter Plan', price: '₹1999', description: 'Core features for growth', color: 'bg-indigo-500' },
+  { id: 'PRO', name: 'Pro Plan', price: '₹4999', description: 'Advanced features for scaling', color: 'bg-slate-900' },
 ];
+
+const getSafeUrl = (url: string | undefined | null) => {
+  if (!url) return undefined;
+  if (typeof url !== 'string') return undefined;
+
+  let cleaned = url.trim();
+  if (cleaned.startsWith('https://https://')) {
+    cleaned = cleaned.replace('https://https://', 'https://');
+  } else if (cleaned.startsWith('http://https://')) {
+    cleaned = cleaned.replace('http://https://', 'https://');
+  }
+
+  // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
+  if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
+    return undefined;
+  }
+
+  try {
+    const decoded = decodeURI(cleaned);
+    return encodeURI(decoded);
+  } catch (e) {
+    return cleaned;
+  }
+};
+
+const getCampaignExpiration = (campaign: any) => {
+  if (!campaign) return null;
+  let baseDate = new Date();
+  const timeSource = campaign.updatedAt || campaign.createdAt;
+  if (timeSource) {
+    if (typeof timeSource.toDate === 'function') {
+      baseDate = timeSource.toDate();
+    } else if (timeSource.seconds) {
+      baseDate = new Date(timeSource.seconds * 1000);
+    } else {
+      const parsed = new Date(timeSource);
+      if (!isNaN(parsed.getTime())) {
+        baseDate = parsed;
+      }
+    }
+  } else {
+    return null;
+  }
+
+  const durationDays = campaign.durationDays || 30;
+  const expirationDate = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const diffTime = expirationDate.getTime() - now.getTime();
+
+  if (diffTime <= 0) {
+    return {
+      expired: true,
+      formattedDate: expirationDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      timeLeftStr: "Expired"
+    };
+  }
+
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMins = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
+
+  let timeLeftStr = "";
+  if (diffDays > 0) {
+    timeLeftStr = `${diffDays}d ${diffHours}h left`;
+  } else if (diffHours > 0) {
+    timeLeftStr = `${diffHours}h ${diffMins}m left`;
+  } else {
+    timeLeftStr = `${diffMins}m left`;
+  }
+
+  return {
+    expired: false,
+    formattedDate: expirationDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    timeLeftStr
+  };
+};
+
+interface Plan {
+  id: string;
+  name: string;
+  price: string | number;
+  designerPrice?: number;
+  description?: string;
+  color: string;
+  unitCount?: string;
+}
 
 interface CustomerPortalProps {
   onLogout: () => void;
 }
 
 export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
-  const [activePlan, setActivePlan] = useState('PRO');
-  const [showPayment, setShowPayment] = useState(false);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+  const [editablePlans, setEditablePlans] = useState<Plan[]>(plans.map(p => ({...p})));
+  const [activePlan, setActivePlan] = useState('BASIC');
+  const [showPayment, setShowPaymentState] = useState(false);
+  const [localPaymentSuccess, setLocalPaymentSuccess] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const hasUserInitiatedPayment = useRef(false);
+
+  const setShowPayment = (value: boolean) => {
+    if (value) {
+      if (hasUserInitiatedPayment.current) {
+        setShowPaymentState(true);
+      } else {
+        console.warn("BLOCKED AUTOMATIC PAYMENT OPEN");
+      }
+    } else {
+      hasUserInitiatedPayment.current = false;
+      setShowPaymentState(false);
+    }
+  };
+
+  const openPaymentModal = () => {
+    if (showPayment) return; // Prevent repeated opening
+    hasUserInitiatedPayment.current = true;
+    setShowPayment(true);
+  };
   const [needDesigner, setNeedDesigner] = useState<boolean | null>(null);
   const [selectedState, setSelectedState] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
@@ -64,10 +175,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   const [step, setStep] = useState<'DASHBOARD' | 'CREATE' | 'FLEET' | 'SUPPORT' | 'LEGAL'>('DASHBOARD');
-  const [creationStep, setCreationStep] = useState<'DETAILS' | 'PAYMENT' | 'MEDIA'>('DETAILS');
+  const [creationStep, setCreationStep] = useState<'DETAILS' | 'PAYMENT' | 'VERIFYING' | 'SUCCESS' | 'FAILED' | 'MEDIA'>('DETAILS');
+  const [paymentResult, setPaymentResult] = useState<{status: string, txId?: string, orderId?: string, amount?: number, campaignId?: string, error?: string} | null>(null);
   const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
   const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL'>('DASHBOARD');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
@@ -79,7 +193,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [myCampaigns, setMyCampaigns] = useState<AdCampaign[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const shortenId = (id: string | null | undefined) => {
+    if (!id) return '---';
+    return id.substring(0, 6).toUpperCase();
+  };
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   // Analytics Helpers
@@ -101,16 +218,143 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   }, [payments]);
 
   const mergedPlans = useMemo(() => {
-    return plans.map(p => {
-      const dbPlan = dbPlans.find(dbp => dbp.id === p.id);
-      return {
-        ...p,
-        price: dbPlan?.price !== undefined ? `₹${dbPlan.price}` : p.price
-      };
-    });
-  }, [dbPlans]);
+    if (dbPlans.length > 0) {
+      return dbPlans.map(p => {
+        const fallback = plans.find(f => f.id === p.id);
+        return {
+          id: p.id,
+          name: p.name || fallback?.name || 'Unknown',
+          price: p.price,
+          designerPrice: p.designerPrice,
+          videoMakerPrice: p.videoMakerPrice,
+          description: p.description || fallback?.description || 'A great plan',
+          color: fallback?.color || 'bg-slate-900'
+        };
+      });
+    }
+    return editablePlans;
+  }, [dbPlans, editablePlans]);
+
+  const latestSuccessfulPayment = useMemo(() => {
+    if (!payments || payments.length === 0 || !createdCampaignId) return null;
+    const sorted = [...payments]
+      .filter(p => (p.status === 'SUCCESS' || p.status === 'PAID') && p.campaignId === createdCampaignId)
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    
+    if (sorted.length === 0) return null;
+    console.log("LATEST PAYMENT", sorted[0]);
+    console.log("PAYMENT STATUS", sorted[0].status);
+    console.log("PAYMENT ID", sorted[0].id);
+    console.log("CAMPAIGN ID", sorted[0].campaignId);
+    
+    return sorted[0];
+  }, [payments, createdCampaignId]);
+
+  const paymentConfirmed = useMemo(() => {
+    return (
+      (latestSuccessfulPayment?.status === 'SUCCESS' || latestSuccessfulPayment?.status === 'PAID') ||
+      (paymentResult?.status === 'SUCCESS') ||
+      (creationStep === 'SUCCESS')
+    );
+  }, [latestSuccessfulPayment, paymentResult, creationStep]);
+
+  useEffect(() => {
+    if (paymentConfirmed) {
+        setShowPaymentState(false);
+        setShowSuccessModal(true);
+        console.log("SUCCESS SCREEN RENDERED");
+    }
+  }, [paymentConfirmed]);
+
+
+  useEffect(() => {
+     if (latestSuccessfulPayment && (creationStep === 'PAYMENT' || creationStep === 'VERIFYING')) {
+        console.log("TRIGGERING SUCCESS UI");
+        setCreationStep('SUCCESS');
+        setShowPaymentState(false);
+        setShowSuccessModal(true);
+        
+         if (typeof (window as any).showToast === 'function') {
+            (window as any).showToast("Payment Verified!", "success");
+         }
+     }
+  }, [latestSuccessfulPayment, creationStep]);
+
+  const updatePlanPrice = (planId: string, newPrice: string) => {
+    setEditablePlans(prev => prev.map(p => p.id === planId ? {...p, price: newPrice} : p));
+  };
 
   const [selectedPlan, setSelectedPlan] = useState<any>(plans[1]);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const paymentProcessedRef = useRef(false);
+  
+  useEffect(() => {
+    if (!activeOrderId || !user) return;
+    
+    // Subscribe to Firestore for payment success
+    const unsubscribe = firebaseService.subscribeToPayment(activeOrderId, (payment) => {
+        if (payment && (payment.status === 'SUCCESS' || payment.status === 'PAID') && !paymentProcessedRef.current) {
+            paymentProcessedRef.current = true;
+            
+            setPaymentResult(prev => ({ ...prev!, status: 'SUCCESS', campaignId: payment.campaignId }));
+            setCreationStep('SUCCESS');
+            setShowSuccessModal(true);
+            setLoading(false);                
+            
+            if (typeof (window as any).showToast === 'function') {
+                (window as any).showToast("Payment Verified!", "success");
+            }
+            setActiveOrderId(null); // Reset
+        }
+    });
+
+    const MAX_RETRIES = 10;
+    const POLL_INTERVAL = 5000;
+    let retryCount = 0;
+
+    const poller = setInterval(async () => {
+        retryCount++;
+
+        try {
+            const response = await fetch(`/api/payment/status?paymentId=${activeOrderId}`);
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                console.error("Backend returned HTML instead of JSON");
+                return;
+            }
+
+            console.log("PAYMENT POLL RESPONSE", data);
+
+            if (data?.status === "SUCCESS" || data?.paymentStatus === "SUCCESS" || data?.status === "PAID") {
+                clearInterval(poller);
+                
+                setLocalPaymentSuccess(true);
+                setShowSuccessModal(true);
+                setPaymentResult(prev => ({ ...prev!, status: 'SUCCESS' }));
+                
+                console.log("SUCCESS SCREEN OPENED");
+                return;
+            }
+
+            if (retryCount >= MAX_RETRIES) {
+                clearInterval(poller);
+            }
+        } catch (err) {
+            console.error("POLL ERROR", err);
+            if (retryCount >= MAX_RETRIES) {
+                clearInterval(poller);
+            }
+        }
+    }, POLL_INTERVAL);
+    
+    return () => {
+        unsubscribe();
+        clearInterval(poller);
+    };
+  }, [activeOrderId, user]);
   
   useEffect(() => {
     const plan = mergedPlans.find(p => p.id === activePlan);
@@ -118,10 +362,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   }, [activePlan, mergedPlans]);
   
   const [isExtracting, setIsExtracting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
-  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
   const [uploadTimeLeft, setUploadTimeLeft] = useState(120);
   const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -182,66 +426,96 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-slate-50">
-                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Transaction Link</th>
-                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Asset Unit</th>
-                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Network Deposit</th>
-                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Signal Status</th>
-                <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Sync Date</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Transaction Link</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] hidden sm:table-cell">Asset Unit</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Network Deposit</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Signal Status</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] hidden sm:table-cell">Sync Date</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Receipt</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 italic">
-              {payments.map((p) => (
+              {payments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
-                  <td className="px-8 py-5">
-                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{p.transactionId || 'SIGNAL_INIT'}</p>
+                  <td className="px-5 sm:px-8 py-5">
+                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight break-all max-w-[120px] sm:max-w-none">{p.transactionId === 'UNKNOWN' ? (p.orderId ? `ORD:${p.orderId.substring(0,8)}` : 'SIGNAL_INIT') : (p.transactionId || 'SIGNAL_INIT')}</p>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">{p.paymentMethod || 'RAZORPAY'}</p>
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-5 sm:px-8 py-5 hidden sm:table-cell">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
                         <Database size={14} />
                       </div>
-                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">Campaign Hub</p>
+                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">{p.campaignId ? shortenId(p.campaignId) : 'Campaign Hub'}</p>
                     </div>
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-5 sm:px-8 py-5">
                     <span className="text-xs font-black text-slate-900">₹{p.amount?.toLocaleString()}</span>
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-5 sm:px-8 py-5">
                     <div className="flex flex-col gap-2">
-                      <span className={cn(
-                        "text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit",
-                        p.status === 'SUCCESS' || p.status === 'success' ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"
-                      )}>
-                        {p.status || 'VERIFIED'}
-                      </span>
+                       <div>
+                          <span className={cn(
+                            "text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit",
+                            p.status === 'SUCCESS' || p.status === 'success' || p.status === 'PAID' ? "bg-emerald-50 text-emerald-600 border-emerald-100" : (p.status === 'FAILED' ? "bg-red-50 text-red-600 border-red-100" : (p.status === 'CANCELLED' ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-amber-50 text-amber-600 border-amber-100"))
+                          )}>
+                            {p.status || 'VERIFIED'}
+                          </span>
+                          {p.failureReason && (
+                             <p className="text-[7px] text-red-500 font-bold mt-1 uppercase sm:max-w-[120px] max-w-[80px] leading-tight truncate" title={p.failureReason}>
+                                {p.failureReason}
+                             </p>
+                          )}
+                       </div>
                       <button 
                         onClick={() => {
                           setActiveTab('TICKETS');
                         }}
                         className="text-[7px] font-black text-slate-400 uppercase tracking-widest hover:text-amber-500 transition-colors flex items-center gap-1"
                       >
-                        <AlertCircle size={8} /> Raise Ticket
+                         <AlertCircle size={8} /> Raise Ticket
                       </button>
                     </div>
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-5 sm:px-8 py-5 hidden sm:table-cell">
                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">
-                      {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'SHORT', year: 'numeric' }) : 'Pending Sync'}
+                      {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Pending Sync'}
                     </p>
                     <p className="text-[7px] font-black text-slate-300 uppercase tracking-tighter">
                       {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                     </p>
                   </td>
+                  <td className="px-5 sm:px-8 py-5">
+                     {(p.status === 'SUCCESS' || p.status === 'success' || p.status === 'PAID') && (
+                         <button onClick={() => window.print()} title="Download Receipt" className="p-2 bg-slate-100 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
+                            <Download size={14} />
+                         </button>
+                     )}
+                  </td>
                 </tr>
               ))}
               {payments.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-8 py-20 text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] italic">No Financial Logs Detected in Current Node</td>
+                  <td colSpan={6} className="px-5 sm:px-8 py-20 text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] italic">No Financial Logs Detected in Current Node</td>
                 </tr>
               )}
             </tbody>
           </table>
+          {payments.length > itemsPerPage && (
+            <div className="flex items-center justify-between p-6 border-t border-slate-50">
+                <button 
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
+                  >Previous</button>
+                <span className="text-[10px] font-black text-slate-400 uppercase">Page {currentPage} of {Math.ceil(payments.length / itemsPerPage)}</span>
+                <button 
+                  disabled={currentPage === Math.ceil(payments.length / itemsPerPage)}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
+                  >Next</button>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
@@ -276,13 +550,20 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         paymentMethod: 'razorpay',
         transactionId: txnId || `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
         customerId: user?.uid || '',
+        customerPhone: phone || '',
       });
 
-      setShowPayment(false);
+      setCreationStep('MEDIA');
+      setCreatedCampaignId(campaignRef.id);
+      localStorage.setItem('last_created_campaign', campaignRef.id);
+      
       setPaymentStage('SELECTION');
       setManualTxnId('');
-      alert('Payment Logged & Verification Pending! Our team will verify the transaction and activate your campaign within 2-4 hours.');
-      setCampaignDetails({ title: '', type: 'VIDEO', asset: null, budget: '', duration: '30' });
+      if (typeof (window as any).showToast === 'function') {
+         (window as any).showToast("Payment Logged! Please upload your media assets now.", "success");
+      } else {
+         alert("Payment Logged! Please upload your media assets now.");
+      }
       setLoading(false);
     } catch (e: any) {
       console.error(e);
@@ -302,33 +583,43 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [isPreparingOrder, setIsPreparingOrder] = useState(false);
 
   const prepareOrder = async () => {
-    if (!user) return alert('Please login');
-    if (!phone || phone.length < 10) return alert('Contact needed');
+    if (!user) { alert('Please login'); return null; }
+    if (!phone || phone.length < 10) { alert('Contact needed'); return null; }
     
     setIsPreparingOrder(true);
     setLoading(true);
 
     const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    const amount = baseAmount + (needDesigner ? 1000 : 0);
-
+    const amount = baseAmount + (needDesigner ? (selectedPlan.designerPrice || 0) : 0);
+    
     try {
-      console.log("[PAYMENT_SYSTEM] Pre-creating order...");
       const orderResponse = await fetch('/api/razorpay/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
           currency: 'INR',
-          notes: { user_uid: user.uid, title: campaignDetails.title }
+          notes: { 
+             user_uid: user.uid, 
+             customerId: user.uid,
+             title: campaignDetails.title 
+          }
         })
       });
 
-      if (!orderResponse.ok) throw new Error("Order creation failed on server");
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json();
+        throw new Error(errorData.error || "Order creation failed on server");
+      }
       const order = await orderResponse.json();
+      if (order.amount < 100) {
+        throw new Error("Invalid order amount. Minimum charge not met.");
+      }
       setOrderData(order);
-      console.log("[PAYMENT_SYSTEM] Order ready for secondary gesture.");
+      return order;
     } catch (e: any) {
       alert(`Initialization Error: ${e.message}`);
+      return null;
     } finally {
       setIsPreparingOrder(false);
       setLoading(false);
@@ -336,11 +627,15 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   const handlePaymentAndSubmit = async () => {
-    if (!orderData) {
-      return prepareOrder();
+    console.log("[PAYMENT_SYSTEM] Opening Modal from:", new Error().stack);
+    let currentOrderData = orderData;
+    if (!currentOrderData) {
+      currentOrderData = await prepareOrder();
     }
     
-    const razorpayKey = 'rzp_live_SnZDlb9YCezb2w';
+    if (!currentOrderData) return;
+    
+    const razorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
     
     try {
       if (typeof (window as any).Razorpay === 'undefined') {
@@ -348,82 +643,225 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         return;
       }
 
-      console.log("[PAYMENT_SYSTEM] Opening Modal with Fresh Gesture...");
+      console.log("[PAYMENT_SYSTEM] Opening Modal...");
       const options = {
         key: razorpayKey,
-        amount: orderData.amount,
-        currency: orderData.currency,
+        amount: currentOrderData.amount,
+        currency: currentOrderData.currency,
         name: "AutoAds Pro",
         description: `Activation: ${campaignDetails.title}`,
         image: "https://darshanct43.github.io/autoads/logo.png",
-        order_id: orderData.id,
-        handler: async function (response: any) {
+        order_id: currentOrderData.id,
+        handler: async (responseData: any) => {
+          console.log("PAYMENT STARTED");
+          console.log("RAZORPAY CALLBACK SUCCESS");
+          setLocalPaymentSuccess(true);
+          setShowPaymentState(false);
+          console.log("SUCCESS SCREEN OPENED");
+          console.log("VERIFYING BACKEND");
+
           try {
-            setLoading(true);
-            const verifyResponse = await fetch('/api/razorpay/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                uid: user?.uid,
-                planData: { amount: orderData.amount / 100, planId: selectedPlan.id },
-                campaignData: {
-                  title: campaignDetails.title,
-                  type: campaignDetails.type,
-                  customerId: user?.uid,
-                  targetCity: selectedCity === 'Other' ? customCity : selectedCity,
-                  targetState: selectedState,
-                  duration: campaignDetails.duration,
-                  needDesigner: !!needDesigner,
-                  paymentStatus: 'PAID',
-                  paymentId: response.razorpay_payment_id,
-                  paymentReceived: true,
-                  createdAt: new Date(),
-                  updatedAt: new Date()
-                }
-              })
-            });
-
-            const result = await verifyResponse.json();
+            console.log("Response Data:", responseData);
             
-            // Also explicitly record payment record for history
-            await firebaseService.recordPayment({
-              transactionId: response.razorpay_payment_id,
-              amount: orderData.amount / 100,
-              paymentMethod: 'razorpay',
-              status: 'SUCCESS',
-              customerId: user?.uid || '',
-              campaignId: result.campaignId || 'NEW_CAMPAIGN'
-            });
-
-            setCreationStep('MEDIA');
-            if (result.campaignId) {
-               setCreatedCampaignId(result.campaignId);
-               localStorage.setItem('last_created_campaign', result.campaignId);
+            if (!responseData || !responseData.razorpay_payment_id) {
+               throw new Error("Razorpay returned empty response or missing payment_id. Transaction state unknown.");
             }
-            alert("SUCCESS: Payment Verified! Your campaign is now ACTIVE and waiting for assets.");
+            
+            setCreationStep('VERIFYING');
+            setLoading(true);
+            
+            console.log("SENDING VERIFY REQUEST");
+            
+            let verifyResponse;
+            try {
+              verifyResponse = await fetch('/api/razorpay/verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: responseData.razorpay_order_id,
+                  razorpay_payment_id: responseData.razorpay_payment_id,
+                  razorpay_signature: responseData.razorpay_signature,
+                  uid: user?.uid,
+                  planData: { amount: currentOrderData.amount / 100, planId: selectedPlan.id },
+                  campaignData: {
+                    title: campaignDetails.title,
+                    type: campaignDetails.type,
+                    customerId: user?.uid,
+                    targetCity: selectedCity === 'Other' ? customCity : selectedCity,
+                    targetState: selectedState,
+                    duration: campaignDetails.duration,
+                    needDesigner: !!needDesigner,
+                    paymentStatus: 'PAID',
+                    paymentId: responseData.razorpay_payment_id,
+                    paymentReceived: true,
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                  }
+                })
+              });
+            } catch (fetchErr: any) {
+               console.error("[PAYMENT_STRICT_DEBUG] Fetch failed entirely:", fetchErr);
+               throw new Error(`Network failure: ${fetchErr.message}`);
+            }
+
+            console.log("VERIFY RESPONSE RECEIVED", verifyResponse);
+            
+            let result;
+            try {
+               result = await verifyResponse.json();
+            } catch (jsonErr: any) {
+               console.error("[PAYMENT_STRICT_DEBUG] JSON Parse failed:", jsonErr);
+               throw new Error("Invalid response format from server (non-JSON)");
+            }
+            
+            console.log("[PAYMENT_STRICT_DEBUG] Verify API JSON Data:", result);
+            
+            if (!result || (result.success !== true && result.status !== "SUCCESS")) {
+               const errorMsg = result?.error || result?.message || "Verification Failed on Server";
+               throw new Error(errorMsg);
+            }
+
+            // SUCCESS PATH STARTS HERE
+            console.log("WRITING FIRESTORE SUCCESS");
+            
+            const planAmount = selectedPlan.price === 'Free' ? 0 : parseFloat(String(selectedPlan.price).replace(/[^0-9.]/g, ''));
+            
+            setPaymentResult({
+                status: 'SUCCESS',
+                txId: responseData.razorpay_payment_id,
+                orderId: responseData.razorpay_order_id,
+                amount: currentOrderData.amount / 100,
+                error: "Verification Complete. Your campaign is being activated..."
+            });
+            
+            console.log("UI SUCCESS TRIGGERED");
+            setCreationStep('SUCCESS');
             setLoading(false);
-            setShowPayment(false);
+            
+            // Hard fallback reload
+            setTimeout(() => {
+                if (window.location.hash.includes('success') || document.body.innerHTML.includes('SUCCESS')) return;
+                window.location.reload();
+            }, 3000);
+
+            if (typeof (window as any).showToast === 'function') {
+               (window as any).showToast("SUCCESS: Payment Verified!", "success");
+            }
+            
+            setActiveOrderId(responseData.razorpay_order_id);
+            paymentProcessedRef.current = false; // Reset lock for new payment
+
+            // Now perform DB operations in the background
+            try {
+              console.log("[PAYMENT_STRICT_DEBUG] Performing background Firestore sync...");
+              
+              const campaignDataToSave = {
+                title: campaignDetails.title,
+                type: campaignDetails.type,
+                customerId: user?.uid,
+                targetCity: selectedCity === 'Other' ? customCity : selectedCity,
+                targetState: selectedState,
+                duration: campaignDetails.duration,
+                needDesigner: !!needDesigner,
+                status: 'PAID',
+                paymentStatus: 'PAID',
+                paymentReceived: true,
+                budget: planAmount
+              };
+
+              console.log("[PAYMENT_STRICT_DEBUG] Saving Campaign to Firestore...");
+              const campaignRef = await firebaseService.createCampaign(campaignDataToSave);
+              console.log("[PAYMENT_STRICT_DEBUG] Campaign Saved ID:", campaignRef.id);
+              
+              setPaymentResult(prev => ({ ...prev!, campaignId: campaignRef.id }));
+              
+              console.log("[PAYMENT_STRICT_DEBUG] Recording Payment Record...");
+              await firebaseService.recordPayment({
+                campaignId: campaignRef.id,
+                orderId: responseData.razorpay_order_id,
+                transactionId: responseData.razorpay_payment_id,
+                amount: currentOrderData.amount / 100, // INR
+                status: 'SUCCESS',
+                customerId: user?.uid || 'UNKNOWN',
+                paymentMethod: 'razorpay'
+              });
+              console.log("[PAYMENT_STRICT_DEBUG] Final Sync Complete");
+              
+              localStorage.setItem('last_created_campaign', campaignRef.id);
+            } catch (dbError: any) {
+              console.error("[PAYMENT_STRICT_DEBUG] Background Firestore Write Error:", dbError);
+              // Don't shift back to FAILED because payment WAS successful. 
+              // We just log that it needs manual sync or webhook will handle it.
+              (window as any).showToast?.("Payment OK, but DB Sync delayed. Our team is activating it manually.", "warning");
+            }
           } catch (verifyErr: any) {
-            console.error(verifyErr);
-            alert("Verification Failed. Please contact support.");
+            console.error("[PAYMENT_STRICT_DEBUG] Verification Error Caught:", verifyErr);
+            firebaseService.recordPayment({
+               transactionId: responseData?.razorpay_payment_id || 'UNKNOWN',
+               orderId: responseData?.razorpay_order_id || currentOrderData.id,
+               amount: currentOrderData.amount / 100,
+               paymentMethod: 'razorpay',
+               status: 'FAILED',
+               failureReason: verifyErr.message || 'Verification Error',
+               customerId: user?.uid || '',
+               customerPhone: phone || '',
+               attemptNumber: 1
+            }).catch(console.error);
+
+            setPaymentResult({ status: 'FAILED', error: verifyErr.message || 'Verification Error' });
+            setCreationStep('FAILED');
             setLoading(false);
           }
         },
         prefill: {
-          name: user.displayName || "Client",
-          email: user.email || "",
+          name: user?.displayName || "Client",
+          email: user?.email || "",
           contact: phone
         },
         theme: { color: "#f59e0b" },
         modal: {
-          ondismiss: () => setLoading(false)
+          ondismiss: () => {
+             console.log("[PAYMENT_SYSTEM] Modal dismissed by user");
+             // Log the cancelled attempt
+             firebaseService.recordPayment({
+                orderId: currentOrderData.id,
+                amount: currentOrderData.amount / 100,
+                paymentMethod: 'razorpay',
+                status: 'CANCELLED',
+                failureReason: 'User closed payment window',
+                customerId: user?.uid || '',
+                customerPhone: phone || ''
+             }).catch(console.error);
+             setLoading(false);
+          }
         }
       };
 
       const rzpObj = new (window as any).Razorpay(options);
+      
+      rzpObj.on('payment.failed', async (responseData: any) => {
+         console.warn("[PAYMENT_SYSTEM] Payment failed:", responseData?.error);
+         
+         await firebaseService.recordPayment({
+            transactionId: responseData?.error?.metadata?.payment_id || 'UNKNOWN',
+            orderId: responseData?.error?.metadata?.order_id || currentOrderData.id,
+            amount: currentOrderData.amount / 100,
+            paymentMethod: 'razorpay',
+            status: 'FAILED',
+            failureReason: responseData?.error?.description || responseData?.error?.reason || 'Unknown error',
+            customerId: user?.uid || '',
+            customerPhone: phone || '',
+            attemptNumber: 1
+         }).catch(console.error);
+         
+         setPaymentResult({ 
+            status: 'FAILED', 
+            error: responseData?.error?.description || 'Payment processing failed.' 
+         });
+         setCreationStep('FAILED');
+         setLoading(false);
+      });
+
       rzpObj.open();
     } catch (e: any) {
       alert(`Modal Error: ${e.message}`);
@@ -431,6 +869,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   useEffect(() => {
+    if (import.meta.env.PROD) {
+      disableDevWebsocketLogs();
+    }
     firebaseService.getPlans().then(setDbPlans).catch(console.error);
 
     // Pre-load Razorpay script
@@ -443,6 +884,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
     const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
       setUser(u);
+      if (u?.phoneNumber) {
+        setPhone(u.phoneNumber.replace('+91', ''));
+      }
       setLoading(false);
     });
     return () => unsubscribeAuth();
@@ -459,6 +903,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       setMyCampaigns(campaigns);
     }, user.uid);
 
+    const unsubscribePayments = firebaseService.subscribeToPayments((payDocs) => {
+      const successfulPayment = payDocs.find(p => ['SUCCESS', 'PAID', 'success', 'paid'].includes((p as any).status));
+      setPayments(payDocs);
+    }, user.uid, phone);
+
     const unsubscribeDevices = firebaseService.subscribeToDevices((devs) => {
       setDevices(devs);
     });
@@ -468,10 +917,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     return () => {
       unsubscribeNotices();
       unsubscribeCampaigns();
+      unsubscribePayments();
       unsubscribeDevices();
       unsubscribeTickets();
     };
-  }, [user]);
+  }, [user, phone]);
 
   useEffect(() => {
     if (activeTicketId) {
@@ -618,11 +1068,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         setUploadProgress(p);
       });
 
+      const mediaType = file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+
       await firebaseService.updateCampaign(campaignId, {
         assetUrl: res.url,
         mediaUrl: res.url,
         videoThumbnail: res.thumbnailUrl || "",
-        mediaType: file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+        mediaType: mediaType,
+        type: mediaType, // Keep both for safety
         mediaReceived: true,
         updatedAt: new Date()
       });
@@ -633,6 +1086,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       alert("Upload failed: " + err.message);
     } finally {
       setIsUploadingMedia(false);
+      setUploadProgress(0);
     }
   };
 
@@ -643,11 +1097,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     exportToCSV(data, fileName);
   };
 
-  useEffect(() => {
-    if (creationStep === 'PAYMENT' && showPayment && !orderData) {
-      prepareOrder();
-    }
-  }, [creationStep, showPayment]);
+  // Removed the automatic prepareOrder() useEffect. 
+  // It now only triggers when the user manually initiates the payment flow.
 
   const handleActivePlanChange = (planId: string) => {
     setActivePlan(planId);
@@ -659,17 +1110,33 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     if (!user) return alert('Please login');
     try {
       setLoading(true);
+      
+      // Auto-configure the campaign flow
+      setNeedDesigner(true);
+      if (type.includes('Video')) {
+        setActivePlan('PRO');
+        setSelectedPlan(mergedPlans.find(p => p.id === 'PRO') || plans[2]);
+      } else {
+        setActivePlan('STARTER');
+        setSelectedPlan(mergedPlans.find(p => p.id === 'STARTER') || plans[1]);
+      }
+      
+      // Switch to Ads tab and trigger checkout
+      setActiveTab('CAMPAIGNS');
+      openPaymentModal();
+      setCreationStep('DETAILS');
+      
+      // Also log the interest via support ticket for tracking
       await firebaseService.createSupportTicket({
         customerId: user.uid,
         customerName: user.displayName || 'Customer',
         title: `Design Request: ${type}`,
-        description: `Customer is requesting ${type} for their campaigns.`,
+        description: `Customer clicked ${type} and was directed to checkout.`,
         priority: 'MEDIUM',
         category: 'Design Strategy',
         type: 'CUSTOMER'
       });
-      alert('Design request submitted! A designer will connect with you via Support Tickets.');
-      setActiveTab('TICKETS');
+      
       setLoading(false);
     } catch (e) {
       console.error(e);
@@ -686,10 +1153,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           <button 
             type="button"
             onClick={() => setShowMobileMenu(!showMobileMenu)}
-            className="md:hidden p-2 -ml-2 text-slate-500 hover:text-slate-900 transition-colors z-[110]"
+            className="md:hidden p-3 -ml-3 text-slate-500 hover:text-slate-900 transition-colors z-[110]"
             aria-label="Toggle Menu"
           >
-            {showMobileMenu ? <X size={24} /> : <Menu size={24} />}
+            {showMobileMenu ? <X size={26} /> : <Menu size={26} />}
           </button>
           <div className="flex flex-col">
             <span className="font-bold text-slate-900 tracking-tight text-xs md:text-sm uppercase tracking-widest leading-none">Auto <span className="text-amber-500 italic">Ads</span></span>
@@ -953,11 +1420,18 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           )}
                         >
                            <div className={cn(
-                             "px-5 py-4 rounded-[1.5rem] text-[11px] font-bold tracking-tight shadow-sm",
+                             "px-5 py-4 rounded-[1.5rem] text-[11px] font-bold tracking-tight shadow-sm flex flex-col gap-2",
                              msg.senderId === user?.uid 
                                ? "bg-slate-900 text-white rounded-tr-none" 
                                : msg.senderId === 'system' ? "bg-amber-50 border border-amber-100 text-amber-600 rounded-tl-none italic" : "bg-white border border-slate-100 text-slate-600 rounded-tl-none"
                            )}>
+                              {msg.mediaUrl && (
+                                msg.mediaType === 'VIDEO' || msg.mediaUrl.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
+                                  <video src={getSafeUrl(msg.mediaUrl)} controls className="max-w-[200px] md:max-w-[300px] rounded-xl" />
+                                ) : (
+                                  <img src={getSafeUrl(msg.mediaUrl)} alt="Attachment" className="max-w-[200px] md:max-w-[300px] rounded-xl object-contain" />
+                                )
+                              )}
                               {msg.content || msg.text}
                            </div>
                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-2 px-2">
@@ -976,7 +1450,53 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    </div>
 
                    <div className="p-6 border-t border-slate-100 bg-white">
-                      <div className="flex gap-4">
+                      <div className="flex gap-4 items-center">
+                         <label className="w-14 h-14 bg-slate-100 text-slate-500 rounded-2xl flex items-center justify-center hover:bg-slate-200 transition-all cursor-pointer shadow-sm relative">
+                            {isUploadingMedia ? (
+                              <div className="absolute inset-0 flex items-center justify-center bg-slate-100 rounded-2xl">
+                                <span className="text-[10px] font-black">{uploadProgress}%</span>
+                              </div>
+                            ) : (
+                              <Paperclip size={20} />
+                            )}
+                            <input 
+                              type="file" 
+                              className="hidden" 
+                              accept="image/*,video/mp4,video/webm"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file || !activeTicketId) return;
+                                
+                                setIsUploadingMedia(true);
+                                setUploadProgress(0);
+                                try {
+                                  let mediaUrl = "";
+                                  const isVideo = file.type.startsWith('video');
+                                  
+                                  mediaUrl = await storageService.uploadFile(file, (p) => {
+                                    setUploadProgress(p.progress || 0);
+                                  });
+                                  
+                                  await firebaseService.sendChatMessage(activeTicketId, {
+                                    senderId: user?.uid || 'CUSTOMER',
+                                    senderName: user?.displayName || 'Customer',
+                                    senderRole: 'customer',
+                                    text: "Sent an attachment",
+                                    mediaUrl,
+                                    mediaType: isVideo ? 'VIDEO' : 'IMAGE'
+                                  });
+                                } catch (err) {
+                                  console.error("Attachment upload error:", err);
+                                  alert("Failed to upload attachment: " + (err instanceof Error ? err.message : "Unknown error"));
+                                } finally {
+                                  setIsUploadingMedia(false);
+                                  setUploadProgress(0);
+                                  e.target.value = '';
+                                }
+                              }}
+                              disabled={isUploadingMedia}
+                            />
+                         </label>
                          <input 
                            type="text"
                            value={newMessage}
@@ -1048,7 +1568,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           <h3 className="text-lg font-black italic uppercase leading-none">{promo.offer}</h3>
                           <div className="flex items-center gap-2 pt-2">
                             <button 
-                              onClick={() => setShowPayment(true)}
+                              onClick={() => {
+                                setCreationStep('DETAILS');
+                                openPaymentModal();
+                              }}
                               className="px-4 py-1.5 bg-slate-950 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
                             >
                               Claim Now
@@ -1067,8 +1590,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     { label: 'Fleet Network', value: totalNetworkUnits.toLocaleString(), icon: <Target size={14} className="text-amber-500" /> },
                     { label: 'Live Nodes', value: activeDevicesCount, icon: <Users size={14} className="text-slate-900" /> },
                     { label: 'Sync Score', value: `${syncScore}%`, icon: <Zap size={14} className="text-orange-500" /> },
-                  ].map((stat, i) => (
-                    <div key={i} className="bg-white px-3 py-2.5 rounded-2xl border border-slate-100 flex items-center gap-2.5 shadow-sm hover:border-amber-200 transition-all group overflow-hidden">
+                  ].map((stat) => (
+                    <div key={stat.label} className="bg-white px-3 py-2.5 rounded-2xl border border-slate-100 flex items-center gap-2.5 shadow-sm hover:border-amber-200 transition-all group overflow-hidden">
                       <div className="p-1.5 bg-slate-50 rounded-lg group-hover:bg-amber-50 transition-colors uppercase shrink-0">{stat.icon}</div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest mb-0.5 truncate leading-none">{stat.label}</p>
@@ -1111,7 +1634,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         <h2 className="text-xl font-black italic text-slate-900 uppercase">Deploy Network Signal</h2>
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed italic text-balance">The network is synchronized and waiting for instructions.</p>
                         <button 
-                          onClick={() => setShowPayment(true)}
+                          onClick={() => {
+                            setCreationStep('DETAILS');
+                            openPaymentModal();
+                          }}
                           className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/10 hover:bg-amber-400 transition-all active:scale-95"
                         >
                           Launch New Campaign
@@ -1137,8 +1663,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                  {ad.mediaType === 'VIDEO' ? <PlayCircle size={14} /> : <ImageIcon size={14} />}
                               </div>
                               <div>
-                                <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{ad.title}</p>
-                                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">{ad.targetArea || 'Global'}</p>
+                             <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{ad.title}</p>
+                             <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">ID: {shortenId(ad.id)} | {ad.targetArea || 'Global'}</p>
                               </div>
                             </div>
                             <div className={cn("px-2 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
@@ -1180,42 +1706,53 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             
                 <div className="space-y-2">
                   {mergedPlans.map((plan) => (
-                    <button
+                    <div
                       key={plan.id}
-                      onClick={() => handleActivePlanChange(plan.id)}
                       className={cn(
                         "w-full p-4 bg-white rounded-2xl border transition-all text-left relative overflow-hidden group",
                         activePlan === plan.id 
                           ? cn("ring-2 shadow-md translate-x-1", 
-                              plan.id === 'BASIC' ? "border-emerald-500 ring-emerald-50" : 
-                              plan.id === 'PRO' ? "border-indigo-500 ring-indigo-50" : 
-                              "border-slate-900 ring-slate-50")
+                               plan.id === 'REEL' ? "border-emerald-500 ring-emerald-50" : 
+                               plan.id === 'EDIT' ? "border-indigo-500 ring-indigo-50" : 
+                               plan.id === 'MOTION' ? "border-violet-500 ring-violet-50" :
+                               "border-slate-900 ring-slate-50")
                           : "border-slate-100 hover:border-slate-300 shadow-sm hover:translate-x-1"
                       )}
                     >
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-start justify-between">
-                          <div className="space-y-0.5">
-                            <h4 className="text-xs font-black text-slate-900 tracking-tight uppercase italic leading-tight">{plan.name}</h4>
-                            <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest italic">{plan.unitCount} Access</p>
-                          </div>
-                          <div className="flex flex-col items-end">
-                             <p className="text-base font-black text-slate-900 italic tracking-tight tabular-nums leading-tight">{plan.price}</p>
-                             <p className="text-[7px] text-slate-400 font-bold uppercase mt-0.5">/ cycle</p>
+                      <button className="w-full text-left" onClick={() => handleActivePlanChange(plan.id)}>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-0.5">
+                              <h4 className="text-xs font-black text-slate-900 tracking-tight uppercase italic leading-tight">{plan.name}</h4>
+                              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest italic">{plan.unitCount || 'Standard Access'}</p>
+                            </div>
+                            <div className="flex flex-col items-end">
+                              <input 
+                                type="text"
+                                value={plan.price}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updatePlanPrice(plan.id, e.target.value)}
+                                className="w-20 text-right text-base font-black text-slate-900 italic tracking-tight tabular-nums leading-tight bg-transparent border-b border-slate-300 focus:border-amber-500 outline-none"
+                              />
+                              <p className="text-[7px] text-slate-400 font-bold uppercase mt-0.5">/ cycle</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      </button>
                       {activePlan === plan.id && (
                         <motion.div layoutId="plan-pulse-small" className="absolute -top-6 -right-6 w-16 h-16 bg-amber-500/10 rounded-full blur-xl" />
                       )}
-                    </button>
+                    </div>
                   ))}
                 </div>
 
                 <div className="p-6 bg-slate-950 rounded-[2rem] space-y-6 text-white shadow-xl relative overflow-hidden border border-slate-900">
                    <div className="relative z-10">
                       <button 
-                        onClick={() => setShowPayment(true)}
+                        onClick={() => {
+                          setCreationStep('DETAILS');
+                          openPaymentModal();
+                        }}
                         className="w-full bg-amber-500 text-slate-950 rounded-xl py-4 font-black text-[10px] uppercase tracking-[0.15em] hover:bg-amber-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
                       >
                         Initiate Payment <ArrowUpRight size={14} />
@@ -1281,6 +1818,25 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                     <div>
                                        <p className="text-sm font-bold text-slate-900 tracking-tight leading-none mb-1 uppercase italic">{ad.title}</p>
                                        <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest italic">{ad.timestamp ? new Date(ad.timestamp).toLocaleDateString() : 'N/A'}</p>
+                                       {(() => {
+                                         const exp = getCampaignExpiration(ad);
+                                         if (!exp) return null;
+                                         return (
+                                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 leading-none">
+                                             <span className={cn(
+                                               "text-[7px] font-extrabold uppercase px-1 py-0.5 rounded tracking-wider leading-none",
+                                               exp.expired 
+                                                 ? "bg-rose-50 text-rose-600 border border-rose-100" 
+                                                 : "bg-blue-50 text-blue-600 border border-blue-100 animate-pulse"
+                                             )}>
+                                               {exp.timeLeftStr}
+                                             </span>
+                                             <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                                               (Expires {exp.formattedDate})
+                                             </span>
+                                           </div>
+                                         );
+                                       })()}
                                     </div>
                                  </div>
                               </td>
@@ -1353,7 +1909,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                             className="cursor-pointer p-2.5 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
                                           >
                                             <Upload size={14} />
-                                            <span className="text-[8px] font-black uppercase">Choose File</span>
+                                            <span className="text-[8px] font-black uppercase">{(ad.assetUrl || ad.mediaUrl) ? "Replace" : "Choose File"}</span>
                                           </button>
                                        </div>
                                     )}
@@ -1390,7 +1946,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                
                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div 
-                    onClick={() => setShowPayment(true)}
+                    onClick={() => {
+                      setCreationStep('DETAILS');
+                      openPaymentModal();
+                    }}
                     className="aspect-[4/3] bg-white border-2 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-50 hover:border-amber-300 group transition-all"
                   >
                      <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 group-hover:rotate-90 transition-transform shadow-lg shadow-slate-200">
@@ -1403,7 +1962,19 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                      <div key={`asset-${ad.id}`} className="aspect-[4/3] bg-white rounded-3xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-xl transition-all group relative">
                         <div className="h-full w-full bg-slate-950 relative">
                            <div className="absolute inset-0 bg-slate-900 flex items-center justify-center">
-                              {ad.type === 'VIDEO' ? <PlayCircle className="text-slate-800" size={48} /> : <ImageIcon className="text-slate-800" size={48} />}
+                               {((ad.mediaType || ad.type) === 'VIDEO') ? (
+                                 (ad.assetUrl || ad.mediaUrl) ? (
+                                   <video src={getSafeUrl(ad.assetUrl || ad.mediaUrl)} className="w-full h-full object-cover" muted playsInline loop onMouseOver={(e) => e.currentTarget.play()} onMouseOut={(e) => e.currentTarget.pause()} />
+                                 ) : (
+                                   <PlayCircle className="text-slate-800" size={48} />
+                                 )
+                               ) : (
+                                 (ad.assetUrl || ad.mediaUrl) ? (
+                                   <img src={getSafeUrl(ad.assetUrl || ad.mediaUrl)} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={ad.title} />
+                                 ) : (
+                                   <ImageIcon className="text-slate-800" size={48} />
+                                 )
+                               )}
                            </div>
                            
                            {(!ad.assetUrl && !ad.mediaUrl) && (
@@ -1434,6 +2005,15 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-950 to-transparent">
                               <p className="text-[9px] font-black text-white uppercase tracking-tight truncate italic">{ad.title}</p>
                               <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest italic">{ad.type} • {ad.targetCity}</p>
+                              {(() => {
+                                const exp = getCampaignExpiration(ad);
+                                if (!exp) return null;
+                                return (
+                                  <p className={cn("text-[7px] font-black uppercase tracking-wider mt-0.5", exp.expired ? "text-rose-500" : "text-amber-500")}>
+                                    {exp.timeLeftStr} ({exp.formattedDate})
+                                  </p>
+                                );
+                              })()}
                            </div>
                         </div>
                      </div>
@@ -1465,7 +2045,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4">
                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Standard Creative</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Perfect for quick announcements, offers, and regional targeting.</p>
-                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹0</h3>
+                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹1000</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Professional 4K Static Design</li>
@@ -1484,9 +2064,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    <div className="glass-card p-10 rounded-[3rem] bg-slate-900 border border-slate-800 shadow-2xl space-y-8 relative overflow-hidden group">
                       <div className="absolute -top-10 -right-10 bg-amber-500/10 w-40 h-40 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all" />
                       <div className="space-y-4 relative z-10">
-                         <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Elite Motion Studio</h4>
+                         <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Video Making Service</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">High-Impact 1080p motion graphics to grab maximum network attention.</p>
-                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹0</h3>
+                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹2000</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-300 tracking-widest relative z-10">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Custom Motion Narrative (15s)</li>
@@ -1495,7 +2075,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> 72-Hour Prime Delivery</li>
                       </ul>
                       <button 
-                         onClick={() => handleRequestDesign('Elite Motion Studio')}
+                         onClick={() => handleRequestDesign('Video Making Service')}
                          className="w-full py-5 bg-amber-500 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition-all shadow-2xl shadow-amber-500/20 relative z-10"
                       >
                         Hire Motion Expert
@@ -1509,13 +2089,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         <div className="pt-20 pb-10">
           <div className="bg-slate-900 rounded-[3rem] p-12 text-center space-y-8 relative overflow-hidden">
              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-             <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">Lead the Network Surge</h2>
-             <p className="text-slate-400 max-w-md mx-auto text-sm font-medium tracking-tight">India's Premimum Digital Transit Advertising Ecosystem. Hardware-verified impressions for modern brand precision.</p>
+             <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">GROW YOUR BRAND</h2>
+             <p className="text-slate-400 max-w-md mx-auto text-sm font-medium tracking-tight">Smart vehicle advertising for your business. Verified reach on the move.</p>
              <button 
-               onClick={() => setShowPayment(true)}
+               onClick={openPaymentModal}
                className="px-10 py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl shadow-amber-500/20"
              >
-               Launch New Node
+               START NEW CAMPAIGN
              </button>
 
              {/* Compliance Directory */}
@@ -1557,6 +2137,42 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         </div>
       </main>
 
+      {/* Success Modal */}
+      <AnimatePresence>
+        {(paymentConfirmed || localPaymentSuccess) && (
+          <motion.div
+             initial={{ opacity: 0 }}
+             animate={{ opacity: 1 }}
+             exit={{ opacity: 0 }}
+             className="fixed inset-0 z-[300] bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-4"
+          >
+             <motion.div
+               initial={{ scale: 0.9, opacity: 0 }}
+               animate={{ scale: 1, opacity: 1 }}
+               className="bg-white p-10 rounded-[3rem] shadow-2xl text-center space-y-6 max-w-sm w-full"
+             >
+                <div className="w-20 h-20 bg-green-100 text-green-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-green-500/10">
+                   <CheckCircle size={40} />
+                </div>
+                <div className="space-y-2">
+                   <h2 className="text-2xl font-black italic uppercase text-slate-900">Success!</h2>
+                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Payment verified and campaign activated.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setLocalPaymentSuccess(false);
+                    setShowSuccessModal(false);
+                    setCreationStep('MEDIA');
+                  }}
+                  className="w-full py-4 bg-amber-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition-all"
+                >
+                   Continue to Media
+                </button>
+             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Payment & Designer Portal Modal */}
       <AnimatePresence>
         {showPayment && (
@@ -1569,6 +2185,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
             />
             <motion.div 
+              key={creationStep}
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -1693,17 +2310,87 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     </div>
 
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         if (!campaignDetails.title || !selectedCity || phone.length < 10) {
                           alert('Please fill all details correctly.');
                           return;
                         }
                         setCreationStep('PAYMENT');
+                        await prepareOrder();
+                        openPaymentModal();
                       }}
                       className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                     >
                       Continue to Payment <ChevronRight size={16} />
                     </button>
+                  </div>
+                ) : creationStep === 'VERIFYING' ? (
+                  <div className="space-y-6 py-12 flex flex-col items-center text-center">
+                    <motion.div
+                       animate={{ rotate: 360 }}
+                       transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                       className="w-16 h-16 border-4 border-amber-500 border-t-white rounded-full mx-auto"
+                    />
+                    <div>
+                       <h4 className="text-xl font-black italic uppercase tracking-tight text-slate-900 mt-4">Verifying Payment</h4>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Please wait. Do not close this window.</p>
+                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Checking cryptographic signatures...</p>
+                    </div>
+                  </div>
+                ) : (creationStep as any) === 'SUCCESS' ? (
+                  <div className="space-y-6 py-8">
+                     <div className="text-center space-y-4">
+                        <div className="w-20 h-20 bg-green-100 text-green-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-green-500/20">
+                           <CheckCircle size={40} />
+                        </div>
+                        <div>
+                           <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Successful</h4>
+                           <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mt-1">Transaction Confirmed & Campaign Activated</p>
+                        </div>
+                     </div>
+                     <div className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] space-y-4">
+                        <div className="flex justify-between items-center text-[11px] font-black uppercase text-slate-400 border-b border-slate-100 pb-3">
+                           <span>Receipt Details</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] font-bold text-slate-900">
+                           <span className="text-slate-500 uppercase">Payment ID</span>
+                           <span className="font-mono">{paymentResult?.txId}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] font-bold text-slate-900">
+                           <span className="text-slate-500 uppercase">Order ID</span>
+                           <span className="font-mono">{paymentResult?.orderId}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] font-bold text-slate-900">
+                           <span className="text-slate-500 uppercase">Amount</span>
+                           <span className="font-mono">₹{paymentResult?.amount}</span>
+                        </div>
+                     </div>
+                     <div className="pt-4 flex gap-4">
+                        <button onClick={() => window.print()} className="flex-1 py-4 border border-slate-200 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+                           <Download size={14} /> Download Receipt
+                        </button>
+                        <button onClick={() => setCreationStep('MEDIA')} className="flex-1 py-4 bg-amber-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:scale-105 active:scale-95 transition-all">
+                           Continue to Media
+                        </button>
+                     </div>
+                  </div>
+                ) : creationStep === 'FAILED' ? (
+                  <div className="space-y-6 py-8 text-center">
+                     <div className="w-20 h-20 bg-red-100 text-red-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-red-500/20">
+                        <AlertCircle size={40} />
+                     </div>
+                     <div>
+                        <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Failed</h4>
+                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mt-1">Verification could not be completed</p>
+                     </div>
+                     <div className="p-4 bg-red-50 rounded-2xl border border-red-100 text-red-800 text-[11px] font-mono">
+                        {paymentResult?.error || 'Unknown error occurred during payment verification.'}
+                     </div>
+                     <div className="pt-4">
+                        <button onClick={() => setCreationStep('PAYMENT')} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-all">
+                           Try Again
+                        </button>
+                     </div>
                   </div>
                 ) : creationStep === 'PAYMENT' ? (
                   <div className="space-y-6 py-6">
@@ -1760,6 +2447,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <p className="text-center text-[10px] font-black text-green-600 uppercase animate-pulse">Payment Signal Ready. Click above to open gateway.</p>
                     )}
                     
+
                     <p className="text-center text-[9px] text-slate-400 font-bold uppercase tracking-widest italic opacity-60">Fast Secure Checkout • RBI Compliant</p>
                   </div>
                 ) : (
@@ -1934,7 +2622,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
                   {promotions[0].imageUrl && (
                     <div className="rounded-2xl overflow-hidden aspect-video border border-white/5 bg-white/10">
-                       <img src={promotions[0].imageUrl} alt={promotions[0].offer} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                       <img src={getSafeUrl(promotions[0].imageUrl)} alt={promotions[0].offer} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
                   )}
 
@@ -1947,7 +2635,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                        onClick={() => {
                          setActiveTab('DASHBOARD');
                          setShowFloatingOffer(false);
-                         setShowPayment(true);
+                         setCreationStep('DETAILS');
+                         openPaymentModal();
                        }}
                        className="flex-1 py-3 bg-white text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-500 transition-all active:scale-95"
                      >

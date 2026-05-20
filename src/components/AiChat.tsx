@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Bot, 
@@ -13,8 +12,8 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
-// Initialize Gemini API
-const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+// Remove legacy client-side initialization
+// const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
 
 interface Message {
   role: "user" | "model";
@@ -74,25 +73,28 @@ export function AiChat() {
     setError(null);
 
     try {
-      if (!import.meta.env.VITE_GEMINI_API_KEY) {
-        throw new Error("Gemini API key is not configured.");
-      }
-
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: messages.concat(userMessage).map(m => ({ 
-          role: m.role, 
-          parts: [{ text: m.text }] 
-        })),
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.7,
-          topP: 0.95,
-          topK: 40,
-        }
+      // Use the server-side proxy
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage.text,
+          history: messages.map(m => ({
+            role: m.role,
+            parts: [{ text: m.text }]
+          })),
+          language: 'English',
+          role: 'admin' // Using admin role as context for this assistant
+        }),
       });
 
-      const modelText = response.text;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to get a response from AI server.");
+      }
+
+      const data = await response.json();
+      const modelText = data.text;
       if (!modelText) throw new Error("No response from AI");
 
       setMessages(prev => [...prev, {

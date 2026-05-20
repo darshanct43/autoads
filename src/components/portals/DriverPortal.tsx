@@ -1,13 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity, CloudUpload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { firebaseService, AdCampaign, DriverAssignment, SupportTicket, ChatMessage } from '@/services/firebaseService';
-import { offlineStorageService } from '@/services/offlineStorageService';
-import StrictVerificationSystem from '@/components/common/StrictVerificationSystem';
+import { offlineStorageService, DocMeta } from '@/services/offlineStorageService';
 import { UserRole } from '@/types';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
@@ -43,8 +42,6 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [showBankModal, setShowBankModal] = useState(false);
   const [withdrawUpiId, setWithdrawUpiId] = useState('');
-  const [showVerificationRequired, setShowVerificationRequired] = useState(false);
-  const [isLocallyVerified, setIsLocallyVerified] = useState(false);
 
   const totalEarnings = payments
     .filter(p => p.type === 'earning')
@@ -60,6 +57,13 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
   const availableBalance = totalEarnings - totalWithdrawn - pendingWithdrawalAmount;
 
+  const handleEnterDisplayMode = () => {
+    if (confirm("Confirm: Switching to Display Terminal Mode. This will hide your dashboard and start showing advertisements.")) {
+      localStorage.setItem('auto_ads_is_terminal', 'true');
+      window.location.reload();
+    }
+  };
+
   const driverCampaigns = assignedCampaigns.filter(c => 
     assignments.some(a => a.campaignId === c.id)
   );
@@ -70,35 +74,34 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       
       if (u) {
         setUser(u);
-          const profile = await firebaseService.getDriverProfile(u.uid);
+        const unsubscribeProfile = firebaseService.subscribeToDriverProfile(u.uid, (profile) => {
           if (profile) {
-            if (!profile.driverCode || !profile.password) {
-              const genCode = `DRV-${u.uid.slice(-4).toUpperCase()}${Math.floor(100 + Math.random() * 900)}`;
-              const genPass = Math.random().toString(36).slice(-8);
-              await firebaseService.updateDriverProfile(u.uid, {
-                driverCode: genCode,
-                password: genPass
-              });
-              setDriverProfile({ ...profile, driverCode: genCode, password: genPass });
-            } else {
-              setDriverProfile(profile);
-            }
+            setDriverProfile(profile);
             if (profile.bankDetails) setBankDetails(profile.bankDetails);
           } else {
-            // New driver registration in production
-            const newProfile = {
-              uid: u.uid,
-              name: u.displayName || 'New Driver',
-              email: u.email || '',
-              phone: u.phoneNumber || '',
-              status: 'pending_verification' as const,
-              driverCode: `DRV-${u.uid.slice(-6).toUpperCase()}`,
-              password: Math.random().toString(36).slice(-8), 
-              createdAt: new Date().toISOString()
-            };
-            await firebaseService.saveDriverProfile(newProfile as any);
-            setDriverProfile(newProfile);
+             // If no profile, we still need to fetch once to create it
+             firebaseService.getDriverProfile(u.uid).then(async (p) => {
+               if (!p) {
+                 const newProfile = {
+                   uid: u.uid,
+                   name: u.displayName || 'New Driver',
+                   email: u.email || '',
+                   phone: u.phoneNumber || '',
+                   status: 'pending_verification' as const,
+                   driverCode: `DRV-${u.uid.slice(-6).toUpperCase()}`,
+                   password: Math.random().toString(36).slice(-8), 
+                   createdAt: new Date().toISOString()
+                 };
+                 await firebaseService.saveDriverProfile(newProfile as any);
+                 setDriverProfile(newProfile);
+               }
+             });
           }
+        });
+        return () => {
+          unsubscribe();
+          unsubscribeProfile();
+        }
       }
     });
     return () => unsubscribe();
@@ -141,7 +144,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
     if (user && status === 'ACTIVE') {
       reportLocation();
-      locationInterval = setInterval(reportLocation, 12000);
+      locationInterval = setInterval(reportLocation, 60000); // 60s instead of 12s
     }
 
     return () => {
@@ -248,22 +251,9 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
     }
   };
 
-  useEffect(() => {
-    const checkVerification = async () => {
-      if (!user) return;
-      const meta = await offlineStorageService.getMeta(user.uid);
-      const isDone = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded';
-      setIsLocallyVerified(isDone);
-    };
-    checkVerification();
-  }, [user]);
 
   const handleWithdrawClick = () => {
-    if (!isLocallyVerified) {
-      setShowVerificationRequired(true);
-      return;
-    }
-    // We now prioritize UPI ID for withdrawals as requested
+    // Verification requirement removed as requested
     setShowWithdraw(true);
   };
 
@@ -461,6 +451,8 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       default:
         return (
           <>
+            {/* Security Pipeline UI Removed */}
+
             <div className="bg-white p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-slate-200/50 border border-slate-100">
               <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Fleet Presence Status</p>
@@ -508,7 +500,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                   <div className="relative z-10 space-y-4">
                     <div className="flex items-center justify-between">
                        <div>
-                         <h3 className="text-lg font-black text-white italic tracking-tighter uppercase leading-none">Terminal <span className="text-amber-500">Hub</span></h3>
+                         <h3 className="text-lg font-black text-white italic tracking-tighter uppercase leading-none">Your <span className="text-amber-500">Display</span></h3>
                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">Managed Ad-Display Module</p>
                        </div>
                        <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
@@ -520,20 +512,18 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                     </div>
 
                     <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl space-y-3">
-                       <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest text-center">Hardware Deployment Credentials</p>
-                       <div className="grid grid-cols-2 gap-4">
-                          <div className="flex flex-col">
-                             <span className="text-[7px] font-black text-slate-500 uppercase">System UID</span>
-                             <span className="text-[10px] font-mono font-black text-white truncate">{user?.uid}</span>
-                          </div>
-                          <div className="flex flex-col text-right">
-                             <span className="text-[7px] font-black text-slate-500 uppercase">Device Password</span>
-                             <span className="text-[10px] font-mono font-black text-amber-500 tracking-widest">{driverProfile?.password || "PENDING"}</span>
-                          </div>
+                       <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest text-center">Hardware Display Activation</p>
+                       <div className="flex flex-col items-center gap-3">
+                          <p className="text-[8px] text-center text-slate-500 font-bold uppercase italic leading-tight">
+                             Terminal session is managed internally. Click below to use this device as an advertising display.
+                          </p>
+                          <button 
+                            onClick={handleEnterDisplayMode}
+                            className="w-full py-4 bg-amber-500 text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+                          >
+                            <Smartphone size={14} /> Launch Display Mode
+                          </button>
                        </div>
-                       <p className="text-[7px] text-center text-slate-500 font-bold uppercase italic leading-tight pt-1">
-                          Use these credentials to authenticate your physical display unit (Tab/Terminal).
-                       </p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pb-2">
@@ -545,13 +535,13 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                          className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center cursor-pointer transition-all hover:bg-white/10"
                          onClick={() => {
                            if (driverProfile?.accessKey) {
-                             alert(`Your Terminal Access Key is: ${driverProfile.accessKey}\n\nDo not share this key.`);
+                             alert(`Your Terminal Access Key is: ${driverProfile.accessKey} (Visible on Dashboard)`);
                            }
                          }}
                        >
                           <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Access Key</p>
                           <div className="flex items-center justify-center gap-2 text-white">
-                            <p className="text-xs font-mono font-black">{driverProfile?.accessKey ? "••••••" : "------"}</p>
+                            <p className="text-xs font-mono font-black text-amber-500">{driverProfile?.accessKey || "------"}</p>
                             <Eye size={10} className="text-slate-500" />
                           </div>
                        </div>
@@ -673,7 +663,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
       {/* Global Floating Back Button - Visible only in sub-views and not when verification is active */}
       <AnimatePresence>
-        {(activeTab === 'WITHDRAW' || showWithdraw || showSupport) && !showVerificationRequired && (
+        {(activeTab === 'WITHDRAW' || showWithdraw || showSupport) && (
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -936,19 +926,6 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       <AnimatePresence>
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showVerificationRequired && user && (
-          <StrictVerificationSystem 
-            uid={user.uid} 
-            onComplete={() => {
-              setIsLocallyVerified(true);
-              setShowVerificationRequired(false);
-              setShowWithdraw(true); // Auto-open withdrawal after verification
-            }} 
-            onLogout={() => setShowVerificationRequired(false)} 
-          />
-        )}
-      </AnimatePresence>
 
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/80 backdrop-blur-xl border border-white/20 p-3 rounded-[2.5rem] z-[90] flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.1)]">
           <button onClick={() => setActiveTab('EARNINGS')} className={cn("flex items-center gap-3 px-6 py-3 rounded-2xl transition-all", activeTab === 'EARNINGS' ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-600")}>

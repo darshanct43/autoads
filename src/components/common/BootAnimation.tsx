@@ -55,7 +55,7 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
 
     const timer = setTimeout(() => {
       onComplete();
-    }, 7000); // Rickshaw drives off to reveal the Intro Page
+    }, 3000); // Rickshaw drives off faster now for better UX
 
     return () => {
       clearTimeout(timer);
@@ -88,7 +88,7 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
           opacity: 1
         }}
         transition={{ 
-          duration: 7,
+          duration: 3,
           times: [0, 0.4, 0.7, 1],
           ease: "easeInOut"
         }}

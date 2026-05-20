@@ -11,7 +11,6 @@ import {
   AlertCircle,
   ChevronRight
 } from "lucide-react";
-import { GoogleGenAI } from "@google/genai";
 import { cn } from "@/lib/utils";
 
 interface AdminAssistantProps {
@@ -72,62 +71,32 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
     if (!overrideText) setInput("");
     setIsLoading(true);
 
-      try {
-        const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
-        
-        const transactionsBrief = systemContext.transactions?.slice(0, 8)
-          .map(t => {
-            const time = t.createdAt?.seconds ? new Date(t.createdAt.seconds * 1000) : 
-                         t.timestamp?.seconds ? new Date(t.timestamp.seconds * 1000) : 
-                         new Date();
-            return `- ₹${t.amount} (${t.type || t.status || 'Payment'}) on ${time.toLocaleDateString()}`;
-          })
-          .join("\n");
-  
-        const systemInstruction = role === 'admin' ? `
-          You are "Admin's AI Secretary". You managed the Auto Ads Global Network.
-          
-          CURRENT LOCATION: Admin is at ${activeTab}.
-          
-          LIVE DATA:
-          - Fleet: ${systemContext.driversCount} (${systemContext.liveUnitsCount} Live)
-          - Revenue: ₹${systemContext.totalRevenue}
-          - Payouts: ${systemContext.pendingWithdrawals} Pending
-          - Status: ${systemContext.fleetHealth}
-          
-          LOGS:
-          ${transactionsBrief || "Activity is standard."}
-          
-          RULES:
-          1. Be CASUAL but EFFICIENT. Address them as "Admin" frequently.
-          2. EXTREMELY SHORT ANSWERS. One sentence if possible.
-          3. Tone: Sharp, professional, loyal.
-        ` : `
-          You are "${assistantName}". You assist the users of Auto Ads platform.
-          You are talking to a ${role}.
-          Name: ${systemContext.userName || 'User'}
-          Balance: ₹${systemContext.balance || 0}
-          
-          RULES:
-          1. Be helpful and encouraging.
-          2. EXTREMELY SHORT ANSWERS.
-          3. If the user is on "CAMPAIGNS" and has an UNPAID campaign, encourage them to complete payment.
-          4. If they have paid but not uploaded media, remind them to upload media for team approval.
-          5. Encourage them to use the dashboard features.
-        `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          { role: "user", parts: [{ text: userMessage }] }
-        ],
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.1,
-        }
+    try {
+      // Use the server-side proxy to keep API keys secure and follow project rules
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          history: messages.map(m => ({
+            role: m.role,
+            parts: [{ text: m.content }]
+          })),
+          language: 'English',
+          role: role, // Pass role to server for correct system instructions
+          systemContext: systemContext // Pass context to AI for data-aware responses
+        }),
       });
 
-      const aiText = response.text || "I encountered a processing interrupt. Please retry.";
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to communicate with AI server');
+      }
+
+      const data = await response.json();
+      const aiText = data.text || "I encountered a processing interrupt. Please retry.";
       setMessages(prev => [...prev, { role: "assistant", content: aiText }]);
     } catch (error) {
       console.error("AI Assistant Error:", error);

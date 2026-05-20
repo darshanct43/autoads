@@ -5,7 +5,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export async function compressImage(file: File, maxWidth = 1024, quality = 0.55): Promise<Blob | File> {
+export async function compressImage(file: File | Blob, maxWidth = 1024, quality = 0.55): Promise<Blob | File | any> {
   // Only compress images
   if (!file.type.startsWith('image/')) {
     return file;

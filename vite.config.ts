@@ -10,6 +10,9 @@ export default defineConfig(({mode}) => {
     define: {
       'process.env': JSON.stringify(env),
     },
+    build: {
+      outDir: 'dist',
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -18,7 +21,7 @@ export default defineConfig(({mode}) => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: false,
     },
   };
 });

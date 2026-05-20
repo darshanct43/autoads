@@ -64,6 +64,18 @@ export const offlineStorageService = {
     });
   },
 
+  async getRawDocument(uid: string, type: DocId): Promise<Blob | null> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const key = `drivers/${uid}/${type}.jpg`;
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
   async getDocument(uid: string, type: DocId): Promise<string | null> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
@@ -109,14 +121,17 @@ export const offlineStorageService = {
       const key = `drivers/${uid}/meta.json`;
       const request = store.get(key);
       request.onsuccess = () => {
-        resolve(request.result || {
+        const defaults: DocMeta = {
           rc: 'pending',
           dl: 'pending',
           aadhar: 'pending',
+          pan: 'pending',
+          insurance: 'pending',
           selfie: 'pending',
           synced: false,
           updatedAt: 0
-        });
+        };
+        resolve({ ...defaults, ...(request.result || {}) });
       };
       request.onerror = () => reject(request.error);
     });
@@ -145,14 +160,19 @@ export const offlineStorageService = {
     }
 
     // Check if all primary uploaded locally
-    const isReady = meta.rc === 'uploaded' && meta.dl === 'uploaded' && meta.aadhar === 'uploaded' && meta.selfie === 'uploaded';
+    const isReady = meta.rc === 'uploaded' && 
+                    meta.dl === 'uploaded' && 
+                    meta.aadhar === 'uploaded' && 
+                    meta.selfie === 'uploaded' && 
+                    meta.pan === 'uploaded' &&
+                    meta.insurance === 'uploaded';
     if (!isReady) return false;
 
     await this.updateMeta(uid, { syncing: true });
 
     try {
       console.log(`[Sync] Starting cloud synchronization for driver ${uid}...`);
-      const types: DocId[] = ['rc', 'dl', 'aadhar', 'selfie', 'pan', 'insurance'];
+      const types: DocId[] = ['rc', 'dl', 'aadhar', 'pan', 'insurance', 'selfie'];
       const urls: any = { ...meta.urls };
 
       for (const t of types) {
@@ -162,24 +182,37 @@ export const offlineStorageService = {
         const blob = await this.getDocumentBlob(uid, t);
         if (blob) {
           const file = new File([blob], `${t}.jpg`, { type: 'image/jpeg' });
-          const path = storageService.getDriverDocPath(uid, t as any, `${t}.jpg`);
-          const url = await storageService.uploadFile(path, file);
+          
+          // Map local doc types to storage paths
+          let storageType: any = t;
+          if (t === 'dl') storageType = 'license';
+          if (t === 'selfie') storageType = 'profile';
+          if (t === 'rc') storageType = 'rc';
+          if (t === 'aadhar') storageType = 'aadhar';
+          if (t === 'pan') storageType = 'pan';
+          if (t === 'insurance') storageType = 'insurance';
+          
+          const path = storageService.getDriverDocPath(uid, storageType, `${t}.jpg`);
+          const url = await storageService.uploadFile(file);
           urls[t] = url;
           console.log(`[Sync] Uploaded ${t} to ${url}`);
         }
       }
 
-      // Update Firebase Profile with these URLs
-      await firebaseService.updateDriverProfile(uid, {
-        profileImage: urls.selfie,
-        aadharPhoto: urls.aadhar,
-        rcPhoto: urls.rc,
-        dlPhoto: urls.dl,
-        panPhoto: urls.pan,
-        insurancePhoto: urls.insurance,
+      // Update Firebase Profile with these URLs (Only those that exist)
+      const profileUpdates: any = {
         isVerified: false,
         status: 'pending_verification'
-      });
+      };
+      
+      if (urls.selfie) profileUpdates.profileImage = urls.selfie;
+      if (urls.aadhar) profileUpdates.aadharPhoto = urls.aadhar;
+      if (urls.rc) profileUpdates.rcPhoto = urls.rc;
+      if (urls.dl) profileUpdates.dlPhoto = urls.dl;
+      if (urls.pan) profileUpdates.panPhoto = urls.pan;
+      if (urls.insurance) profileUpdates.insurancePhoto = urls.insurance;
+
+      await firebaseService.updateDriverProfile(uid, profileUpdates);
 
       await this.updateMeta(uid, { 
         synced: true, 
@@ -196,4 +229,4 @@ export const offlineStorageService = {
   }
 };
 
-type DocId = 'rc' | 'dl' | 'aadhar' | 'selfie' | 'pan' | 'insurance';
+export type DocId = 'rc' | 'dl' | 'aadhar' | 'selfie' | 'pan' | 'insurance';

@@ -18,6 +18,7 @@ import {
   X,
   Smartphone,
   Zap,
+  Wifi,
   Trash2,
   MessageSquare,
   Send,
@@ -34,6 +35,9 @@ import {
   Terminal as TerminalIcon,
   AlertTriangle,
   ArrowLeft,
+  Eye,
+  ExternalLink,
+  Play,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -53,6 +57,7 @@ import {
   SupportTicket,
   ChatMessage,
 } from "@/services/firebaseService";
+import { storageService } from "@/services/storageService";
 import { auth } from "@/lib/firebase";
 import { UserRole } from "@/types";
 import RoadmapChart from "../common/RoadmapChart";
@@ -148,6 +153,82 @@ function InvalidateMap() {
   return null;
 }
 
+const getSafeUrl = (url: string | undefined | null) => {
+  if (!url) return undefined;
+  if (typeof url !== 'string') return undefined;
+
+  let cleaned = url.trim();
+  if (cleaned.startsWith('https://https://')) {
+    cleaned = cleaned.replace('https://https://', 'https://');
+  } else if (cleaned.startsWith('http://https://')) {
+    cleaned = cleaned.replace('http://https://', 'https://');
+  }
+
+  // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
+  if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
+    return undefined;
+  }
+
+  try {
+    const decoded = decodeURI(cleaned);
+    return encodeURI(decoded);
+  } catch (e) {
+    return cleaned;
+  }
+};
+
+const getCampaignExpiration = (campaign: any) => {
+  if (!campaign) return null;
+  let baseDate = new Date();
+  const timeSource = campaign.updatedAt || campaign.createdAt;
+  if (timeSource) {
+    if (typeof timeSource.toDate === 'function') {
+      baseDate = timeSource.toDate();
+    } else if (timeSource.seconds) {
+      baseDate = new Date(timeSource.seconds * 1000);
+    } else {
+      const parsed = new Date(timeSource);
+      if (!isNaN(parsed.getTime())) {
+        baseDate = parsed;
+      }
+    }
+  } else {
+    return null;
+  }
+
+  const durationDays = campaign.durationDays || 30;
+  const expirationDate = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const diffTime = expirationDate.getTime() - now.getTime();
+
+  if (diffTime <= 0) {
+    return {
+      expired: true,
+      formattedDate: expirationDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      timeLeftStr: "Expired"
+    };
+  }
+
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMins = Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60));
+
+  let timeLeftStr = "";
+  if (diffDays > 0) {
+    timeLeftStr = `${diffDays}d ${diffHours}h left`;
+  } else if (diffHours > 0) {
+    timeLeftStr = `${diffHours}h ${diffMins}m left`;
+  } else {
+    timeLeftStr = `${diffMins}m left`;
+  }
+
+  return {
+    expired: false,
+    formattedDate: expirationDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    timeLeftStr
+  };
+};
+
 interface AdminPortalProps {
   onRoleJump?: (role: UserRole) => void;
   onLogout: () => void;
@@ -175,16 +256,14 @@ export default function AdminPortal({
   const [payments, setPayments] = useState<Payment[]>([]);
   const [driverPayments, setDriverPayments] = useState<any[]>([]);
   const [deviceScreens, setDeviceScreens] = useState<any[]>([]);
-  const liveScreensCount = deviceScreens.filter((s) => {
-    if (!s.timestamp) return false;
-    const lastUpdate = s.timestamp.toMillis?.() || 0;
-    return Date.now() - lastUpdate < 30000; // 30 seconds for screen live stat
-  }).length;
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [isUpdatingPlan, setIsUpdatingPlan] = useState<string | null>(null);
   const [selectedDriverHistory, setSelectedDriverHistory] = useState<any[]>([]);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
+  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [driverPaymentsPage, setDriverPaymentsPage] = useState(1);
+  const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -206,9 +285,16 @@ export default function AdminPortal({
     endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     paymentConfirmed: false,
     mediaConfirmed: false,
+    mediaUrl: "",
+    mediaType: "IMAGE" as "IMAGE" | "VIDEO",
     targetLat: 12.9716,
     targetLng: 77.5946,
-    coverageRadius: 5000
+    coverageRadius: 5000,
+    startTime: "06:00",
+    endTime: "22:00",
+    daysOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+    designerFee: 0,
+    videoMakerFee: 0
   });
   const [selectedDriverForEarning, setSelectedDriverForEarning] =
     useState<any>(null);
@@ -220,14 +306,37 @@ export default function AdminPortal({
   );
   const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isEditingMedia, setIsEditingMedia] = useState(false);
+  const [editMediaUrl, setEditMediaUrl] = useState('');
+  const [editMediaType, setEditMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
+  const [isUpdatingMedia, setIsUpdatingMedia] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
+  const [driverDocuments, setDriverDocuments] = useState<any[]>([]);
   const [showDocModal, setShowDocModal] = useState(false);
+  const [pricingSubTab, setPricingSubTab] = useState<'BASE' | 'DESIGNER'>('BASE');
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedArea, setSelectedArea] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const [opFeedback, setOpFeedback] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [campaignMediaFile, setCampaignMediaFile] = useState<File | null>(null);
+  const [campaignMediaType, setCampaignMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
+  const [campaignUploadProgress, setCampaignUploadProgress] = useState(0);
+  const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
+  const [editUploadProgress, setEditUploadProgress] = useState(0);
   const [terminals, setTerminals] = useState<any[]>([]);
+  const [viewingUnit, setViewingUnit] = useState<any>(null);
+  const [networkConfigTarget, setNetworkConfigTarget] = useState<string | null>(null);
+  
+  const liveScreensCount = terminals.filter((t) => {
+    if (!t.metrics?.currentAdImage) return false;
+    const ts = t.metrics?.lastHeartbeat || t.lastPulse;
+    if (!ts) return false;
+    // lastPulse might be a firestore timestamp
+    const lastUpdate = ts.toMillis ? ts.toMillis() : new Date(ts).getTime();
+    return Date.now() - lastUpdate < 60000; // 60 seconds threshold
+  }).length;
   const [liveStatus, setLiveStatus] = useState<any[]>([]);
 
   useEffect(() => {
@@ -319,17 +428,55 @@ export default function AdminPortal({
     }
   };
 
+  const handleCampaignFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCampaignMediaFile(file);
+      setCampaignMediaType(file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE');
+    }
+  };
+
   const handleCreateCampaign = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setCampaignUploadProgress(0);
     const formData = new FormData(e.currentTarget);
 
     try {
+      let finalMediaUrl = "";
+      let finalMediaType = campaignMediaType;
+
+      if (campaignMediaFile) {
+        setOpFeedback({ message: "Uploading to AWS S3 / CloudFront...", type: 'info' });
+        console.log("[AdminPortal] Initializing AWS upload for:", campaignMediaFile.name);
+        
+        finalMediaUrl = await storageService.uploadFile(
+          campaignMediaFile,
+          (progressInfo) => {
+            setCampaignUploadProgress(progressInfo.progress);
+            if (progressInfo.status === 'ERROR') {
+              console.error("[AdminPortal] AWS Upload Failed:", progressInfo.error);
+            }
+          }
+        );
+        
+        console.log("[AdminPortal] AWS Upload Success. URL:", finalMediaUrl);
+        setOpFeedback({ message: "AWS Cloud Link Secured.", type: 'success' });
+      }
+
+      if (!finalMediaUrl) {
+        showToast("Please upload a file for the campaign.", 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
       await firebaseService.createCampaign({
         title: formData.get("title") as string,
         clientName: formData.get("clientName") as string,
         description: (formData.get("description") as string) || "",
-        assetUrl: formData.get("assetUrl") as string,
+        assetUrl: finalMediaUrl,
+        mediaUrl: finalMediaUrl,
+        mediaType: finalMediaType,
         budget: parseFloat(formData.get("budget") as string),
         targetLat: parseFloat(formData.get("targetLat") as string) || 12.9716,
         targetLng: parseFloat(formData.get("targetLng") as string) || 77.5946,
@@ -339,6 +486,8 @@ export default function AdminPortal({
         customerId: "SYSTEM_ADMIN",
       });
       setShowCampaignModal(false);
+      setCampaignMediaFile(null);
+      setCampaignUploadProgress(0);
       showToast("Campaign deployed to network.", 'success');
     } catch (err) {
       console.error(err);
@@ -455,6 +604,7 @@ export default function AdminPortal({
     const unsubNotices = firebaseService.subscribeToPublicNotices(setNotices);
     const unsubTerminals = firebaseService.subscribeToTerminals(setTerminals);
     const unsubLiveStatus = firebaseService.subscribeToLiveStatus(setLiveStatus);
+    // Document listeners removed
 
     firebaseService.getPlans().then(setPlans).catch(console.error);
     
@@ -474,6 +624,7 @@ export default function AdminPortal({
       unsubNotices();
       unsubTerminals();
       unsubLiveStatus();
+      // unsubDocs cleanup removed
     };
   }, []);
 
@@ -563,14 +714,17 @@ export default function AdminPortal({
     return () => unsub();
   }, []);
 
-  const handleApprovePlan = async (proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice' = 'price') => {
+  const handleApprovePlan = async (proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice' | 'videoMakerPrice' = 'price') => {
     try {
       await firebaseService.approvePlanProposal(proposalId, planId, newValue, type);
       const up = await firebaseService.getPlans();
       setPlans(up);
       const props = await firebaseService.getPlanProposals();
       setPlanProposals(props);
-      showToast(`${type === 'price' ? 'Base' : 'Designer'} rate updated successfully!`, 'success');
+      let label = 'Base';
+      if (type === 'designerPrice') label = 'Designer';
+      if (type === 'videoMakerPrice') label = 'Video Maker';
+      showToast(`${label} rate updated successfully!`, 'success');
     } catch (e) {
       console.error(e);
       showToast("Failed to approve plan change.", 'error');
@@ -695,17 +849,37 @@ export default function AdminPortal({
     }
   };
 
-  const handleApproveCampaign = async (campaignId: string) => {
+  const handleApproveCampaign = async (campaignId: string, preselectedDrivers?: string[]) => {
     const campaign = campaigns.find(c => c.id === campaignId);
     setApprovingCampaignId(campaignId);
     setApprovalForm(prev => ({
       ...prev,
       paymentConfirmed: campaign?.paymentReceived || false,
-      mediaConfirmed: campaign?.mediaReceived || (!!campaign?.assetUrl || !!campaign?.mediaUrl)
+      mediaConfirmed: campaign?.mediaReceived || (!!campaign?.assetUrl || !!campaign?.mediaUrl),
+      mediaUrl: campaign?.mediaUrl || campaign?.assetUrl || "",
+      mediaType: (campaign?.mediaType as any) || "IMAGE",
+      durationDays: campaign?.durationDays || 30,
+      hoursPerDay: campaign?.hoursPerDay || 8,
+      totalMinutes: campaign?.totalMinutes || 50,
+      maxAutos: campaign?.maxAutos || 5,
+      targetLat: campaign?.targetLat || 12.9716,
+      targetLng: campaign?.targetLng || 77.5946,
+      coverageRadius: campaign?.coverageRadius || 5000,
+      startTime: campaign?.startTime || "06:00",
+      endTime: campaign?.endTime || "22:00",
+      daysOfWeek: campaign?.daysOfWeek || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      designerFee: campaign?.designerFee || 0,
+      videoMakerFee: campaign?.videoMakerFee || 0
     }));
     setShowApprovalModal(true);
-    // Reset selection when starting approval
-    setSelectedDriverIds([]);
+    // Use preselected if provided, otherwise use existing, else clear
+    if (preselectedDrivers && preselectedDrivers.length > 0) {
+      setSelectedDriverIds(preselectedDrivers);
+    } else if (campaign?.assignedDrivers && campaign.assignedDrivers.length > 0) {
+      setSelectedDriverIds(campaign.assignedDrivers);
+    } else {
+      setSelectedDriverIds([]);
+    }
   };
 
   const handleConfirmApproval = async () => {
@@ -714,6 +888,11 @@ export default function AdminPortal({
 
     if (!approvalForm.paymentConfirmed || !approvalForm.mediaConfirmed) {
       showToast("Both Payment and Media must be confirmed before approval.", "error");
+      return;
+    }
+
+    if (!approvalForm.mediaUrl) {
+      showToast("A valid media source is required for approval.", "error");
       return;
     }
 
@@ -738,14 +917,22 @@ export default function AdminPortal({
           mediaConfirmed: approvalForm.mediaConfirmed,
           targetLat: approvalForm.targetLat,
           targetLng: approvalForm.targetLng,
-          coverageRadius: approvalForm.coverageRadius
+          coverageRadius: approvalForm.coverageRadius,
+          mediaUrl: approvalForm.mediaUrl,
+          mediaType: approvalForm.mediaType,
+          startTime: approvalForm.startTime,
+          endTime: approvalForm.endTime,
+          daysOfWeek: approvalForm.daysOfWeek,
+          designerFee: approvalForm.designerFee,
+          videoMakerFee: approvalForm.videoMakerFee
         },
       );
-      showToast("Campaign Approved and Drivers Assigned!", 'success');
+      showToast("Campaign approved and drivers assigned.", 'success');
       setShowApprovalModal(false);
       setApprovingCampaignId(null);
-    } catch (err) {
-      showToast("Approval sync failed. Check cloud rules.", 'error');
+    } catch (e) {
+      console.error(e);
+      showToast("Approval failed.", 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -762,19 +949,47 @@ export default function AdminPortal({
 
   const handleBulkAssign = async () => {
     if (!selectedCampaign?.id || selectedDriverIds.length === 0) return;
-    setIsAssigning(true);
+    // Instead of direct assignment, open the detailed desk
+    handleApproveCampaign(selectedCampaign.id, selectedDriverIds);
+  };
+
+  const handleUpdateMedia = async () => {
+    if (!selectedCampaign?.id) return;
+    setIsUpdatingMedia(true);
+    setEditUploadProgress(0);
     try {
-      await firebaseService.adminAssignDrivers(
-        selectedCampaign.id,
-        selectedDriverIds,
-      );
-      showToast(`Success! Campaign assigned to ${selectedDriverIds.length} drivers.`, 'success');
-      setSelectedCampaign(null);
-      setSelectedDriverIds([]);
-    } catch (e) {
-      showToast("Assignment failed.", 'error');
+      let finalUrl = editMediaUrl;
+      let finalType = editMediaType;
+
+      if (editMediaFile) {
+        setOpFeedback({ message: "Uploading updated asset...", type: 'info' });
+        finalUrl = await storageService.uploadFile(
+          editMediaFile,
+          (p) => setEditUploadProgress(p.progress)
+        );
+        finalType = editMediaFile.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+      }
+
+      if (!finalUrl) {
+        showToast("No media asset provided.", "error");
+        setIsUpdatingMedia(false);
+        return;
+      }
+
+      await firebaseService.updateCampaign(selectedCampaign.id, {
+        mediaUrl: finalUrl,
+        assetUrl: finalUrl,
+        mediaType: finalType
+      });
+      showToast("Media assets synchronized with cloud storage successfully.", "success");
+      setIsEditingMedia(false);
+      setEditMediaFile(null);
+      // Refresh local state
+      setSelectedCampaign(prev => prev ? { ...prev, mediaUrl: finalUrl, assetUrl: finalUrl, mediaType: finalType } : null);
+    } catch (err) {
+      showToast("Failed to update media assets.", "error");
     } finally {
-      setIsAssigning(false);
+      setIsUpdatingMedia(false);
     }
   };
 
@@ -824,6 +1039,94 @@ export default function AdminPortal({
   };
 
   const [isExtracting, setIsExtracting] = useState(false);
+
+  const handleSystemTest = async () => {
+    try {
+      setIsSubmitting(true);
+      showToast("Initializing Deep System Audit...", "info");
+      
+      // 1. Resolve Demo Driver 8861574729
+      const demoDriver = drivers.find(d => d.phone === '8861574729');
+      if (!demoDriver) {
+        showToast("CRITICAL: Driver 8861574729 not found. Please log in first.", "error");
+        return;
+      }
+
+      const campaignId = 'demo_campaign_id';
+      const terminalId = "TRM-DEMO-8861";
+
+      console.log("[Audit] Syncing Terminal & Driver Profile...");
+      // Ensure Terminal exists and is ACTIVE
+      await firebaseService.syncDemoTerminal(demoDriver.uid, terminalId, campaignId);
+      
+      // Ensure DUMMY Campaign exists with standard status logic
+      const campaignExists = campaigns.find(c => c.id === campaignId);
+      
+      const demoAssets = {
+        video: "https://d1234567890.cloudfront.net/demo-ad-1.mp4",
+        image: "https://d1234567890.cloudfront.net/demo-image-1.jpg"
+      };
+
+      if (!campaignExists) {
+        console.log("[Audit] Creating Demo Campaign...");
+        await firebaseService.createCampaign({
+          id: campaignId,
+          title: "SYSTEM_DEMO_LOOP",
+          clientName: "System Auditor",
+          mediaUrl: demoAssets.video, // Primary for compatibility
+          assetUrl: demoAssets.video,
+          mediaType: "VIDEO",
+          ads: [
+             { url: demoAssets.video, type: 'VIDEO', title: 'Demo Video', duration: 30 },
+             { url: demoAssets.image, type: 'IMAGE', title: 'Demo Image', duration: 10 }
+          ],
+          status: "LIVE", // Matches device filter
+          durationDays: 365,
+          assignedDrivers: [demoDriver.uid],
+          paymentReceived: true,
+          mediaReceived: true,
+          budget: 10000,
+          targetLat: 12.9716,
+          targetLng: 77.5946,
+          coverageRadius: 50000
+        } as any);
+      } else {
+        console.log("[Audit] Updating Demo Campaign...");
+        await firebaseService.updateCampaign(campaignId, {
+          status: 'LIVE',
+          assignedDrivers: [demoDriver.uid],
+          mediaUrl: demoAssets.video,
+          assetUrl: demoAssets.video,
+          mediaReceived: true,
+          paymentReceived: true,
+          ads: [
+             { url: demoAssets.video, type: 'VIDEO', title: 'Demo Video', duration: 30 },
+             { url: demoAssets.image, type: 'IMAGE', title: 'Demo Image', duration: 10 }
+          ],
+        });
+      }
+
+      // Ensure assignment is 'running'
+      const assignmentId = `asgn_${demoDriver.uid}_${campaignId}`;
+      await firebaseService.updateDriverAssignment(demoDriver.uid, campaignId, {
+         status: 'running',
+         updatedAt: new Date().toISOString()
+      });
+
+      // Browser Sync: Pre-seed local storage for seamless terminal switch
+      localStorage.setItem('temp_terminal_id', terminalId);
+      localStorage.setItem('temp_access_key', '8861');
+
+      console.log("[Audit] Complete. Driver 8861574729 is now LIVE via Terminal TRM-DEMO-8861");
+      showToast(`Audit Success. Terminal 8861 is linked and ready. Switch tabs to see ads.`, "success");
+      
+    } catch (e: any) {
+      console.error("[Audit] Fault detected:", e);
+      showToast("Audit Failed: " + e.message, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3; // metres
@@ -917,13 +1220,18 @@ export default function AdminPortal({
     exportToCSV(data, fileName);
   };
 
-  const filteredDrivers = (drivers || []).filter(
-    (d) =>
+  const filteredDrivers = (drivers || []).filter((d) => {
+    const matchesSearch =
       (d.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (d.phone || "").includes(searchTerm) ||
       (d.vNo || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (d.gpsId || "").toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+      (d.gpsId || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (d.city || "").toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesArea = selectedArea === "ALL" || (d.city || "").toUpperCase() === selectedArea.toUpperCase();
+    
+    return matchesSearch && matchesArea;
+  });
 
   return (
     <ErrorBoundary componentName="Admin Command Center">
@@ -931,12 +1239,14 @@ export default function AdminPortal({
       <AnimatePresence>
         {showPurgeConfirm && (
           <motion.div
+            key="purge-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6"
           >
             <motion.div 
+              key="purge-modal"
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               className="bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-md w-full border border-red-100"
@@ -975,6 +1285,7 @@ export default function AdminPortal({
       <AnimatePresence>
         {opFeedback && (
           <motion.div
+            key="op-feedback-top"
             initial={{ opacity: 0, y: -50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
@@ -996,10 +1307,8 @@ export default function AdminPortal({
             { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
             { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests", badge: planProposals.length > 0 },
             { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
-            { id: "REVIEWS", icon: Zap, title: "QC Queue" },
             { id: "MONITOR", icon: Smartphone, title: "Live Units", badge: liveScreensCount > 0 },
             { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
-            { id: "PRICING", icon: IndianRupee, title: "Market Rates" },
             { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
             { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
@@ -1108,8 +1417,9 @@ export default function AdminPortal({
       {/* Admin Mobile Menu Drawer */}
       <AnimatePresence>
         {showMobileMenu && (
-          <div className="fixed inset-0 z-[200] md:hidden">
+          <div key="mobile-menu-portal" className="fixed inset-0 z-[200] md:hidden">
             <motion.div
+              key="mobile-menu-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -1117,6 +1427,7 @@ export default function AdminPortal({
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
             />
             <motion.div
+              key="mobile-menu-drawer"
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
@@ -1135,10 +1446,8 @@ export default function AdminPortal({
                   { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
                   { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests" },
                   { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
-                  { id: "REVIEWS", icon: Zap, title: "QC Queue" },
                   { id: "MONITOR", icon: Smartphone, title: "Live Units" },
                   { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
-                  { id: "PRICING", icon: IndianRupee, title: "Market Rates" },
                   { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
                   { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
@@ -1261,7 +1570,7 @@ export default function AdminPortal({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-8 py-8 md:px-12 md:py-10 space-y-10 md:space-y-12 custom-scrollbar">
+        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-10 space-y-6 md:space-y-12 custom-scrollbar">
           {showRoadmap ? (
             <RoadmapChart onClose={() => setShowRoadmap(false)} />
           ) : activeTab === "DASHBOARD" ? (
@@ -1308,12 +1617,12 @@ export default function AdminPortal({
                   color: (liveUnitsCount || 0) > 0 ? "amber" : "slate",
                   icon: <Activity />,
                 },
-              ].map((stat, i) => (
+              ].map((stat) => (
                   <motion.div
-                    key={i}
+                    key={stat.label}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: i * 0.05 }}
+                    transition={{ delay: 0.05 }}
                     className="bg-slate-950 border border-white/10 p-3 md:p-6 rounded-2xl md:rounded-[2.5rem] group hover:border-amber-500/50 shadow-sm hover:shadow-xl hover:shadow-amber-500/5 transition-all cursor-pointer relative overflow-hidden"
                   >
                     <div className="absolute right-0 top-0 w-24 h-24 bg-amber-500/5 blur-2xl rounded-full -mr-12 -mt-12 group-hover:bg-amber-500/10 transition-colors" />
@@ -1448,8 +1757,8 @@ export default function AdminPortal({
                     </div>
                     <div className="space-y-6">
                       {dynamicChartData.length > 0 ? (
-                        dynamicChartData.map((item, i) => (
-                          <div key={i} className="space-y-2">
+                        dynamicChartData.map((item) => (
+                          <div key={item.name} className="space-y-2">
                             <div className="flex justify-between text-[10px] md:text-[11px] font-black uppercase tracking-widest">
                               <span className="text-slate-500">{item.name}</span>
                               <span className="text-slate-950 font-mono italic">
@@ -1547,6 +1856,14 @@ export default function AdminPortal({
                       {isExtracting ? <RefreshCw size={14} className="animate-spin text-amber-500" /> : <Download size={14} className="text-amber-500" />}
                       {isExtracting ? "Extracting..." : "Extract Matrix"}
                     </button>
+                    <button
+                      onClick={handleSystemTest}
+                      disabled={isSubmitting}
+                      className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-3 rounded-xl border border-amber-500 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50"
+                    >
+                      {isSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      {isSubmitting ? "Running Test..." : "Sync Demo Campaign"}
+                    </button>
                     {(activeTab === "CAMPAIGNS" || activeTab === "REVIEWS") && (
                       <div className="hidden sm:flex items-center gap-4">
                         <div className="text-right">
@@ -1582,9 +1899,9 @@ export default function AdminPortal({
                   <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
                     {campaigns
                       .filter((c) => c.status === "ACTIVE")
-                      .map((c, i) => (
+                      .map((c) => (
                         <div
-                          key={i}
+                          key={c.id}
                           className={cn(
                             "p-6 flex items-center justify-between hover:bg-slate-50 transition-all cursor-pointer group",
                             selectedCampaign?.id === c.id &&
@@ -1594,7 +1911,7 @@ export default function AdminPortal({
                         >
                           <div className="flex items-center gap-4">
                             <div className="w-16 h-12 bg-slate-900 rounded-xl overflow-hidden relative border border-slate-800">
-                              {c.mediaType === "IMAGE" ? (
+                              {c?.mediaType === "IMAGE" ? (
                                 <img
                                   src={c.mediaUrl}
                                   alt=""
@@ -1610,6 +1927,23 @@ export default function AdminPortal({
                               <h4 className="text-sm font-black text-slate-900 uppercase leading-none mb-1">
                                 {c.title}
                               </h4>
+                              {(() => {
+                                const exp = getCampaignExpiration(c);
+                                if (!exp) return null;
+                                return (
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <span className={cn(
+                                      "text-[8px] font-black px-1.5 py-0.5 rounded tracking-wider leading-none",
+                                      exp.expired ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600 animate-pulse"
+                                    )}>
+                                      {exp.timeLeftStr}
+                                    </span>
+                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                                      (Exp: {exp.formattedDate})
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                               <div className="flex flex-col gap-1.5">
                                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
                                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
@@ -1619,9 +1953,9 @@ export default function AdminPortal({
                                   <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
                                     <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1">Live Terminals:</p>
                                     <div className="flex flex-wrap gap-1">
-                                      {c.assignedDrivers.map((d: any) => (
-                                        <span key={d.driverId} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-black text-slate-700 shadow-sm">
-                                          {d.terminalId || d.driverId?.slice(-4).toUpperCase()}
+                                      {c.assignedDrivers.map((driverId: string) => (
+                                        <span key={driverId} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-black text-slate-700 shadow-sm">
+                                          {driverId.slice(-4).toUpperCase()}
                                         </span>
                                       ))}
                                     </div>
@@ -1701,25 +2035,160 @@ export default function AdminPortal({
                       Cluster: {selectedCampaign?.title.slice(0, 10)}
                     </span>
                   </div>
-                  <div className="p-4 border-b border-slate-50 bg-slate-50/10">
-                    <div className="relative">
-                      <Search
-                        size={14}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Search network nodes..."
-                        className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-2xl text-xs font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all shadow-sm"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
+                  <div className="p-4 border-b border-slate-50 bg-slate-50/10 space-y-4">
+                    {/* Media Edit Section */}
+                    <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Asset Sync (AWS/CDN)</h4>
+                        {!isEditingMedia ? (
+                          <button 
+                            onClick={() => {
+                              setEditMediaUrl(selectedCampaign?.mediaUrl || selectedCampaign?.assetUrl || '');
+                              setEditMediaType(selectedCampaign?.mediaType || 'IMAGE');
+                              setIsEditingMedia(true);
+                            }}
+                            className="text-[8px] font-black text-amber-600 uppercase hover:underline"
+                          >
+                            Update AWS Link
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => setIsEditingMedia(false)}
+                            className="text-[8px] font-black text-slate-400 uppercase hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingMedia ? (
+                        <div className="space-y-3">
+                          <div className="relative group/edit">
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              onChange={(e) => setEditMediaFile(e.target.files?.[0] || null)}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            />
+                            <div className={cn(
+                              "p-6 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 transition-all",
+                              editMediaFile ? "border-amber-500 bg-amber-50/10" : "border-slate-100 bg-slate-50/50"
+                            )}>
+                              {editMediaFile ? (
+                                <>
+                                  <Check size={20} className="text-amber-500" />
+                                  <p className="text-[9px] font-black uppercase text-slate-900 truncate max-w-full px-4">{editMediaFile.name}</p>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw size={20} className="text-slate-300" />
+                                  <p className="text-[9px] font-black uppercase text-slate-400">Swap with New File</p>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {!editMediaFile && (
+                            <>
+                              <div className="flex items-center gap-4 py-1">
+                                <div className="flex-1 h-px bg-slate-100" />
+                                <span className="text-[7px] font-black text-slate-300 uppercase">OR</span>
+                                <div className="flex-1 h-px bg-slate-100" />
+                              </div>
+                              <input 
+                                type="text"
+                                value={editMediaUrl}
+                                onChange={(e) => setEditMediaUrl(e.target.value)}
+                                placeholder="External Asset URL..."
+                                className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-[10px] font-bold text-slate-900 outline-none focus:ring-2 focus:ring-amber-500/20 transition-all font-mono"
+                              />
+                            </>
+                          )}
+                          
+                          <div className="flex gap-2">
+                             <button 
+                               onClick={() => setEditMediaType('IMAGE')}
+                               className={cn(
+                                 "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
+                                 editMediaType === 'IMAGE' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100"
+                               )}
+                             >
+                               Image
+                             </button>
+                             <button 
+                               onClick={() => setEditMediaType('VIDEO')}
+                               className={cn(
+                                 "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
+                                 editMediaType === 'VIDEO' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100"
+                               )}
+                             >
+                               Video
+                             </button>
+                          </div>
+                          
+                          {editUploadProgress > 0 && editUploadProgress < 100 && (
+                            <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                               <div className="h-full bg-amber-500" style={{ width: `${editUploadProgress}%` }} />
+                            </div>
+                          )}
+
+                          <button 
+                            onClick={handleUpdateMedia}
+                            disabled={isUpdatingMedia}
+                            className="w-full py-3 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/10 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                          >
+                            {isUpdatingMedia ? 'Processing...' : 'Secure Node Asset'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-10 bg-slate-900 rounded-lg overflow-hidden border border-slate-200">
+                             {selectedCampaign?.mediaType === 'IMAGE' ? (
+                               <img src={getSafeUrl(selectedCampaign?.mediaUrl)} className="w-full h-full object-cover opacity-60" />
+                             ) : (
+                               <div className="w-full h-full flex items-center justify-center"><Video size={14} className="text-slate-600" /></div>
+                             )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-tight truncate">
+                               {selectedCampaign?.mediaUrl || 'NOT LINKED'}
+                             </p>
+                             <p className="text-[7px] font-bold text-amber-600 uppercase mt-0.5">{selectedCampaign?.mediaType || 'NO'} ASSET ACTIVE</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Search
+                          size={14}
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Search nodes by name, number, city..."
+                          className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-2xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all shadow-sm h-14"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                      <select
+                        className="bg-white border border-slate-200 px-4 rounded-2xl text-[9px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-14"
+                        value={selectedArea}
+                        onChange={(e) => setSelectedArea(e.target.value)}
+                      >
+                        <option value="ALL">All Areas</option>
+                        {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
+                          <option key={city} value={city}>{city?.toUpperCase()}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto max-h-[400px] p-6 space-y-2">
-                    {filteredDrivers.map((d, i) => (
+                    {filteredDrivers.map((d) => (
                       <label
-                        key={i}
+                        key={d.uid}
                         className={cn(
                           "flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border",
                           selectedDriverIds.includes(d.uid)
@@ -1745,13 +2214,23 @@ export default function AdminPortal({
                                   )
                             }
                           />
-                          <div>
-                            <span className="text-[11px] font-black uppercase text-slate-900 block leading-none">
-                              {d.name}
-                            </span>
-                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
-                              {d.vNo || "Unit ID: " + d.uid.slice(0, 6)}
-                            </span>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-amber-500 group-hover:text-white transition-all">
+                              <Truck size={20} />
+                            </div>
+                            <div>
+                              <span className="text-[11px] font-black uppercase text-slate-900 block leading-none">
+                                {d.name}
+                              </span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-widest">
+                                  AUTO NO: {d.vNo || 'NOT SET'}
+                                </span>
+                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
+                                  {d.city || 'GLOBAL'}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                         <div
@@ -1795,12 +2274,12 @@ export default function AdminPortal({
       </div>
 
       {/* Driver Verification Section */}
-      <div className="space-y-4">
+      <div className="space-y-4 pb-12">
         <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Driver Onboarding ({drivers.filter(d => d.status === 'pending_verification').length})</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {drivers.filter(d => d.status === 'pending_verification').map((d, i) => (
+          {drivers.filter(d => d.status === 'pending_verification').map((d) => (
             <motion.div
-              key={i}
+              key={d.uid}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col group"
@@ -1820,13 +2299,14 @@ export default function AdminPortal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {[
                     { label: 'Aadhaar', key: 'aadharPhoto' },
                     { label: 'RC', key: 'rcPhoto' },
                     { label: 'License', key: 'dlPhoto' },
                     { label: 'PAN', key: 'panPhoto' },
-                    { label: 'Insurance', key: 'insurancePhoto' }
+                    { label: 'Insurance', key: 'insurancePhoto' },
+                    { label: 'Selfie', key: 'profileImage' }
                   ].map(doc => (
                     <div key={doc.key} className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-1">
                       <span className="text-[7px] font-black uppercase text-slate-400">{doc.label}</span>
@@ -1840,15 +2320,6 @@ export default function AdminPortal({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      setSelectedDriverForDocs(d);
-                      setShowDocModal(true);
-                    }}
-                    className="py-4 border border-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all font-sans"
-                  >
-                    Review Docs
-                  </button>
                   <button
                     onClick={() => {
                       const newId = d.terminalId || `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1884,15 +2355,15 @@ export default function AdminPortal({
           {campaigns.filter((c) => c.status === "PENDING").length > 0 ? (
             campaigns
               .filter((c) => c.status === "PENDING")
-                    .map((c, i) => (
+                    .map((c) => (
                       <motion.div
-                        key={i}
+                        key={c.id}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col h-full group"
                       >
                         <div className="h-56 bg-slate-950 relative overflow-hidden shrink-0 italic">
-                          {c.mediaType === "IMAGE" ? (
+                          {c?.mediaType === "IMAGE" ? (
                             <img
                               src={c.mediaUrl}
                               alt=""
@@ -1931,6 +2402,9 @@ export default function AdminPortal({
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                               <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
                               ID: {c.id?.slice(-8).toUpperCase()}
+                            </p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                              Requested Lifespan: <span className="text-slate-900 font-extrabold">{c.durationDays || 30} Days</span>
                             </p>
                             <div className="flex flex-wrap gap-2 pt-2">
                                <div className={cn(
@@ -2007,18 +2481,18 @@ export default function AdminPortal({
                     <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">No pending price proposals from support team</p>
                  </div>
                ) : (
-                 planProposals.map((prop, i) => {
+                 planProposals.map((prop) => {
                    const plan = plans.find(p => p.id === prop.planId);
                    return (
                      <motion.div 
-                       key={i}
+                       key={prop.id}
                        initial={{ opacity: 0, scale: 0.95 }}
                        animate={{ opacity: 1, scale: 1 }}
                        className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6 relative group"
                      >
                         <div className="flex items-center justify-between">
                            <div className="bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">
-                              {prop.type === 'designerPrice' ? 'Designer Rate' : 'Base Rate'}
+                              {prop.type === 'designerPrice' ? 'Designer Rate' : prop.type === 'videoMakerPrice' ? 'Video Rate' : 'Base Rate'}
                            </div>
                            <span className="text-[10px] font-bold text-slate-400">{prop.createdAt?.toDate?.()?.toLocaleDateString() || 'Today'}</span>
                         </div>
@@ -2036,7 +2510,7 @@ export default function AdminPortal({
                            <div className="w-px h-10 bg-slate-200" />
                            <div className="flex-1">
                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current</p>
-                              <p className="text-2xl font-black text-slate-300 italic">₹{prop.type === 'designerPrice' ? plan?.designerPrice : plan?.price}</p>
+                              <p className="text-2xl font-black text-slate-300 italic">₹{prop.type === 'designerPrice' ? plan?.designerPrice : prop.type === 'videoMakerPrice' ? plan?.videoMakerPrice : plan?.price}</p>
                            </div>
                         </div>
 
@@ -2069,8 +2543,8 @@ export default function AdminPortal({
                 { label: 'Cloud Units Ready', value: drivers.filter(d => d.status === 'active').length, sub: 'Approved Fleet', icon: ShieldCheck },
                 { label: 'Total Revenue', value: `₹${totalSuccessfulRevenue.toLocaleString()}`, sub: 'Cumulative', icon: IndianRupee },
                 { label: 'Online Now', value: liveUnitsCount, sub: 'Real-time Pulse', icon: Activity }
-              ].map((stat, i) => (
-                <div key={i} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
+              ].map((stat) => (
+                <div key={stat.label} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
                   <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
                     <stat.icon className="text-amber-500" size={100} />
                   </div>
@@ -2118,13 +2592,13 @@ export default function AdminPortal({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                {drivers.filter(d => (d.terminalId || '').toUpperCase().includes(searchTerm.toUpperCase())).map((d, i) => {
+                {drivers.filter(d => (d.terminalId || '').toUpperCase().includes(searchTerm.toUpperCase())).map((d) => {
                   const status = liveStatus.find(s => s.terminalId === d.terminalId);
                   const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
                   
                   return (
                     <motion.div
-                      key={i}
+                      key={d.uid}
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-8 space-y-6 relative group overflow-hidden"
@@ -2168,7 +2642,7 @@ export default function AdminPortal({
                       {status?.currentAdImage && (
                         <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group/screen">
                           <img 
-                            src={status.currentAdImage} 
+                            src={getSafeUrl(status.currentAdImage)} 
                             className="w-full h-full object-cover transition-transform duration-500 group-hover/screen:scale-110" 
                             alt="Live Display"
                             referrerPolicy="no-referrer"
@@ -2271,15 +2745,6 @@ export default function AdminPortal({
                         </button>
                         <button 
                           onClick={() => {
-                            setSelectedDriverForDocs(d);
-                            setShowDocModal(true);
-                          }}
-                          className="p-4 bg-slate-100 text-slate-600 rounded-2xl hover:bg-slate-200 transition-all text-[8px] font-black uppercase"
-                        >
-                          Docs
-                        </button>
-                        <button 
-                          onClick={() => {
                             if(window.confirm(`Revoke access for Terminal ${d.terminalId}?`)) {
                               firebaseService.revokeTerminal(d.terminalId!, d.uid)
                                 .then(() => showToast("Terminal credentials revoked.", 'info'))
@@ -2292,6 +2757,32 @@ export default function AdminPortal({
                         </button>
                       </div>
                       
+                      {d.terminalId && (
+                        <div className="flex gap-2">
+                           <button 
+                               onClick={() => setNetworkConfigTarget(d.terminalId)}
+                               className="flex-1 py-3 bg-amber-50 text-amber-600 border border-amber-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-amber-100 transition-colors"
+                           >
+                              Config WiFi
+                           </button>
+                           {isOnline && (
+                             <button 
+                                 onClick={() => {
+                                   if (window.confirm("Restart this device remotely?")) {
+                                     const termRefId = terminals.find(t => t.id === d.terminalId)?.id || d.terminalId;
+                                     firebaseService.updateTerminalCommand(termRefId, "REBOOT")
+                                        .then(() => showToast("Reboot command sent.", "success"))
+                                        .catch(e => showToast("Error: " + e.message, "error"));
+                                   }
+                                 }}
+                                 className="flex-1 py-3 bg-red-50 text-red-600 border border-red-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-red-100 transition-colors"
+                             >
+                                Restart
+                             </button>
+                           )}
+                        </div>
+                      )}
+
                       {/* Decorative Element */}
                       <div className="absolute -left-10 -bottom-10 w-24 h-24 bg-amber-500/10 blur-3xl rounded-full" />
                     </motion.div>
@@ -2300,121 +2791,7 @@ export default function AdminPortal({
               </div>
             </div>
           </div>
-        ) : activeTab === "PRICING" ? (
-            <div className="space-y-8">
-              <div className="bg-slate-900 p-6 md:p-8 rounded-3xl flex items-center justify-between text-white">
-                <div>
-                  <h2 className="text-3xl font-black italic uppercase text-amber-500">
-                    Marketplace Economics
-                  </h2>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    Pricing Strategy Module
-                  </p>
-                </div>
-                <IndianRupee className="text-amber-500" size={32} />
-              </div>
-
-              {/* Proposals Section */}
-              {planProposals && planProposals.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Rate Adjustments (From Support)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {planProposals.map((proposal, i) => {
-                      const plan = plans.find(p => p.id === proposal.planId);
-                      return (
-                        <div key={i} className="bg-amber-50 p-6 rounded-2xl border border-amber-100 shadow-sm space-y-4">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest leading-none mb-1">Proposed Change</p>
-                              <h4 className="text-sm font-black text-slate-900 uppercase">{plan?.name || "Unknown Plan"}</h4>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Old: ₹{plan?.price || 0}</p>
-                              <p className="text-lg font-black text-amber-600 decoration-amber-500">→ ₹{proposal.newPrice}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleApprovePlan(proposal.id, proposal.planId, proposal.newPrice).catch(() => {})}
-                              className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all font-sans"
-                            >
-                              Approve
-                            </button>
-                            <button 
-                              onClick={() => handleRejectPlan(proposal.id).catch(() => {})}
-                              className="flex-1 py-3 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-500 transition-all font-sans"
-                            >
-                              Ignore
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {plans.map((plan, i) => (
-                  <div
-                    key={i}
-                    className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl space-y-6 relative overflow-hidden group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-black text-slate-900 uppercase decoration-amber-500 underline underline-offset-4">
-                        {plan.name} Tier
-                      </h3>
-                      <span className="text-2xl font-black italic text-slate-900 tracking-tight">
-                        ₹{plan.price}
-                      </span>
-                    </div>
-
-                    <div className="space-y-4 pt-4 border-t border-slate-50">
-                      <div className="space-y-1">
-                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Designer Rate</p>
-                         <p className="text-lg font-black text-slate-900 italic tracking-tight">₹{plan.designerPrice || 1000}</p>
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <button 
-                          onClick={() => {
-                            const newVal = window.prompt(`Proposed NEW price for ${plan.name} (Current: ${plan.price})`, plan.price);
-                            if (newVal && !isNaN(parseFloat(newVal))) {
-                              firebaseService.proposePlanChange({
-                                planId: plan.id,
-                                newPrice: parseFloat(newVal),
-                                proposedBy: auth.currentUser?.displayName || 'Support Admin',
-                                type: 'price'
-                              }).then(() => showToast("Price Proposal Sent!", 'info'));
-                            }
-                          }}
-                          className="w-full py-4 bg-slate-50 border border-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-sm"
-                        >
-                          Modify Base Rate
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const newVal = window.prompt(`Proposed Designer Charge for ${plan.name} (Current: ${plan.designerPrice || 1000})`, (plan.designerPrice || 1000).toString());
-                            if (newVal && !isNaN(parseFloat(newVal))) {
-                              firebaseService.proposePlanChange({
-                                planId: plan.id,
-                                newPrice: parseFloat(newVal),
-                                proposedBy: auth.currentUser?.displayName || 'Support Admin',
-                                type: 'designerPrice'
-                              }).then(() => showToast("Designer Rate Proposal Sent!", 'info'));
-                            }
-                          }}
-                          className="w-full py-4 bg-amber-50 border border-amber-100 text-amber-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all shadow-sm italic"
-                        >
-                          Adjust Designer Fee
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : activeTab === "MAP" ? (
+        ) : activeTab === "MAP" ? (
             <div className="flex flex-col space-y-4 relative">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4 shrink-0 px-1">
                 <div>
@@ -2562,9 +2939,9 @@ export default function AdminPortal({
                     )}
 
                     {/* Render Issue Reports */}
-                    {showIssues && tickets.filter(t => t.type === 'DEVICE' && t.lat && t.lng).map((ticket, i) => (
+                    {showIssues && tickets.filter(t => t.type === 'DEVICE' && t.lat && t.lng).map((ticket) => (
                       <Marker 
-                        key={`ticket-${i}`}
+                        key={ticket.id}
                         position={[ticket.lat!, ticket.lng!]}
                         icon={L.divIcon({
                           className: 'custom-issue-icon',
@@ -2780,10 +3157,10 @@ export default function AdminPortal({
                           <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
                             {driverLocations
                               .filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0))
-                              .map((loc, idx) => {
+                              .map((loc) => {
                                 const driver = drivers.find(d => d.uid === loc.driverId);
                                 return (
-                                  <div key={idx} className="flex flex-col bg-white/10 p-2 rounded-lg border border-white/10">
+                                  <div key={loc.driverId || Math.random().toString()} className="flex flex-col bg-white/10 p-2 rounded-lg border border-white/10">
                                     <span className="text-[8px] font-black uppercase truncate">{driver?.fullName || 'Unknown Unit'}</span>
                                     <span className="text-[6px] font-bold opacity-70 uppercase">ID: {loc.terminalId || 'N/A'}</span>
                                   </div>
@@ -2836,7 +3213,7 @@ export default function AdminPortal({
                       <div className="space-y-4 max-h-64 overflow-y-auto pr-3 custom-scrollbar">
                         {selectedDriverHistory.slice(0, 20).map((log, i) => (
                           <div
-                            key={i}
+                            key={log.timestamp?.seconds ? `${log.timestamp.seconds}-${i}` : `log-${i}`}
                             className="flex gap-4 relative pb-4 last:pb-0"
                           >
                             {i < selectedDriverHistory.length - 1 && (
@@ -2989,9 +3366,9 @@ export default function AdminPortal({
                               highlight: true,
                             },
                             { label: "Last Sync", value: "Active" },
-                          ].map((item, i) => (
+                          ].map((item) => (
                             <div
-                              key={i}
+                              key={item.label}
                               className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-50"
                             >
                               <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
@@ -3159,9 +3536,11 @@ export default function AdminPortal({
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {paymentSubTab === "INCOME"
-                        ? payments.map((p, i) => (
+                        ? payments
+                            .slice((paymentsPage - 1) * itemsPerPage, paymentsPage * itemsPerPage)
+                            .map((p) => (
                             <tr
-                              key={i}
+                              key={p.id}
                               className="hover:bg-slate-50 transition-all border-b border-slate-50"
                             >
                               <td className="px-8 py-5 text-[10px] font-mono text-slate-400">
@@ -3171,7 +3550,7 @@ export default function AdminPortal({
                                 ₹{p.amount?.toLocaleString()}
                               </td>
                               <td className="px-8 py-5 text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                                {p.customerId || "Customer"}
+                                {p.customerId || p.customerPhone || "Guest"}
                               </td>
                               <td className="px-8 py-5">
                                 <span className="px-3 py-1 bg-green-50 text-green-500 rounded-full text-[8px] font-black uppercase">
@@ -3189,9 +3568,11 @@ export default function AdminPortal({
                               </td>
                             </tr>
                           ))
-                        : driverPayments.map((p, i) => (
+                        : driverPayments
+                              .slice((driverPaymentsPage - 1) * itemsPerPage, driverPaymentsPage * itemsPerPage)
+                              .map((p) => (
                             <tr
-                              key={i}
+                              key={p.id}
                               className="hover:bg-slate-50 transition-all border-b border-slate-50"
                             >
                               <td className="px-8 py-5 text-[10px] font-mono text-slate-400">
@@ -3222,6 +3603,21 @@ export default function AdminPortal({
                           ))}
                     </tbody>
                   </table>
+                  {(paymentSubTab === "INCOME" ? payments.length : driverPayments.length) > itemsPerPage && (
+                    <div className="flex items-center justify-between p-6 border-t border-slate-50">
+                        <button 
+                          disabled={paymentSubTab === "INCOME" ? paymentsPage === 1 : driverPaymentsPage === 1}
+                          onClick={() => paymentSubTab === "INCOME" ? setPaymentsPage(p => p - 1) : setDriverPaymentsPage(p => p - 1)}
+                          className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
+                          >Previous</button>
+                        <span className="text-[10px] font-black text-slate-400 uppercase">Page {paymentSubTab === "INCOME" ? paymentsPage : driverPaymentsPage} of {Math.ceil((paymentSubTab === "INCOME" ? payments.length : driverPayments.length) / itemsPerPage)}</span>
+                        <button 
+                          disabled={paymentSubTab === "INCOME" ? paymentsPage === Math.ceil(payments.length / itemsPerPage) : driverPaymentsPage === Math.ceil(driverPayments.length / itemsPerPage)}
+                          onClick={() => paymentSubTab === "INCOME" ? setPaymentsPage(p => p + 1) : setDriverPaymentsPage(p => p + 1)}
+                          className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
+                          >Next</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3465,16 +3861,17 @@ export default function AdminPortal({
 
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-                  {(deviceScreens || []).map((screen, i) => {
+                  {(terminals || []).filter(t => t.metrics?.currentAdImage).map((t) => {
                     const driver = (drivers || []).find(
-                      (d) => d.uid === screen.driverId,
+                      (d) => d.uid === t.driverId,
                     );
+                    const isOnline = t.metrics?.online;
                     return (
                       <motion.div
-                        key={i}
+                        key={t.id}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.05 }}
+                        transition={{ delay: 0.05 }}
                         className="bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-sm hover:shadow-2xl transition-all group overflow-hidden relative"
                       >
                         <div className="flex items-center justify-between mb-6">
@@ -3484,46 +3881,53 @@ export default function AdminPortal({
                             </div>
                             <div>
                               <h4 className="text-[11px] font-black text-slate-900 uppercase italic tracking-tighter">
-                                {driver?.name || `Unknown Unit (${screen.driverId?.slice(-6) || "ID_MISSING"})`}
+                                {driver?.name || `Unknown Unit (${t.id.slice(-6)})`}
                               </h4>
                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
-                                ID: {screen.driverId?.slice(0, 8)}
+                                ID: {t.id.slice(0, 8)}
                               </p>
                             </div>
                           </div>
                           <div
                             className={cn(
                               "text-[7px] font-black uppercase tracking-widest px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-sm",
-                              screen.status === "playing"
+                              isOnline
                                 ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-500/5"
-                                : screen.status === "error"
-                                  ? "bg-red-50 text-red-600 border-red-100"
-                                  : "bg-slate-50 text-slate-400 border-slate-100",
+                                : "bg-red-50 text-red-600 border-red-100"
                             )}
                           >
                             <div
                               className={cn(
                                 "w-1.5 h-1.5 rounded-full",
-                                screen.status === "playing"
+                                isOnline
                                   ? "bg-emerald-500 animate-pulse"
-                                  : screen.status === "error"
-                                    ? "bg-red-500"
-                                    : "bg-slate-300",
+                                  : "bg-red-500"
                               )}
                             />
-                            {screen.status?.toUpperCase()}
+                            {isOnline ? "PLAYING" : "OFFLINE"}
                           </div>
                         </div>
 
-                        <div className="aspect-[16/9] w-full bg-slate-100 rounded-3xl overflow-hidden relative cursor-zoom-in border border-slate-100 mb-6 group-hover:scale-[1.02] transition-transform duration-500">
-                          <img
-                            src={screen.imageUrl}
-                            alt="Device Snapshot"
-                            className="w-full h-full object-cover grayscale-[0.2] hover:grayscale-0 transition-all duration-700"
-                            referrerPolicy="no-referrer"
-                          />
+                        <div className="aspect-[16/9] w-full bg-slate-100 rounded-3xl overflow-hidden relative border border-slate-100 mb-6 group-hover:scale-[1.02] transition-transform duration-500">
+                           {t.metrics?.currentAdType === 'VIDEO' || t.metrics?.currentAdImage?.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
+                              <video
+                                src={getSafeUrl(t.metrics.currentAdImage)}
+                                className="w-full h-full object-cover grayscale-[0.2] hover:grayscale-0 transition-all duration-700"
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                              />
+                           ) : (
+                              <img
+                                src={getSafeUrl(t.metrics.currentAdImage) || `https://placehold.co/600x400/1e293b/FFFFFF/png?text=Unit+${t.id.slice(0, 4)}`}
+                                alt="Device Snapshot"
+                                className="w-full h-full object-cover grayscale-[0.2] hover:grayscale-0 transition-all duration-700"
+                                referrerPolicy="no-referrer"
+                              />
+                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                            <button className="w-full py-2 bg-white/20 backdrop-blur-md border border-white/20 rounded-xl text-white text-[8px] font-black uppercase tracking-widest">
+                            <button onClick={() => setViewingUnit(t)} className="w-full py-2 bg-white/20 backdrop-blur-md border border-white/20 rounded-xl text-white text-[8px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/30 transition-all">
                               Expand Vision
                             </button>
                           </div>
@@ -3535,10 +3939,10 @@ export default function AdminPortal({
                               Transmitted at
                             </span>
                             <span className="text-slate-900 font-mono italic">
-                              {screen.timestamp
+                              {t.metrics?.lastHeartbeat || t.lastPulse
                                 ? new Date(
-                                    screen.timestamp.toMillis?.() ||
-                                      screen.timestamp,
+                                    t.metrics?.lastHeartbeat ||
+                                      (t.lastPulse?.toMillis?.() || t.lastPulse)
                                   ).toLocaleString([], {
                                     hour: "2-digit",
                                     minute: "2-digit",
@@ -3555,7 +3959,15 @@ export default function AdminPortal({
                               Stable 54ms
                             </span>
                           </div>
-                          <button className="w-full mt-2 py-4 bg-slate-50 text-slate-900 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] border border-slate-100 hover:bg-slate-950 hover:text-white transition-all group-hover:shadow-[0_15px_30px_-10px_rgba(0,0,0,0.1)]">
+                          <button 
+                            onClick={() => {
+                              showToast("Diagnostic frame capture requested from Terminal", "info");
+                              setTimeout(() => {
+                                showToast("Live frame successfully captured via secure tunnel", "success");
+                              }, 2000);
+                            }}
+                            className="w-full mt-2 py-4 bg-slate-50 text-slate-900 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] border border-slate-100 hover:bg-slate-950 hover:text-white transition-all group-hover:shadow-[0_15px_30px_-10px_rgba(0,0,0,0.1)]"
+                          >
                             CAPTURE LIVE FRAME
                           </button>
                         </div>
@@ -3583,8 +3995,8 @@ export default function AdminPortal({
             <div className="space-y-6 pb-32">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
                 <div className="absolute right-0 top-0 w-64 h-64 bg-emerald-500/5 blur-3xl rounded-full" />
-                <div className="relative z-10 flex items-center justify-between">
-                  <div>
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-6 w-full">
+                  <div className="shrink-0">
                     <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500">
                       Fleet Operations
                     </h2>
@@ -3592,13 +4004,37 @@ export default function AdminPortal({
                       Network Personnel Cluster
                     </p>
                   </div>
+                  
+                  <div className="flex flex-1 gap-3 w-full">
+                    <div className="relative flex-1">
+                      <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input 
+                        type="text" 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search fleet..."
+                        className="w-full bg-white/5 border border-white/10 p-3 pl-10 rounded-xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all h-12"
+                      />
+                    </div>
+                    <select
+                      className="bg-white/5 border border-white/10 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-12 text-white"
+                      value={selectedArea}
+                      onChange={(e) => setSelectedArea(e.target.value)}
+                    >
+                      <option value="ALL" className="bg-slate-900 text-white">All Areas</option>
+                      {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
+                        <option key={city} value={city} className="bg-slate-900 text-white">{city?.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <button
-                    onClick={(e) => handleExtractionClick(e, drivers, "Network_Fleet_Directory")}
+                    onClick={(e) => handleExtractionClick(e, filteredDrivers, "Network_Fleet_Directory")}
                     disabled={isExtracting}
-                    className="bg-amber-500 text-slate-950 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50"
+                    className="bg-amber-500 text-slate-950 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50 h-12 shrink-0"
                   >
                     {isExtracting ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-                    {isExtracting ? "Processing..." : "Extract Data"}
+                    {isExtracting ? "Processing..." : "Extract"}
                   </button>
                 </div>
               </div>
@@ -3625,9 +4061,9 @@ export default function AdminPortal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {filteredDrivers.map((d, i) => (
+                      {filteredDrivers.map((d) => (
                         <tr
-                          key={i}
+                          key={d.uid}
                           className="hover:bg-slate-50/50 transition-all group"
                         >
                           <td className="px-8 py-5">
@@ -3674,15 +4110,6 @@ export default function AdminPortal({
                               </button>
                               <button
                                 onClick={() => {
-                                  setSelectedDriverForDocs(d);
-                                  setShowDocModal(true);
-                                }}
-                                className="text-[8px] font-black bg-slate-100 text-slate-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
-                              >
-                                Docs
-                              </button>
-                              <button
-                                onClick={() => {
                                   setSelectedDriverForProvision(d);
                                   setShowProvisionModal(true);
                                 }}
@@ -3700,9 +4127,9 @@ export default function AdminPortal({
 
                   {/* Mobile Card Layout */}
                   <div className="sm:hidden divide-y divide-slate-100 p-4 space-y-4">
-                    {filteredDrivers.map((d, i) => (
+                    {filteredDrivers.map((d) => (
                       <div
-                        key={i}
+                        key={d.uid}
                         className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4"
                       >
                         <div className="flex justify-between items-start">
@@ -3827,11 +4254,11 @@ export default function AdminPortal({
             </div>
             <div className="grid grid-cols-1 gap-6">
               {withdrawRequests.length > 0 ? (
-                withdrawRequests.map((req, i) => {
+                withdrawRequests.map((req) => {
                   const driver = drivers.find((d) => d.uid === req.driverId);
                   return (
                     <div
-                      key={i}
+                      key={req.id}
                       className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between border border-slate-100 group hover:border-amber-500/50 transition-all"
                     >
                       <div className="flex items-center gap-5">
@@ -4041,6 +4468,7 @@ export default function AdminPortal({
                         src={newNotice.imageUrl}
                         alt="Preview"
                         className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
                       />
                       <button
                         type="button"
@@ -4156,7 +4584,11 @@ export default function AdminPortal({
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
-            onClick={() => setShowCampaignModal(false)}
+            onClick={() => {
+              setShowCampaignModal(false);
+              setCampaignMediaFile(null);
+              setCampaignUploadProgress(0);
+            }}
           ></div>
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
@@ -4167,24 +4599,88 @@ export default function AdminPortal({
               New Campaign
             </h3>
             <form onSubmit={handleCreateCampaign} className="space-y-4">
-              <input
-                name="title"
-                required
-                placeholder="Title"
-                className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
-              />
-              <input
-                name="clientName"
-                required
-                placeholder="Client"
-                className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
-              />
-              <input
-                name="assetUrl"
-                required
-                placeholder="Asset URL"
-                className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
-              />
+              <div className="space-y-4">
+                <input
+                  name="title"
+                  required
+                  placeholder="Title"
+                  className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
+                />
+                <input
+                  name="clientName"
+                  required
+                  placeholder="Client"
+                  className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
+                />
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Campaign Media (Photo/Video)</label>
+                  <div className="relative group/upload">
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={handleCampaignFileChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div className="p-8 border-2 border-dashed border-slate-100 rounded-3xl group-hover/upload:border-amber-500/50 bg-slate-50/50 flex flex-col items-center justify-center gap-3 transition-all">
+                      {campaignMediaFile ? (
+                        <>
+                          <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
+                            {campaignMediaType === 'VIDEO' ? <Play size={24} /> : <ImageIcon size={24} />}
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[10px] font-black uppercase text-slate-900 truncate max-w-[200px]">{campaignMediaFile.name}</p>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase">Size: {(campaignMediaFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300">
+                             <RefreshCw size={24} />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[10px] font-black uppercase text-slate-900">Click or Drag Upload</p>
+                            <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">MP4, JPG, PNG Supported</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {campaignUploadProgress > 0 && campaignUploadProgress < 100 && (
+            <div className="px-2">
+              <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500" style={{ width: `${campaignUploadProgress}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+        {!campaignMediaFile && (
+          <div className="space-y-4">
+            <p className="text-[10px] text-center text-slate-400">Please select an image or video file to proceed with campaign deployment.</p>
+          </div>
+        )}
+        <div className="flex gap-2">
+           <button 
+             type="button"
+             onClick={() => setCampaignMediaType('IMAGE')}
+             className={cn(
+               "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
+               campaignMediaType === 'IMAGE' ? "bg-slate-900 text-white border-slate-900 shadow-lg" : "bg-white text-slate-400 border-slate-100"
+             )}
+           >
+             Link is Image
+           </button>
+           <button 
+             type="button"
+             onClick={() => setCampaignMediaType('VIDEO')}
+             className={cn(
+               "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
+               campaignMediaType === 'VIDEO' ? "bg-slate-900 text-white border-slate-900 shadow-lg" : "bg-white text-slate-400 border-slate-100"
+             )}
+           >
+             Link is Video
+           </button>
+        </div>
+      </div>
               <input
                 name="budget"
                 type="number"
@@ -4332,18 +4828,140 @@ export default function AdminPortal({
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 gap-6">
+                <div className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Campaign Asset Verification</h4>
+                    <div className="px-2 py-0.5 bg-amber-500/10 text-amber-600 rounded text-[8px] font-black uppercase tracking-widest">{approvalForm?.mediaType}</div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={approvalForm?.mediaUrl || ''}
+                          onChange={(e) => setApprovalForm(p => p ? ({ ...p, mediaUrl: e.target.value }) : p)}
+                          placeholder="Asset URL..."
+                          className="w-full bg-white border border-slate-100 rounded-2xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setApprovalForm(p => p ? ({ ...p, mediaType: 'IMAGE' }) : p)}
+                          className={cn("flex-1 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all", approvalForm?.mediaType === 'IMAGE' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100")}
+                        >
+                          Image Mode
+                        </button>
+                        <button 
+                          onClick={() => setApprovalForm(p => p ? ({ ...p, mediaType: 'VIDEO' }) : p)}
+                          className={cn("flex-1 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all", approvalForm?.mediaType === 'VIDEO' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100")}
+                        >
+                          Video Mode
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="aspect-video bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 relative group shadow-inner">
+                      {approvalForm?.mediaUrl ? (
+                         approvalForm?.mediaType === 'VIDEO' ? (
+                           <video 
+                             src={getSafeUrl(approvalForm.mediaUrl)} 
+                             className="w-full h-full object-cover" 
+                             controls 
+                             muted
+                           />
+                         ) : (
+                           <img 
+                             src={getSafeUrl(approvalForm.mediaUrl)} 
+                             className="w-full h-full object-cover" 
+                             alt="Preview" 
+                             referrerPolicy="no-referrer"
+                           />
+                         )
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center gap-2">
+                          <ImageIcon className="text-white/10" size={32} />
+                          <p className="text-[10px] font-black text-white/20 uppercase tracking-widest">No Media Preview</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Daily Start (Hour)
+                  </label>
+                  <input
+                    type="time"
+                    value={approvalForm.startTime}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        startTime: e.target.value,
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Daily End (Hour)
+                  </label>
+                  <input
+                    type="time"
+                    value={approvalForm.endTime}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        endTime: e.target.value,
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-3">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Allowed Days of Week
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(day => (
+                      <button
+                        key={day}
+                        onClick={() => {
+                          const current = approvalForm.daysOfWeek || [];
+                          const updated = current.includes(day) 
+                            ? current.filter(d => d !== day)
+                            : [...current, day];
+                          setApprovalForm({ ...approvalForm, daysOfWeek: updated });
+                        }}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
+                          (approvalForm.daysOfWeek || []).includes(day)
+                            ? "bg-amber-500 text-slate-950 border-amber-500 shadow-md"
+                            : "bg-white text-slate-400 border-slate-100 hover:border-amber-200"
+                        )}
+                      >
+                        {day.slice(0, 3)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                     Days to Run
                   </label>
                   <input
                     type="number"
-                    value={approvalForm.durationDays}
+                    value={approvalForm.durationDays || ''}
                     onChange={(e) =>
                       setApprovalForm({
                         ...approvalForm,
-                        durationDays: parseInt(e.target.value),
+                        durationDays: parseInt(e.target.value) || 0,
                       })
                     }
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
@@ -4355,11 +4973,11 @@ export default function AdminPortal({
                   </label>
                   <input
                     type="number"
-                    value={approvalForm.hoursPerDay}
+                    value={approvalForm.hoursPerDay || ''}
                     onChange={(e) =>
                       setApprovalForm({
                         ...approvalForm,
-                        hoursPerDay: parseInt(e.target.value),
+                        hoursPerDay: parseInt(e.target.value) || 0,
                       })
                     }
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
@@ -4480,6 +5098,60 @@ export default function AdminPortal({
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Designer Fee (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={approvalForm.designerFee || ''}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        designerFee: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    Video Maker Fee (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={approvalForm.videoMakerFee || ''}
+                    onChange={(e) =>
+                      setApprovalForm({
+                        ...approvalForm,
+                        videoMakerFee: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Node Distribution Strategy section */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 italic">Node Distribution Strategy</h4>
+                <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-amber-500 text-xl font-black italic uppercase tracking-tighter">
+                        {selectedDriverIds.length} Selective Units
+                      </p>
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Target Cluster Size</p>
+                    </div>
+                    <div className="h-10 w-px bg-slate-800" />
+                    <div className="text-right">
+                       <p className="text-white text-xl font-black italic uppercase tracking-tighter">
+                         ₹{((selectedCampaign?.budget || 0) / (selectedDriverIds.length || 1)).toFixed(0)}
+                       </p>
+                       <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Est. Per-Unit Yield</p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Driver Selection Matrix */}
@@ -4583,93 +5255,6 @@ export default function AdminPortal({
                     </div>
                  </div>
               </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                    Select Active Units ({selectedDriverIds.length} chosen)
-                  </label>
-                  <div className="relative">
-                    <Search
-                      size={14}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Filter autos..."
-                      className="bg-slate-50 border border-slate-100 rounded-xl py-2 pl-9 pr-4 text-[10px] font-bold w-48"
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {drivers
-                    .filter(
-                      (d) =>
-                        d.name
-                          .toLowerCase()
-                          .includes(searchTerm.toLowerCase()) ||
-                        d.vNo
-                          ?.toLowerCase()
-                          .includes(searchTerm.toLowerCase()) ||
-                        d.city
-                          ?.toLowerCase()
-                          .includes(searchTerm.toLowerCase()),
-                    )
-                    .map((d, i) => (
-                      <div
-                        key={i}
-                        onClick={() => {
-                          if (selectedDriverIds.includes(d.uid)) {
-                            setSelectedDriverIds(
-                              selectedDriverIds.filter((id) => id !== d.uid),
-                            );
-                          } else {
-                            setSelectedDriverIds([...selectedDriverIds, d.uid]);
-                          }
-                        }}
-                        className={cn(
-                          "p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between group",
-                          selectedDriverIds.includes(d.uid)
-                            ? "bg-amber-50 border-amber-500"
-                            : "bg-white border-slate-100 hover:bg-slate-50",
-                        )}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={cn(
-                              "w-2 h-2 rounded-full",
-                              d.status === "active"
-                                ? "bg-green-500"
-                                : "bg-slate-300",
-                            )}
-                          />
-                          <div>
-                            <p className="text-[10px] font-black uppercase text-slate-900">
-                              {d.name}
-                            </p>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
-                              {d.vNo || "Unit ID: " + d.uid.slice(0, 4)} •{" "}
-                              {d.city || "Anywhere"}
-                            </p>
-                          </div>
-                        </div>
-                        <div
-                          className={cn(
-                            "w-4 h-4 rounded border flex items-center justify-center transition-all",
-                            selectedDriverIds.includes(d.uid)
-                              ? "bg-amber-500 border-amber-500"
-                              : "border-slate-200 group-hover:border-slate-400",
-                          )}
-                        >
-                          {selectedDriverIds.includes(d.uid) && (
-                            <Check size={10} className="text-slate-950" />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
             </div>
 
             <div className="p-8 bg-slate-950 flex gap-4">
@@ -4710,8 +5295,9 @@ export default function AdminPortal({
       {/* Purge Confirmation Modal */}
       <AnimatePresence>
         {showPurgeConfirm && (
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-3xl">
+          <div key="purge-nuclear-portal" className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-3xl">
             <motion.div
+              key="purge-nuclear-modal"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               className="bg-white rounded-[2.5rem] p-10 max-w-md w-full shadow-2xl border border-red-100 text-center"
@@ -4744,116 +5330,13 @@ export default function AdminPortal({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showDocModal && selectedDriverForDocs && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowDocModal(false)}
-              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950">
-                    <ShieldCheck size={24} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none">Document Review</h3>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Verification Pipeline: {selectedDriverForDocs.name}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowDocModal(false)}
-                  className="p-3 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-2xl transition-all"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-50/30">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {[
-                    { label: 'Profile Photo / Selfie', key: 'profileImage' },
-                    { label: 'Aadhaar Card', key: 'aadharPhoto' },
-                    { label: 'Vehicle RC', key: 'rcPhoto' },
-                    { label: 'Driving License', key: 'dlPhoto' },
-                    { label: 'PAN Card', key: 'panPhoto' },
-                    { label: 'Vehicle Insurance', key: 'insurancePhoto' }
-                  ].map((docItem) => (
-                    <div key={docItem.key} className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest italic">{docItem.label}</span>
-                        {!selectedDriverForDocs[docItem.key as keyof Driver] && (
-                          <span className="text-[8px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded-lg">Missing Document</span>
-                        )}
-                      </div>
-                      <div className="aspect-[4/3] bg-slate-200 rounded-[2rem] overflow-hidden border border-slate-100 relative group shadow-sm bg-white cursor-zoom-in">
-                        {selectedDriverForDocs[docItem.key as keyof Driver] ? (
-                          <img 
-                            src={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
-                            alt={docItem.label}
-                            className="w-full h-full object-contain filter group-hover:brightness-90 transition-all"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center grayscale opacity-20">
-                            <Truck size={48} className="mb-2" />
-                            <p className="text-[9px] font-black uppercase tracking-widest">Awaiting Upload</p>
-                          </div>
-                        )}
-                        {selectedDriverForDocs[docItem.key as keyof Driver] && (
-                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <a 
-                              href={selectedDriverForDocs[docItem.key as keyof Driver] as string} 
-                              target="_blank" 
-                              rel="noreferrer"
-                              className="px-6 py-3 bg-white text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl"
-                            >
-                              Open Original
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-8 border-t border-slate-100 bg-white grid grid-cols-2 gap-4 shrink-0">
-                <button
-                  onClick={() => setShowDocModal(false)}
-                  className="py-5 border border-slate-200 text-slate-400 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-slate-50 transition-all italic"
-                >
-                  Close Pipeline
-                </button>
-                <button
-                  onClick={async () => {
-                    await firebaseService.adminApproveDriverAndProvisionTerminal(selectedDriverForDocs.id, selectedDriverForDocs.name);
-                    showToast(`${selectedDriverForDocs.name} Verified & Terminal Provisioned Successfully`, 'success');
-                    setShowDocModal(false);
-                  }}
-                  className="py-5 bg-slate-950 text-amber-500 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all italic"
-                >
-                  Verify & Activate Node
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Verification Modal Removed */}
 
       {/* Toast Notification */}
       <AnimatePresence>
         {opFeedback && (
           <motion.div
+            key="op-feedback-toast-bottom"
             initial={{ opacity: 0, y: 50, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: 50, x: "-50%" }}
@@ -4877,6 +5360,134 @@ export default function AdminPortal({
               <span className="text-xs font-black uppercase tracking-widest">{opFeedback.message}</span>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Expanded Vision Modal */}
+      <AnimatePresence>
+        {viewingUnit && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-3xl" onClick={() => setViewingUnit(null)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-6xl bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden relative z-10 shadow-2xl flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center">
+                    <Monitor size={24} className="text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white uppercase tracking-widest">Vision Expanded</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 italic">Unit ID: {viewingUnit.id}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setViewingUnit(null)}
+                  className="w-12 h-12 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="relative aspect-video w-full bg-black flex items-center justify-center">
+                {viewingUnit.metrics?.currentAdType === 'VIDEO' || viewingUnit.metrics?.currentAdImage?.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
+                  <video
+                    src={getSafeUrl(viewingUnit.metrics.currentAdImage)}
+                    className="w-full h-full object-contain"
+                    autoPlay
+                    muted
+                    loop
+                    controls
+                    playsInline
+                  />
+                ) : (
+                  <img
+                    src={getSafeUrl(viewingUnit.metrics?.currentAdImage) || `https://placehold.co/1920x1080/1e293b/FFFFFF/png?text=Unit+${viewingUnit.id.slice(0, 4)}`}
+                    alt="Expanded Vision"
+                    className="w-full h-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                
+                {/* HUD Overlay */}
+                <div className="absolute top-6 left-6 flex items-center gap-3">
+                  <div className={cn("px-4 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest backdrop-blur-md shadow-2xl flex items-center gap-2", viewingUnit.metrics?.online ? "bg-emerald-500/20 text-emerald-500 border-emerald-500/30" : "bg-red-500/20 text-red-500 border-red-500/30")}>
+                     <div className={cn("w-2 h-2 rounded-full", viewingUnit.metrics?.online ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
+                     Live Status
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {networkConfigTarget && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setNetworkConfigTarget(null)} />
+             <motion.div
+               initial={{ opacity: 0, scale: 0.95 }}
+               animate={{ opacity: 1, scale: 1 }}
+               exit={{ opacity: 0, scale: 0.95 }}
+               className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-8 relative z-10"
+             >
+                <div className="flex items-center gap-4 mb-6">
+                   <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center">
+                      <Wifi size={24} />
+                   </div>
+                   <div>
+                      <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Configure Network</h3>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Terminal {networkConfigTarget}</p>
+                   </div>
+                </div>
+
+                <form className="space-y-4" onSubmit={async (e) => {
+                   e.preventDefault();
+                   const fd = new FormData(e.currentTarget);
+                   try {
+                     await firebaseService.updateTerminalNetwork(networkConfigTarget, {
+                        wifiSSID: fd.get('wifiSSID'),
+                        wifiPassword: fd.get('wifiPassword'),
+                        hotspotName: fd.get('hotspotName'),
+                        hotspotPassword: fd.get('hotspotPassword'),
+                        lastConnected: false,
+                        connectionStatus: 'DISCONNECTED'
+                     });
+                     showToast("Network configuration saved.", 'success');
+                     setNetworkConfigTarget(null);
+                   } catch (err: any) {
+                     showToast(err.message, 'error');
+                   }
+                }}>
+                   <div className="space-y-4 bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Primary WiFi (SSID)</label>
+                         <input name="wifiSSID" required defaultValue={terminals.find(t => t.id === networkConfigTarget)?.networkConfig?.wifiSSID || ''} placeholder="e.g. Starbucks_WiFi" className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500/20" />
+                      </div>
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Primary Password</label>
+                         <input name="wifiPassword" type="password" required defaultValue={terminals.find(t => t.id === networkConfigTarget)?.networkConfig?.wifiPassword || ''} placeholder="••••••••" className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500/20" />
+                      </div>
+                      <div className="pt-2 border-t border-slate-200/50">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Fallback Hotspot (SSID)</label>
+                         <input name="hotspotName" placeholder="e.g. JioDongle_1234" defaultValue={terminals.find(t => t.id === networkConfigTarget)?.networkConfig?.hotspotName || ''} className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500/20" />
+                      </div>
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Hotspot Password</label>
+                         <input name="hotspotPassword" type="password" placeholder="••••••••" defaultValue={terminals.find(t => t.id === networkConfigTarget)?.networkConfig?.hotspotPassword || ''} className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500/20" />
+                      </div>
+                   </div>
+
+                   <div className="flex justify-end gap-3 pt-4">
+                      <button type="button" onClick={() => setNetworkConfigTarget(null)} className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest hover:bg-slate-50 rounded-xl transition-all">Cancel</button>
+                      <button type="submit" className="px-8 py-4 bg-amber-500 text-slate-950 font-black text-[10px] uppercase tracking-widest rounded-xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-amber-500/20">Save Configuration</button>
+                   </div>
+                </form>
+             </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

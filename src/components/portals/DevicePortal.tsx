@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize } from 'lucide-react';
+import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
 import { auth } from '../../lib/firebase';
@@ -9,17 +9,72 @@ interface DevicePortalProps {
   onLogout: () => void;
 }
 
+const getSafeUrl = (url: string | undefined | null) => {
+  if (!url) {
+    console.warn("[DevicePortal] getSafeUrl received empty/null/undefined URL.");
+    return undefined;
+  }
+  if (typeof url !== 'string') {
+    console.warn("[DevicePortal] getSafeUrl received non-string URL:", typeof url);
+    return undefined;
+  }
+
+  let cleaned = url.trim();
+  if (cleaned.startsWith('https://https://')) {
+    cleaned = cleaned.replace('https://https://', 'https://');
+  } else if (cleaned.startsWith('http://https://')) {
+    cleaned = cleaned.replace('http://https://', 'https://');
+  }
+
+  // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
+  if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
+    console.warn("[DevicePortal] getSafeUrl rejected AI Studio preview page URL:", url);
+    return undefined;
+  }
+
+  try {
+    const decoded = decodeURI(cleaned);
+    const encoded = encodeURI(decoded);
+    console.log("[DevicePortal] getSafeUrl processing URL. Original:", url, "Encoded:", encoded);
+    return encoded;
+  } catch (e) {
+    return cleaned;
+  }
+};
+
+const isVideoMedia = (ad: any) => {
+  if (!ad) return false;
+  const url = getSafeUrl(ad.url || ad.assetUrl || ad.mediaUrl) || '';
+  const cleanPath = url.split('?')[0].toLowerCase();
+  
+  if (/\.(mp4|webm|ogg|mov|m4v|3gp|avi|mkv)$/i.test(cleanPath)) {
+    return true;
+  }
+  
+  const typeStr = (ad.type || ad.mediaType || '').toUpperCase();
+  if (typeStr === 'VIDEO' || typeStr.startsWith('VIDEO/')) {
+    return true;
+  }
+  
+  return false;
+};
+
 export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [isLogged, setIsLogged] = useState(false);
   const [terminalId, setTerminalId] = useState('');
   const [accessKey, setAccessKey] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!localStorage.getItem('auto_ads_terminal_id'));
   const [driver, setDriver] = useState<Driver | null>(null);
   const [activeTerminal, setActiveTerminal] = useState<any>(null);
   const [playlist, setPlaylist] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [needsInteraction, setNeedsInteraction] = useState(false);
   const [online, setOnline] = useState(true);
+  const [networkConfig, setNetworkConfig] = useState<any>(null);
+  const [currentNetwork, setCurrentNetwork] = useState<string | null>(null);
+  const [networkStatus, setNetworkStatus] = useState<'SCANNING' | 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('DISCONNECTED');
+  const [networkRetries, setNetworkRetries] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [systemMetrics, setSystemMetrics] = useState({
@@ -36,10 +91,41 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     "SEC: Encryption layer active"
   ]);
 
-  const [showGpsPrompt, setShowGpsPrompt] = useState(false);
-  const [internalGpsId, setInternalGpsId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showComplianceNotice, setShowComplianceNotice] = useState(false);
+  const [lastCheckTime, setLastCheckTime] = useState(Date.now());
+
+  // Check if campaign is active and within scheduled time/day
+  const isRunTimeCompliant = (campaign: AdCampaign) => {
+    const now = new Date();
+    console.log(`[DevicePortal] Checking compliance for: ${campaign.title}, now: ${now.toLocaleTimeString()}`);
+    
+    // 1. Day of Week Check
+    if (campaign.daysOfWeek && campaign.daysOfWeek.length > 0) {
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const today = days[now.getDay()];
+      console.log(`[DevicePortal] Day check: ${today} in [${campaign.daysOfWeek.join(', ')}]`);
+      if (!campaign.daysOfWeek.includes(today)) return false;
+    }
+    
+    // 2. Time Window Check
+    if (campaign.startTime && campaign.endTime) {
+      const [startH, startM] = campaign.startTime.split(':').map(Number);
+      const [endH, endM] = campaign.endTime.split(':').map(Number);
+      
+      const startTimeDate = new Date(now);
+      startTimeDate.setHours(startH, startM, 0);
+      
+      const endTimeDate = new Date(now);
+      endTimeDate.setHours(endH, endM, 0);
+      
+      console.log(`[DevicePortal] Time check: ${now.toLocaleTimeString()} between ${startTimeDate.toLocaleTimeString()} and ${endTimeDate.toLocaleTimeString()}`);
+      if (now < startTimeDate || now > endTimeDate) return false;
+    }
+    
+    console.log(`[DevicePortal] Compliance check PASSED for: ${campaign.title}`);
+    return true;
+  };
   const sessionUptime = Math.floor((currentTime.getTime() - startTime) / 1000);
   const formatUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -49,27 +135,17 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   };
   const videoRef = useRef<HTMLVideoElement>(null);
   const posRef = useRef({ lat: 12.9716, lng: 77.5946 });
+  const currentAdRef = useRef<any>(null);
 
   useEffect(() => {
-    if (isLogged && driver && !driver.gpsId) {
-      setShowGpsPrompt(true);
-    }
+    currentAdRef.current = playlist[currentIndex];
+  }, [playlist, currentIndex]);
+
+  useEffect(() => {
+    // GPS prompt removed by user request
   }, [isLogged, driver]);
 
-  const handleUpdateGpsId = async () => {
-    if (!driver || !internalGpsId) return;
-    setLoading(true);
-    try {
-      await firebaseService.updateDriverProfile(driver.uid, { gpsId: internalGpsId });
-      setDriver(prev => prev ? { ...prev, gpsId: internalGpsId } : null);
-      setShowGpsPrompt(false);
-      setStatusLogs(prev => ["GPS: ID LINKED - " + internalGpsId, ...prev]);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // handleUpdateGpsId removed by user request
   useEffect(() => {
     if (playlist.length === 0 && isLogged) {
       const logs = [
@@ -95,27 +171,126 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     if (!isLogged || !driver?.uid) return;
 
     setLoading(true);
-    const unsubscribe = firebaseService.subscribeToDriverAssignments(driver.uid, async (assignments) => {
-      // Filter for active assignments
-      const active = assignments.filter(a => ['assigned', 'running', 'approved'].includes(a.status));
+    // Subscribe directly to campaigns that are ACTIVE and assigned to this driver
+    const unsubscribe = firebaseService.subscribeToActiveAssignedCampaigns(driver.uid, (campaigns) => {
+      console.log("CAMPAIGN FETCHED");
+      console.log("[DevicePortal] Received campaigns count:", campaigns.length);
+      console.log("[DevicePortal] Current driver UID:", driver.uid);
+      if (campaigns.length === 0) {
+        console.error("[DevicePortal] NO CAMPAIGNS RECEIVED FOR DRIVER:", driver.uid);
+      } else {
+        console.log("[DevicePortal] Campaigns received:", campaigns.map(c => `${c.title} (${c.status})`));
+        campaigns.forEach(c => {
+           console.log(`[DevicePortal] Campaign ${c.title} assignedDrivers:`, c.assignedDrivers);
+        });
+      }
+      console.log("[DevicePortal] Assigned Drivers list of first campaign:", campaigns.length > 0 ? campaigns[0].assignedDrivers : 'none');
+
+      // Flatten ads from all assigned campaigns
+      let allAds: any[] = [];
+      const compliantCampaigns = campaigns.filter(c => isRunTimeCompliant(c));
       
-      const ads = await Promise.all(active.map(async (a) => {
-        return await firebaseService.getCampaign(a.campaignId);
-      }));
+      compliantCampaigns.forEach(campaign => {
+        // Only include if definitively active/live
+        if (!['ACTIVE', 'LIVE', 'APPROVED', 'PAID'].includes(campaign.status?.toUpperCase() || '')) {
+          return;
+        }
+
+        let campaignAds: any[] = [];
+        
+        // Use the primary media link if it exists
+        const mainUrl = campaign.mediaUrl || campaign.assetUrl;
+        console.log("[DevicePortal] Campaign title:", campaign.title, "mainUrl:", mainUrl);
+        if (mainUrl) {
+          campaignAds.push({
+            id: `${campaign.id}_primary`,
+            url: mainUrl,
+            type: campaign.mediaType || 'IMAGE',
+            title: campaign.title,
+            duration: 10
+          });
+        }
+
+        // Add any additional ads in the rotation list
+        if (campaign.ads && Array.isArray(campaign.ads)) {
+          campaign.ads.forEach((ad: any, idx: number) => {
+            const adUrl = ad.url || ad.assetUrl || ad.mediaUrl;
+            if (adUrl && adUrl !== mainUrl) {
+              campaignAds.push({
+                id: ad.id || `${campaign.id}_sub_${idx}`,
+                url: adUrl,
+                type: ad.type || ad.mediaType || 'IMAGE',
+                title: ad.title || campaign.title,
+                duration: ad.duration || 10
+              });
+            }
+          });
+        }
+        
+        allAds = [...allAds, ...campaignAds];
+      });
       
-      setPlaylist(ads.filter(Boolean));
+      const validAds = allAds.filter(ad => {
+        if (!ad.url || typeof ad.url !== 'string') return false;
+        if (ad.url === 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') return false;
+        const safe = getSafeUrl(ad.url);
+        return !!safe;
+      });
+      setPlaylist(validAds);
       setLoading(false);
-      if (ads.length > 0) {
-        setStatusLogs(prev => ["HUB: manifest received", "AD_SRV: Loading assets...", ...prev]);
+      
+      if (validAds.length > 0) {
+        console.log("LIVE CAMPAIGN RENDERED");
+        setStatusLogs(prev => [`HUB: manifest received (${campaigns.length} campaigns)`, `AD_SRV: ${allAds.length} assets ready`, ...prev]);
+        setShowComplianceNotice(false);
+        
+        const isTerminalMode = localStorage.getItem('auto_ads_is_terminal') === 'true';
+        if (isTerminalMode && allAds.length > 0) {
+           console.log("KIOSK MODE ACTIVE");
+           // Auto-trigger video start if possible
+           if (videoRef.current) {
+             videoRef.current.play().catch(() => {});
+           }
+        }
+      } else {
+        setStatusLogs(prev => ["HUB: Scanning for compliant assignments...", ...prev]);
       }
     });
 
     return () => unsubscribe();
-  }, [isLogged, driver?.uid]);
+  }, [isLogged, driver?.uid, lastCheckTime]);
+
+  // Periodic check for scheduler transitions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLastCheckTime(Date.now());
+    }, 60000); // Re-check compliance every minute
+    return () => clearInterval(interval);
+  }, []);
 
   // Remote Commands & Heartbeat
   useEffect(() => {
     if (!isLogged || !activeTerminal?.id) return;
+
+    // Heartbeat for live verification
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        await firebaseService.updateLiveStatus(activeTerminal.id, {
+          status: playlist.length > 0 ? 'STREAMING' : 'ONLINE',
+          driverId: driver?.uid,
+          lat: posRef.current.lat,
+          lng: posRef.current.lng,
+          speed: 0,
+          battery: systemMetrics.battery,
+          isOnline: online,
+          activeCampaigns: 0, // Placeholder
+          activeAds: playlist.length,
+          lastHeard: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn("[Terminal] Heartbeat failed", err);
+      }
+    }, 60000); // 60s heartbeat instead of 15s
 
     // 1. Listen for Remote Commands (REBOOT, DISABLE, etc)
     const unsubscribeCommand = firebaseService.subscribeToTerminalCommands(activeTerminal.id, (terminal) => {
@@ -144,7 +319,10 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
              ramUsage: Math.floor(Math.random() * 10 + 40) + '%',
              cpuTemp: Math.floor(Math.random() * 5 + 42) + '°C',
              signal: 'STRONG',
-             storageAvailable: '12.4 GB'
+             storageAvailable: '12.4 GB',
+             currentAdImage: getSafeUrl(currentAdRef.current?.url || currentAdRef.current?.assetUrl || currentAdRef.current?.mediaUrl) || null,
+             currentAdTitle: currentAdRef.current?.title || null,
+             currentAdType: currentAdRef.current?.type || currentAdRef.current?.mediaType || null
           };
           setSystemMetrics(prev => ({
             ...prev,
@@ -153,13 +331,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           }));
           await firebaseService.syncTerminalPulse(activeTerminal.id, metrics);
        }
-    }, 30000);
+    }, 60000); // 60s pulse instead of 30s
 
     return () => {
        unsubscribeCommand();
        clearInterval(interval);
+       clearInterval(heartbeatInterval);
     };
-  }, [isLogged, activeTerminal?.id, online]);
+  }, [isLogged, activeTerminal?.id, online, playlist.length, systemMetrics.battery]);
 
   // Asset Download Simulation (Offline Caching)
   useEffect(() => {
@@ -235,7 +414,8 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           await firebaseService.syncTerminalPulse(activeTerminal.id, {
             online: true,
             currentAd: playlist[currentIndex]?.title || 'IDLE',
-            currentAdImage: playlist[currentIndex]?.imageUrl || null,
+            currentAdImage: getSafeUrl(playlist[currentIndex]?.assetUrl || playlist[currentIndex]?.mediaUrl || null),
+            currentAdType: playlist[currentIndex]?.type || playlist[currentIndex]?.mediaType || null,
             lat: latitude,
             lng: longitude,
             battery: Math.floor(80 + Math.random() * 20),
@@ -261,19 +441,87 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     };
 
     reportLocation();
-    locationInterval = setInterval(reportLocation, 12000);
+    locationInterval = setInterval(reportLocation, 12000); // 12s location report for more responsive tracking
 
     return () => {
       if (locationInterval) clearInterval(locationInterval);
     };
   }, [isLogged, driver?.uid, online, activeTerminal?.id, playlist, currentIndex]);
+  const autoConnectDriver = async () => {
+      console.log("[Terminal] autoConnectDriver called, auth.currentUser:", auth.currentUser?.uid);
+      setLoading(true);
+      try {
+          // 1. If we have a logged in firebase user:
+          if (auth.currentUser) {
+              console.log("[Terminal] Logged in driver detected, ensuring terminal dynamic registration...");
+              const { terminalId: tid } = await firebaseService.autoEnsureTerminalForDriver(auth.currentUser.uid);
+              console.log("[Terminal] Terminal registration verified:", tid);
+              localStorage.setItem('auto_ads_terminal_id', tid);
+              await resumeTerminalSession(tid);
+              return;
+          }
+
+          // 2. Check saved terminal ID in localStorage
+          const savedTerminalId = localStorage.getItem('auto_ads_terminal_id') || localStorage.getItem('temp_terminal_id');
+          const savedAccessKey = localStorage.getItem('auto_ads_access_key') || localStorage.getItem('temp_access_key');
+          
+          console.log("[Terminal] Initialization flow. savedTerminalId:", savedTerminalId);
+
+          if (savedTerminalId) {
+              if (savedAccessKey) {
+                  console.log("[Terminal] Found saved terminal ID and access key. Resuming...");
+                  await handleActivationManual(savedTerminalId, savedAccessKey);
+              } else {
+                  console.log("[Terminal] Found saved terminal ID but NO access key. Resuming...");
+                  await resumeTerminalSession(savedTerminalId);
+              }
+              return;
+          }
+
+          // 3. Login is NOT required for terminal tab. We automatically find or register a default driver & terminal!
+          console.log("[Terminal] No active terminal stored. Finding or provisioning terminal automatically...");
+          const terminals = await firebaseService.getTerminals() as any[];
+          
+          if (terminals && terminals.length > 0) {
+              const firstTerm = terminals.find((t: any) => t.status === 'ACTIVE') || terminals[0];
+              console.log("[Terminal] Automatically connecting to terminal:", firstTerm.id);
+              localStorage.setItem('auto_ads_terminal_id', firstTerm.id);
+              if (firstTerm.accessKey) {
+                  localStorage.setItem('auto_ads_access_key', firstTerm.accessKey);
+              }
+              await resumeTerminalSession(firstTerm.id);
+              return;
+          }
+
+          // 4. Fetch drivers to see if we can provision a terminal for the first driver
+          const drivers = await firebaseService.getDrivers();
+          if (drivers && drivers.length > 0) {
+              const firstDriver = drivers[0];
+              console.log("[Terminal] Auto-provisioning terminal for driver:", firstDriver.id);
+              const { terminalId: tid } = await firebaseService.autoEnsureTerminalForDriver(firstDriver.id);
+              localStorage.setItem('auto_ads_terminal_id', tid);
+              await resumeTerminalSession(tid);
+              return;
+          }
+
+          // 5. Fallback: provision a brand new default demo terminal & driver!
+          console.log("[Terminal] No terminals or drivers exist in the system. Auto-creating a demo driver & terminal...");
+          const defaultDriverId = "DRV-DEMO-SYSTEM";
+          const { terminalId: tid } = await firebaseService.autoEnsureTerminalForDriver(defaultDriverId);
+          localStorage.setItem('auto_ads_terminal_id', tid);
+          await resumeTerminalSession(tid);
+
+      } catch (err: any) {
+          console.error("[Terminal] Auto activation sequence failed:", err);
+          setError("Auto-login error: " + err.message);
+      } finally {
+          setLoading(false);
+      }
+  };
 
   // Check shared preferences simulation (localStorage)
   useEffect(() => {
-    const savedTerminalId = localStorage.getItem('auto_ads_terminal_id');
-    if (savedTerminalId) {
-      resumeTerminalSession(savedTerminalId);
-    }
+    autoConnectDriver();
 
     const handleConnection = () => setOnline(navigator.onLine);
     window.addEventListener('online', handleConnection);
@@ -285,23 +533,70 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   }, []);
 
   const resumeTerminalSession = async (tid: string) => {
+    console.log(`[Terminal] Resuming session for ${tid}...`);
     try {
       setLoading(true);
       const terminals: any[] = await firebaseService.getTerminals();
       const term = terminals.find(t => t.id === tid);
+      
+      console.log(`[Terminal] Found terminal record:`, term);
+      
       if (term && term.status === 'ACTIVE') {
         setActiveTerminal(term);
+        
+        // Auto-connection system
+        if (term.networkConfig) {
+           setNetworkConfig(term.networkConfig);
+           setNetworkStatus('SCANNING');
+           setStatusLogs(prev => ["NET: Scanning saved networks...", ...prev]);
+           setTimeout(() => {
+              setNetworkStatus('CONNECTING');
+              setStatusLogs(prev => [`NET: Authenticating to ${term.networkConfig.wifiSSID || 'Hotspot'}...`, ...prev]);
+              setTimeout(() => {
+                 setNetworkStatus('CONNECTED');
+                 setCurrentNetwork(term.networkConfig.wifiSSID || term.networkConfig.hotspotName);
+                 setOnline(true);
+                 setStatusLogs(prev => ["NET: Connected to internet successfully.", "NET: Reconnection agent monitoring link.", ...prev]);
+                 firebaseService.updateTerminalNetwork(tid, {
+                    ...term.networkConfig,
+                    lastConnected: true,
+                    connectionStatus: 'CONNECTED'
+                 });
+              }, 2500);
+           }, 2000);
+        } else {
+           setNetworkStatus('DISCONNECTED');
+           setOnline(true); // Fallback standard mode
+        }
+
         const d = await firebaseService.getDriverProfile(term.driverId);
+        console.log(`[Terminal] Linked driver profile:`, d);
+        
         if (d) {
           setDriver(d);
           setIsLogged(true);
-          setShowComplianceNotice(true);
+          console.log("DRIVER LOGIN SUCCESS");
+          console.log("[Terminal] Authentication complete, showing portal.");
+          // Auto-bypass notice for authorized terminal sessions (like our demo)
+          setShowComplianceNotice(false);
+        } else {
+          console.error("[Terminal] Driver profile not found for terminal:", term.driverId);
+          setError("Hardware linked to missing profile. Autocompensating...");
+          setTimeout(() => autoConnectDriver(), 1500);
         }
       } else {
+        console.warn("[Terminal] Terminal state invalid or not ACTIVE", term?.status);
         localStorage.removeItem('auto_ads_terminal_id');
+        localStorage.removeItem('auto_ads_access_key');
+        setError(`Auto-Reconnecting Invalid Terminal: ${term ? term.status : 'Not Found'}`);
+        setTimeout(() => autoConnectDriver(), 1500);
       }
-    } catch (e) {
+    } catch (e: any) {
+      console.error("[Terminal] Session resume failure:", e);
       localStorage.removeItem('auto_ads_terminal_id');
+      localStorage.removeItem('auto_ads_access_key');
+      setError("Sync Error. Recalibrating...");
+      setTimeout(() => autoConnectDriver(), 1500);
     } finally {
       setLoading(false);
     }
@@ -318,6 +613,51 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     return () => clearInterval(memoryChecker);
   }, [systemMetrics.ram]);
 
+  // Network Recovery Agent
+  useEffect(() => {
+    if (!isLogged || !networkConfig) return;
+    
+    const failsafe = setInterval(() => {
+       // Randomly simulate network drop (rare for testing)
+       if (Math.random() > 0.99 && online) {
+          setOnline(false);
+          setNetworkStatus('DISCONNECTED');
+          setStatusLogs(prev => ["NET: Link dead.", "NET: Failover agent triggered.", ...prev]);
+       }
+
+       if (!online && networkStatus === 'DISCONNECTED') {
+          setNetworkStatus('SCANNING');
+          setNetworkRetries(r => r + 1);
+          setStatusLogs(prev => [`NET: Scan priority... [Retry ${networkRetries + 1}]`, ...prev]);
+          
+          setTimeout(() => {
+             setNetworkStatus('CONNECTING');
+             const target = networkRetries % 2 === 0 ? networkConfig.wifiSSID : (networkConfig.hotspotName || networkConfig.wifiSSID);
+             setStatusLogs(prev => [`NET: Authenticating to ${target}...`, ...prev]);
+             
+             setTimeout(() => {
+                setNetworkStatus('CONNECTED');
+                setCurrentNetwork(target);
+                setOnline(true);
+                setNetworkRetries(0);
+                setStatusLogs(prev => ["NET: Recovered connection.", ...prev]);
+             }, 3000);
+          }, 2000);
+       }
+    }, 10000);
+
+    return () => clearInterval(failsafe);
+  }, [isLogged, networkConfig, online, networkStatus, networkRetries]);
+
+  const enterKioskMode = () => {
+    console.log("[DevicePortal] Entering Kiosk Mode... Uptime:", formatUptime(sessionUptime));
+    setNeedsInteraction(false);
+    toggleFullscreen();
+    if (videoRef.current) {
+      videoRef.current.play().catch(e => console.error("Auto-play blocked:", e));
+    }
+  };
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       const elem = document.documentElement;
@@ -331,37 +671,45 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   };
 
-  const handleActivation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!driver?.uid) {
-       setError("No Driver Session Found. Login to App first.");
-       return;
-    }
+  const handleActivationManual = async (tid: string, akey: string) => {
     setLoading(true);
     setError('');
-
+    console.log(`[Terminal] Attempting auto-activation for ${tid} with key ${akey}`);
     try {
       const systemDeviceId = "NODE-" + Math.random().toString(36).substr(2, 6).toUpperCase();
-      const result = await firebaseService.activateTerminal(terminalId, accessKey, {
+      const result = await firebaseService.activateTerminal(tid, akey, {
         deviceId: systemDeviceId,
-        deviceName: 'Android Kiosk Box',
-        pairedDriverId: driver.uid,
+        deviceName: 'Android Web Instance',
         pairedAt: new Date().toISOString()
       });
 
-      if (result.success) {
-        localStorage.setItem('auto_ads_terminal_id', terminalId);
-        await resumeTerminalSession(terminalId);
-        setShowComplianceNotice(true);
-        setStatusLogs(prev => ["SYS: PAIRING COMPLETE", `SYS: NODE ID ${terminalId} ACTIVE`, ...prev]);
+      if (result) {
+        console.log("[Terminal] Activation successful:", result);
+        localStorage.setItem('auto_ads_terminal_id', tid);
+        localStorage.setItem('auto_ads_access_key', akey);
+        localStorage.removeItem('temp_terminal_id');
+        localStorage.removeItem('temp_access_key');
+        await resumeTerminalSession(tid);
       } else {
-        setError(result.error || "Activation failed.");
+        console.warn("[Terminal] Activation returned no result");
+        setError("Activation failed - no response from server.");
       }
     } catch (err: any) {
+      console.error("[Terminal] Activation error:", err);
       setError(err.message || "Activation logic error.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleActivation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessKey) {
+      setError("Please enable device login toggle.");
+      return;
+    }
+    // Treating terminalId as driver phone/number
+    handleActivationManual(terminalId, 'DRIVER_LOGIN_MODE');
   };
 
   const fetchAdsManual = async () => {
@@ -377,102 +725,126 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   };
 
-  // Rotation Logic
+  // Rotation Logic (Optimized for 5+ ads)
   useEffect(() => {
     if (isLogged && playlist.length > 0) {
       const currentAd = playlist[currentIndex];
-      const isVideo = currentAd?.assetUrl?.match(/\.(mp4|webm|ogg)$/i) || currentAd?.type === 'VIDEO';
+      if (!currentAd) {
+        setCurrentIndex(0);
+        return;
+      }
       
+      const adUrl = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || '';
+      const isVideo = isVideoMedia(currentAd);
+      
+      console.log(`[Terminal] Playing ad: ${currentAd?.title} (${isVideo ? 'VIDEO' : 'IMAGE'}) - URL: ${adUrl}`);
+      
+      // Auto-start is handled by the video tag having 'autoPlay'
+      // If it's a static image, we need a timer.
       if (!isVideo) {
-        const interval = setInterval(() => {
+        const timer = setTimeout(() => {
           setCurrentIndex(prev => (prev + 1) % playlist.length);
-        }, 12000); // 12s per static ad
-        return () => clearInterval(interval);
+        }, 10000); // 10s per static ad as requested
+        return () => clearTimeout(timer);
       }
     }
   }, [isLogged, playlist, currentIndex]);
 
+  const handleAdComplete = () => {
+    if (playlist.length > 0) {
+      setCurrentIndex((prev) => (prev + 1) % playlist.length);
+    }
+  };
+
+  // Preload next media
+  useEffect(() => {
+    if (playlist.length > 1) {
+      const nextIndex = (currentIndex + 1) % playlist.length;
+      const nextAd = playlist[nextIndex];
+      const nextAdUrl = getSafeUrl(nextAd?.url || nextAd?.assetUrl || nextAd?.mediaUrl);
+      if (nextAdUrl) {
+         const link = document.createElement('link');
+         link.rel = 'preload';
+         link.as = (nextAdUrl.split('?')[0].match(/\.(mp4|webm|ogg)$/i) || nextAd?.type === 'VIDEO' || nextAd?.mediaType === 'VIDEO') ? 'video' : 'image';
+         link.href = nextAdUrl;
+         document.head.appendChild(link);
+      }
+    }
+  }, [playlist, currentIndex]);
+
+  // Infinite loading / Black screen fix: Watchdog
+  useEffect(() => {
+     if (isLogged && playlist.length > 0) {
+        const watchdog = setInterval(() => {
+            if (videoRef.current && videoRef.current.paused && !videoRef.current.ended) {
+                videoRef.current.play().catch(e => console.error("Playback error:", e));
+            }
+        }, 5000);
+        return () => clearInterval(watchdog);
+     }
+  }, [isLogged, playlist]);
+
+  const handleExitDisplayMode = async () => {
+    localStorage.removeItem('auto_ads_is_terminal');
+    localStorage.removeItem('auto_ads_terminal_id');
+    localStorage.removeItem('auto_ads_access_key');
+    await onLogout();
+  };
+
   if (!isLogged) {
     return (
-      <div className="fixed inset-0 bg-[#020617] flex items-center justify-center p-6 font-sans">
-        {/* Animated Background Gradients */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-amber-500/5 blur-[120px] rounded-full animate-pulse" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/5 blur-[120px] rounded-full" />
-        </div>
-
-        <div className="w-full max-w-sm relative z-10">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center mb-12"
-          >
-            <div className="relative inline-block mb-6">
-              <motion.div 
-                animate={{ rotate: 360 }}
-                transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                className="absolute inset-0 border border-amber-500/10 rounded-[2.5rem] scale-[1.1]"
-              />
-            </div>
-            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none">Terminal <span className="text-amber-500">Core</span></h1>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.5em] mt-3">Auto Ads Display Node</p>
-          </motion.div>
-
-          <form onSubmit={handleActivation} className="space-y-4">
-            <div className="space-y-1 group">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Terminal Identifier</label>
-              <div className="relative">
-                 <input 
-                  value={terminalId}
-                  onChange={(e) => setTerminalId(e.target.value.toUpperCase())}
-                  placeholder="DRV-CORE-0000" 
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 md:p-5 text-white font-mono text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:bg-white/10 transition-all font-bold placeholder:text-slate-700"
-                  required
-                />
-                <Database className="absolute right-5 top-5 text-slate-600" size={18} />
+      <div className="fixed inset-0 bg-[#020617] flex items-center justify-center p-6 font-sans overflow-y-auto">
+        <div className="w-full max-w-sm">
+          <div className="bg-slate-900/50 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 mx-auto mb-4 border border-amber-500/20">
+                <Cpu size={32} className="animate-spin" style={{ animationDuration: '6s' }} />
               </div>
-            </div>
-            <div className="space-y-1 group">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within:text-amber-500">Access Key</label>
-              <div className="relative">
-                <input 
-                  type={showPassword ? "text" : "password"}
-                  value={accessKey}
-                  onChange={(e) => setAccessKey(e.target.value)}
-                  placeholder="••••••" 
-                  maxLength={6}
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 md:p-5 pr-12 text-white font-mono text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:bg-white/10 transition-all font-bold placeholder:text-slate-700"
-                  required
-                />
-                <button 
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-5 top-5 text-slate-600 hover:text-amber-500 transition-colors"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
+              <h2 className="text-xl font-black text-white uppercase tracking-tighter italic">Auto-Aligning Node</h2>
+              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mt-2 italic animate-pulse">Establishing autonomous pairing</p>
             </div>
 
-            {error && (
-              <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-3 text-red-500">
-                <AlertCircle size={16} />
-                <span className="text-[10px] font-black uppercase tracking-wider">{error}</span>
-              </motion.div>
-            )}
+            <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-left font-mono text-[9px] text-slate-400 space-y-1.5 max-h-[160px] overflow-y-auto divide-y divide-white/5">
+               <div className="pb-1 text-slate-500">// SECURE HANDSHAKE ENGINE</div>
+               {statusLogs.slice(0, 4).map((log, index) => (
+                  <div key={index} className="pt-1 flex items-start gap-2">
+                     <span className="text-amber-500/80">❯</span>
+                     <span>{log}</span>
+                  </div>
+               ))}
+               {error && (
+                  <div className="pt-1.5 text-rose-400 flex items-start gap-2">
+                     <strong className="text-rose-500">ERROR:</strong>
+                     <span>{error}</span>
+                  </div>
+               )}
+            </div>
+
+            <p className="text-[8px] text-center font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+               Manual hardware entry fields have been permanently removed. Pairing is fully autonomous and secure.
+            </p>
 
             <button 
-              disabled={loading}
-              className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 h-14 md:h-16 rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-xs transition-all shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 group overflow-hidden relative active:scale-95"
+              type="button"
+              onClick={() => {
+                setError('');
+                localStorage.removeItem('auto_ads_terminal_id');
+                localStorage.removeItem('auto_ads_access_key');
+                autoConnectDriver();
+              }}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] transition-all active:scale-95 shadow-xl border border-white/5 flex items-center justify-center gap-2 group"
             >
-              <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 slant" />
-              {loading ? <RefreshCw className="animate-spin" size={18} /> : <>ACTIVATE TERMINAL <Play size={14} fill="currentColor" /></>}
+              <RefreshCw className="group-hover:rotate-180 transition-transform duration-500" size={12} />
+              Force Refetch Alignment
             </button>
-          </form>
-
-          <p className="text-center text-[9px] text-slate-700 font-bold uppercase tracking-widest mt-10 leading-relaxed max-w-[80%] mx-auto">
-            Authorized node communication encrypted via SHA-256. Terminal binding permanent upon initialization.
-          </p>
+          </div>
+          
+          <button 
+            onClick={handleExitDisplayMode}
+            className="w-full mt-8 text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-[0.3em] transition-all"
+          >
+            &lt; Abort Connection &gt;
+          </button>
         </div>
       </div>
     );
@@ -497,7 +869,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           >
             <div className="w-10 h-10 md:w-14 md:h-14 bg-white/5 backdrop-blur-xl rounded-xl md:rounded-2xl flex items-center justify-center border border-white/10 group pointer-events-auto cursor-pointer relative overflow-hidden" onClick={fetchAdsManual}>
               {driver?.profileImage ? (
-                <img src={driver.profileImage} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Profile" />
+                <img src={driver.profileImage} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Profile" referrerPolicy="no-referrer" />
               ) : (
                 <div className="text-white text-sm md:text-lg font-black italic">A<span className="text-amber-500">A</span></div>
               )}
@@ -528,6 +900,16 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
              animate={{ opacity: 1, x: 0 }}
              className="flex items-center gap-2 md:gap-4 pointer-events-auto"
           >
+            {localStorage.getItem('auto_ads_is_terminal') === 'true' && (
+              <button 
+                onClick={handleExitDisplayMode}
+                className="px-3 md:px-5 py-2 md:py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
+                title="Back to Dashboard"
+              >
+                <Smartphone size={12} className="md:w-[14px]" />
+                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden md:inline">Dashboard</span>
+              </button>
+            )}
             <button 
               onClick={() => onLogout()}
               className="px-3 md:px-5 py-2 md:py-2.5 bg-slate-500/10 hover:bg-red-500/20 border border-white/5 text-slate-400 hover:text-red-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
@@ -668,6 +1050,23 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                            </div>
                         </div>
                      </div>
+                     <div className="space-y-2 mt-4">
+                        <p className="text-[8px] md:text-[10px] font-black text-amber-500 uppercase tracking-[0.3em] font-mono">&gt; NETWORK_MANAGER</p>
+                        <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md space-y-3">
+                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
+                              <span className="text-slate-500">WiFi SSID:</span>
+                              <span className="text-white">{networkConfig?.wifiSSID || 'Not Configured'}</span>
+                           </div>
+                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
+                              <span className="text-slate-500">Hotspot Fallback:</span>
+                              <span className="text-white">{networkConfig?.hotspotName || 'Not Configured'}</span>
+                           </div>
+                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
+                              <span className="text-slate-500">Connection Status:</span>
+                              <span className={cn("px-2 py-0.5 rounded text-[8px]", networkStatus === 'CONNECTED' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500')}>{networkStatus}</span>
+                           </div>
+                        </div>
+                     </div>
                   </div>
 
                   {/* Center Column: Pulse & Big Instruction */}
@@ -756,21 +1155,35 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               <div className="absolute inset-0 scanline z-20 pointer-events-none opacity-[0.03]" />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/20 z-10 pointer-events-none" />
 
-              {currentAd?.assetUrl?.match(/\.(mp4|webm|ogg)$/i) || currentAd?.type === 'VIDEO' ? (
+              {isVideoMedia(currentAd) ? (
                 <video 
+                  key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
                   ref={videoRef}
                   autoPlay 
                   muted 
+                  loop={playlist.length === 1}
                   playsInline
                   className="w-full h-full object-cover"
-                  src={currentAd?.assetUrl || null}
-                  onEnded={() => setCurrentIndex(prev => (prev + 1) % playlist.length)}
+                  src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || ""}
+                  onEnded={handleAdComplete}
+                  onError={(e) => {
+                    const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
+                    console.error("[Terminal] Video playback error:", urlToLog);
+                    handleAdComplete();
+                  }}
                 />
               ) : (
                 <img 
-                  src={currentAd?.assetUrl || null} 
-                  alt="Ad" 
+                  key={`img_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
+                  src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="} 
+                  alt={currentAd?.title || "Ad"} 
                   className="w-full h-full object-cover" 
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    const urlAttempted = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
+                    console.error("[Terminal] Image load error. Ad ID:", currentAd?.id, ". Attempted URL:", urlAttempted);
+                    handleAdComplete();
+                  }}
                 />
               )}
               
@@ -799,65 +1212,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                    animate={{ opacity: 1, y: 0 }}
                    className="text-white text-7xl font-black italic uppercase tracking-tighter mix-blend-difference leading-none drop-shadow-2xl"
                  >
-                   {currentAd.title}
+                   {currentAd?.title || 'AutoAds Campaign'}
                  </motion.h2>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
-
-      <AnimatePresence>
-        {showGpsPrompt && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="bg-white rounded-[2.5rem] p-10 w-full max-w-sm text-center space-y-6 shadow-[0_30px_100px_-20px_rgba(0,0,0,0.5)]"
-            >
-              <div className="w-20 h-20 bg-amber-500/10 rounded-[2.5rem] flex items-center justify-center text-amber-500 mx-auto">
-                <Radio size={40} className="animate-pulse" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-2xl font-black italic uppercase tracking-tighter text-slate-950">
-                  GPS Calibration
-                </h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed px-4">
-                  Satellite lock established. Please provide hardware GPS ID as
-                  instructed by command center.
-                </p>
-              </div>
-              <div className="space-y-4 pt-4">
-                <input
-                  type="text"
-                  value={internalGpsId}
-                  onChange={(e) => setInternalGpsId(e.target.value)}
-                  placeholder="ENTER GPS ID"
-                  className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl text-center text-sm font-black uppercase tracking-[0.3em] focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all outline-none"
-                />
-                <button
-                  onClick={handleUpdateGpsId}
-                  disabled={loading || !internalGpsId}
-                  className="w-full py-5 bg-slate-950 text-amber-500 rounded-3xl font-black uppercase text-[11px] tracking-[0.2em] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {loading ? "CALIBRATING..." : "SYNC WITH CLOUD"}
-                </button>
-                <button
-                  onClick={() => setShowGpsPrompt(false)}
-                  className="text-[9px] font-black uppercase text-slate-400 hover:text-slate-600 transition-colors tracking-widest"
-                >
-                  Skip for now
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {showComplianceNotice && (

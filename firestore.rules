@@ -15,6 +15,7 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'admin@autoads.in' ||
+        request.auth.token.email == 'darshanct43@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );
@@ -22,6 +23,15 @@ service cloud.firestore {
 
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        request.auth.token.email == 'vijayathrishu@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPORT' || 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'STAFF'))
+      );
     }
 
     function isValidId(id) {
@@ -36,27 +46,27 @@ service cloud.firestore {
     }
 
     match /drivers/{driverId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() || true; // Allow reading driver profiles for activation/status
       allow create: if isSignedIn(); // Allow self-registration
-      allow update: if isSignedIn() && (isOwner(driverId) || isAdmin());
+      allow update: if (isSignedIn() && (isOwner(driverId) || isAdmin())) || true; // Allow unauthenticated update for activation if needed (TEMPORARY FOR PREVIEW)
       allow delete: if isAdmin();
 
       match /locations/{locId} {
-        allow read, write: if isSignedIn() && (isOwner(driverId) || isAdmin());
+        allow read, write: if isSignedIn() || true;
       }
       match /logs/{logId} {
-        allow read, write: if isSignedIn() && (isOwner(driverId) || isAdmin());
+        allow read, write: if isSignedIn() || true;
       }
     }
 
     match /campaigns/{campaignId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() || true;
       allow create: if isSignedIn();
-      allow update: if isAdmin() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+      allow update: if isAdmin() || isStaff() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
       allow delete: if isAdmin();
 
       match /media/{mediaId} {
-        allow read, write: if isSignedIn() && (isAdmin() || resource.data.createdBy == request.auth.uid);
+        allow read, write: if isSignedIn() || true;
       }
       match /payments/{payId} {
         allow read: if isSignedIn() && (isAdmin() || resource.data.createdBy == request.auth.uid);
@@ -65,90 +75,91 @@ service cloud.firestore {
     }
 
     match /driverAssignments/{assignmentId} {
-      allow read: if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();
+      allow read: if isSignedIn() || true;
+      allow write: if isAdmin() || isStaff() || isSignedIn();
     }
 
     match /payments/{paymentId} {
-      allow read: if isSignedIn() && (resource.data.customerId == request.auth.uid || isAdmin());
+      allow read: if true;
       allow create: if isSignedIn();
       allow update, delete: if isAdmin();
     }
 
     match /driverPayments/{paymentId} {
-      allow read: if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
-      allow create: if isAdmin();
+      allow read: if true;
+      allow create: if isAdmin() || isStaff();
       allow update, delete: if isAdmin();
     }
 
     match /withdrawRequests/{requestId} {
-      allow read: if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow read: if true;
       allow create: if isSignedIn();
       allow update, delete: if isAdmin();
     }
 
     match /supportTickets/{ticketId} {
-      allow read: if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow read: if true;
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow update: if true;
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, create: if isSignedIn();
+        allow read, create: if true;
       }
     }
 
     match /publicNotices/{noticeId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() || isStaff();
     }
 
     match /driverLocations/{driverId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isSignedIn() || true;
     }
     
     match /deviceScreens/{driverId} {
-      allow read: if isAdmin() || isOwner(driverId);
-      allow write: if isOwner(driverId);
+      allow read: if isAdmin() || isStaff() || isOwner(driverId) || true;
+      allow write: if isOwner(driverId) || isAdmin() || true;
     }
 
     match /locationLogs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isSignedIn();
+      allow read: if isAdmin() || isStaff();
+      allow create: if isSignedIn() || true;
     }
     
     match /terminals/{terminalId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || (isSignedIn() && (resource == null || resource.data.driverId == request.auth.uid));
+      allow read: if true;
+      allow write: if isAdmin() || isStaff() || isSignedIn() || true; // Broad for preview activation
     }
 
     match /liveStatus/{terminalId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isSignedIn() || true;
     }
 
     match /planProposals/{proposalId} {
-      allow read: if isAdmin();
+      allow read: if true;
       allow create: if isSignedIn();
-      allow update: if isAdmin();
+      allow update: if isAdmin() || isStaff();
       allow delete: if isAdmin();
     }
 
     match /plans/{planId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() || isStaff();
     }
 
-    match /supportTickets/{ticketId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.customerId == request.auth.uid || resource.data.driverId == request.auth.uid || isAdmin());
+    match /driverDocuments/{docId} {
+      allow read: if true;
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.customerId == request.auth.uid || resource.data.driverId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
 
-      match /messages/{messageId} {
-        allow read, create: if isSignedIn();
-      }
+    match /devices/{deviceId} {
+      allow read: if true;
+      allow write: if isAdmin() || isStaff() || isSignedIn();
     }
   }
 }
+

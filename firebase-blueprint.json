@@ -215,8 +215,7 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["driverId", "lat", "lng", "updatedAt"]
-    }
-  },
+    },
     "plans": {
       "title": "Pricing Plans",
       "description": "Subscription and ad deployment plans",
@@ -241,12 +240,31 @@
         "timestamp": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["playing", "error", "idle"] }
       }
+    },
+    "driverDocument": {
+      "title": "Driver Document",
+      "description": "Metadata for an uploaded driver document",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "type": { "type": "string", "enum": ["RC", "DL", "AADHAR", "PROFILE", "PAN"] },
+        "downloadUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] }
+      },
+      "required": ["driverId", "type", "downloadUrl", "uploadedAt"]
     }
   },
   "firestore": {
     "/deviceScreens/{driverId}": {
       "schema": "deviceScreen",
       "description": "Real-time device screen snapshots"
+    },
+    "/driverDocuments/{docId}": {
+      "schema": "driverDocument",
+      "description": "Central registry of driver document uploads"
     },
     "/plans/{planId}": {
       "schema": "plans",
@@ -341,6 +359,47 @@
         }
       },
       "description": "Individual driver incentive signals"
+    },
+    "/terminals/{terminalId}": {
+      "schema": {
+        "title": "Terminal",
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "driverId": { "type": "string" },
+          "status": { "type": "string", "enum": ["PENDING", "ACTIVE", "DISABLED"] },
+          "accessKey": { "type": "string" },
+          "lastHeard": { "type": "string" }
+        }
+      },
+      "description": "Hardware display terminals"
+    },
+    "/liveStatus/{terminalId}": {
+      "schema": {
+        "title": "Live Status",
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "driverId": { "type": "string" },
+          "lat": { "type": "number" },
+          "lng": { "type": "number" },
+          "lastHeard": { "type": "string" }
+        }
+      },
+      "description": "Real-time terminal pulse"
+    },
+    "/planProposals/{proposalId}": {
+      "schema": {
+        "title": "Plan Proposal",
+        "type": "object",
+        "properties": {
+          "driverId": { "type": "string" },
+          "newPlanId": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+          "createdAt": { "type": "string" }
+        }
+      },
+      "description": "Driver requests to change pricing plans"
     },
     "/payments/{paymentId}": {
       "schema": "campaignPayment",

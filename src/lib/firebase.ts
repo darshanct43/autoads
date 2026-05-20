@@ -70,6 +70,12 @@ export const googleLogin = async () => {
     if (error.code === 'auth/network-request-failed') {
       throw new Error("Authentication failed due to a network error. Please ensure you are not blocking popups or third-party cookies, and that your domain is authorized in Firebase Console.");
     }
+    if (error.code === 'auth/operation-not-allowed') {
+       throw new Error("Google Sign-in is not enabled in your Firebase Console. Please enable it in Authentication > Sign-in method.");
+    }
+    if (error.code === 'auth/unauthorized-domain') {
+       throw new Error("This domain is not authorized for Google Login. Please add the current preview URL to the authorized domains in your Firebase Console and ensure that your email has a verified AutoAds account.");
+    }
     throw error;
   }
 };

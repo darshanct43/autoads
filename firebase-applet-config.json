@@ -1,9 +1,10 @@
 {
   "projectId": "autoads-18b26",
-  "appId": "1:195891414080:web:8149fd51d5c034d4b0cba5",
+  "appId": "1:195891414080:web:5694b9b61bb5bec4b0cba5",
   "apiKey": "AIzaSyDLwQwpYKjFVrbnP9Iwz6r3EAQsVaiCr3A",
   "authDomain": "autoads-18b26.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
-  "storageBucket": "autoads-18b26.appspot.com",
-  "messagingSenderId": "195891414080"
+  "firestoreDatabaseId": "ai-studio-2d7c0ec8-7f5b-426d-8e1a-dc77926ec5fb",
+  "storageBucket": "autoads-18b26.firebasestorage.app",
+  "messagingSenderId": "195891414080",
+  "measurementId": ""
 }
