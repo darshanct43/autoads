@@ -265,6 +265,7 @@ async function startServer() {
   });
 
   app.post("/api/razorpay/create-order", async (req, res) => {
+    console.log("[SERVER] Received POST /api/razorpay/create-order");
     console.log("[SERVER] Order Creation Request Received");
     const { amount, currency, notes } = req.body;
     
@@ -303,6 +304,7 @@ async function startServer() {
   });
 
   app.post("/api/razorpay/verify-payment", async (req, res) => {
+    console.log("[SERVER] Received POST /api/razorpay/verify-payment");
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     
     // STEP 2 — PAYMENT SUCCESS: Log key receipt parameters on server entry
