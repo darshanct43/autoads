@@ -722,7 +722,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     const amount = baseAmount + (needDesigner ? (selectedPlan.designerPrice || 0) : 0);
     
     try {
-      const orderResponse = await fetch('/api/razorpay/create-order', {
+      const response = await fetch('/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -737,16 +737,25 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         })
       });
 
-      if (!orderResponse.ok) {
-        const errorData = await orderResponse.json();
-        throw new Error(errorData.error || "Order creation failed on server");
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("NON JSON RESPONSE:", text);
+        throw new Error("Invalid response from server");
       }
-      const order = await orderResponse.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Order creation failed on server");
+      }
+      
+      const order = data;
       if (order.amount < 100) {
         throw new Error("Invalid order amount. Minimum charge not met.");
       }
       setOrderData(order);
-      setActiveOrderId(order.id); // Set the active order ID to start real-time sub in the background
+      setActiveOrderId(order.id);
       return order;
     } catch (e: any) {
       alert(`Initialization Error: ${e.message}`);
@@ -792,48 +801,54 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           alert("HANDLER FIRED");
 
           try {
-           const verifyResult = await fetch('/api/razorpay/verify-payment', {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ...response,
-      uid: user?.uid,
-      campaignId:
-        createdCampaignId ||
-        localStorage.getItem("last_created_campaign") ||
-        "",
-      planData: {
-        amount: currentOrderData.amount / 100,
-        planId: selectedPlan.id
-      },
-      campaignData: {
-        title: campaignDetails.title,
-        type: campaignDetails.type,
-        customerId: user?.uid,
-        targetCity:
-          selectedCity === "Other"
-            ? customCity
-            : selectedCity,
-        targetState: selectedState,
-        duration: campaignDetails.duration,
-        needDesigner: !!needDesigner,
-        paymentStatus: "PAID",
-        paymentId: response.razorpay_payment_id,
-        paymentReceived: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
-    })
-  }
-);
+            const verifyRes = await fetch('/api/verify-payment', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...response,
+                  uid: user?.uid,
+                  campaignId:
+                    createdCampaignId ||
+                    localStorage.getItem("last_created_campaign") ||
+                    "",
+                  planData: {
+                    amount: currentOrderData.amount / 100,
+                    planId: selectedPlan.id
+                  },
+                  campaignData: {
+                    title: campaignDetails.title,
+                    type: campaignDetails.type,
+                    customerId: user?.uid,
+                    targetCity:
+                      selectedCity === "Other"
+                        ? customCity
+                        : selectedCity,
+                    targetState: selectedState,
+                    duration: campaignDetails.duration,
+                    needDesigner: !!needDesigner,
+                    paymentStatus: "PAID",
+                    paymentId: response.razorpay_payment_id,
+                    paymentReceived: true,
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                  }
+                })
+            });
 
-            const verifyText = await verifyResult.text();
-            console.log(
-              "[VERIFY_RESPONSE]",
-              verifyText
-            );
+            const text = await verifyRes.text();
+            let data;
+            try {
+              data = JSON.parse(text);
+            } catch (e) {
+              console.error("NON JSON RESPONSE:", text);
+              throw new Error("Invalid response from server");
+            }
+            
+            console.log("[VERIFY_RESPONSE]", data);
+            
+            if (!verifyRes.ok) {
+                throw new Error(data.error || "Payment verification failed");
+            }
 
             // Instant UI transitions
             dispatch({ type: 'SET_ACTIVE' });
@@ -869,7 +884,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             setLoading(true);
             
             console.log("SENDING VERIFY REQUEST");
-            const fetchUrl = '/api/razorpay/verify-payment';
+            const fetchUrl = '/api/verify-payment';
             console.log("[MANDATORY CHECK STAGE 3] Preparing payment verification request:");
             console.log("  - Exact Target Fetch URL:", fetchUrl);
             console.log("  - Campaign ID to send:", createdCampaignId || localStorage.getItem('last_created_campaign') || '');

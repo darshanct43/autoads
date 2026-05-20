@@ -8,7 +8,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import cors from 'cors';
 import multer from 'multer';
-import { uploadToS3 } from './src/services/awsService.js';
+import { uploadToS3 } from './src/services/awsService.ts';
 import twilio from 'twilio';
 import fs from 'fs';
 import { GoogleGenAI } from "@google/genai";
@@ -25,8 +25,7 @@ try {
 }
 
 // Demo Setup Function
-async function createDemoCampaign() {
-    const db = getFirestore(firebaseConfig.firestoreDatabaseId);
+async function createDemoCampaign(db: any) {
     const campaignData = {
         title: "Demo AutoAds Campaign",
         status: "ACTIVE",
@@ -71,25 +70,31 @@ try {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   
+  // Basic middlewares
+  app.use(express.json());
   app.use(cors({
     origin: true,
     credentials: true,
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "DELETE",
-      "OPTIONS"
-    ],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization"
-    ]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
   }));
 
-  app.use(express.json());
+  // Health route - early
+  app.get("/health", (req, res) => {
+    res.json({
+      success: true,
+      server: "running",
+      time: new Date().toISOString()
+    });
+  });
+
+  // Force JSON headers for all API routes
+  app.use("/api", (req, res, next) => {
+    res.setHeader("Content-Type", "application/json");
+    next();
+  });
 
   // Firebase Admin Init
   let adminApp;
@@ -184,15 +189,7 @@ async function startServer() {
     };
   };
 
-  // API Routes
-  app.get("/health", (req, res) => {
-    res.json({
-      success: true,
-      server: "running",
-      time: new Date().toISOString()
-    });
-  });
-
+  // API Routes (Specific)
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
@@ -209,113 +206,171 @@ async function startServer() {
     }
   });
 
-  // API: Send OTP
+  // 1. Send OTP
   app.post("/api/otp/send", async (req, res) => {
-    const { phoneNumber } = req.body;
-    const twilio = getTwilioClient();
-    if (!twilio) return res.status(500).json({ error: "Twilio not configured" });
-
-    try {
-      const verification = await twilio.client.verify.v2.services(twilio.serviceSid)
-        .verifications.create({ to: phoneNumber, channel: 'sms' });
-      res.json({ status: "success", sid: verification.sid });
-    } catch (error: any) {
-      if (error.code === 21608) {
-        console.warn("[SERVER] Twilio send warning: Unverified phone number (trial account limitation).");
-        res.status(403).json({ error: "Trial account limit: Please verify this phone number in your Twilio console to receive messages." });
-      } else {
-        console.error("[SERVER] Twilio send error:", error);
-        res.status(500).json({ error: error.message || "Failed to send OTP" });
-      }
-    }
+    // Migration Note: Logic is now in /api/otp/send.ts for Vercel
+    res.json({ success: true, message: "Migrated to serverless" });
   });
 
-  // API: Verify OTP
   app.post("/api/otp/verify", async (req, res) => {
-    const { phoneNumber, code } = req.body;
-    const twilio = getTwilioClient();
-    if (!twilio) return res.status(500).json({ error: "Twilio not configured" });
-
-    try {
-      const verificationCheck = await twilio.client.verify.v2.services(twilio.serviceSid)
-        .verificationChecks.create({ to: phoneNumber, code: code });
-      
-      if (verificationCheck.status === 'approved') {
-          res.json({ status: "approved" });
-      } else {
-          res.status(400).json({ error: "Invalid code" });
-      }
-    } catch (error: any) {
-      if (error.code === 21608) {
-        console.warn("[SERVER] Twilio verify warning: Unverified phone number (trial account limitation).");
-        res.status(403).json({ error: "Trial account limit: Please verify this phone number in your Twilio console." });
-      } else {
-        console.error("[SERVER] Twilio verify error:", error);
-        res.status(500).json({ error: error.message || "Failed to verify OTP" });
-      }
-    }
+    res.json({ success: true, message: "Migrated to serverless" });
   });
 
 
 
 
-  app.get("/api/payment/status", async (req, res) => {
-    const { userId } = req.query;
-    if (!userId) {
-      return res.status(400).json({ error: "Missing userId" });
-    }
-    
+  // 3. Razorpay Orders
+  app.post("/api/create-order", async (req, res) => {
+    res.json({ success: true, message: "Migrated to serverless" });
+  });
+
+  app.post("/api/verify-payment", async (req, res) => {
+    res.json({ success: true, message: "Migrated to serverless" });
+  });
+
+  app.get("/api/payment-status", async (req, res) => {
+    res.json({ success: true, message: "Migrated to serverless" });
+  });
+
+  // API: Razorpay Create Order
+  app.post("/api/razorpay/create-order", async (req, res) => {
+    const rzp = getRazorpay();
+    if (!rzp) return res.status(500).json({ error: "Razorpay not configured" });
+
     try {
-      if (!firebaseProjectId) {
-         return res.status(500).json({ success: false, error: "Firebase project not configured on server" });
-      }
+      const { amount } = req.body;
+      if (!amount) return res.status(400).json({ error: "Amount required" });
 
-      // Simple where query to avoid index requirement for composite orderBy
-      const paymentsSnapshot = await dbAdm.collection('payments')
-        .where('customerId', '==', userId)
-        .get();
-      
-      if (paymentsSnapshot.empty) {
-        console.log(`[SERVER] No payments found for ${userId}`);
-        console.log("RETURNING JSON (PENDING)");
-        return res.json({ success: true, paymentStatus: "PENDING", details: "No records found" });
-      }
-      
-      // Sort in memory to avoid index requirement
-      const payments: any[] = paymentsSnapshot.docs.map(doc => ({
-          ...doc.data(),
-          createdAt: doc.data().createdAt ? (doc.data().createdAt as any).toMillis() : 0
-      }));
-      
-      payments.sort((a: any, b: any) => b.createdAt - a.createdAt);
-      const payment = payments[0];
+      const order = await rzp.orders.create({
+        amount: Math.round(amount * 100),
+        currency: "INR",
+      });
 
-      console.log("PAYMENT FOUND", payment);
-      console.log(`[SERVER] Latest payment status for ${userId}: ${payment.status}`);
-      console.log("RETURNING JSON (SUCCESS/PAID check)");
-      
-      return res.status(200).json({ 
+      res.json({
         success: true,
-        paymentStatus: payment.status || "PENDING",
-        subscription: payment.status === 'SUCCESS' || payment.status === 'PAID' ? 'ACTIVE' : 'INACTIVE'
+        order,
+        key: process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID
       });
-    } catch (e: any) {
-      console.error("[SERVER] Status check error details:", e);
-      // Ensure we return JSON even on error
-      res.setHeader('Content-Type', 'application/json');
-      return res.status(500).json({ 
-        success: false,
-        error: e.message || "Internal Database Error",
-        code: e.code,
-        details: e.details || "Check server logs for PERMISSION_DENIED or API activation issues"
-      });
+    } catch (error: any) {
+      console.error("[RAZORPAY] Create error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: Razorpay Verify Payment
+  app.post("/api/razorpay/verify-payment", async (req, res) => {
+    try {
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
+      const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
+
+      const secret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || process.env.VITE_RAZORPAY_KEY_SECRET;
+      if (!secret) return res.status(500).json({ error: "Razorpay Secret missing" });
+
+      const generated_signature = crypto
+        .createHmac("sha256", secret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+
+      if (generated_signature !== razorpay_signature) {
+        return res.status(400).json({ success: false, error: "Invalid signature" });
+      }
+
+      const paymentRecord = {
+        transactionId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        amount: planData?.amount || 0,
+        status: 'SUCCESS',
+        paymentMethod: 'razorpay',
+        createdAt: FieldValue.serverTimestamp(),
+        verifiedAt: FieldValue.serverTimestamp(),
+        customerId: uid || 'UNKNOWN',
+        campaignId: finalCampaignId || campaignData?.title || 'PENDING',
+        isWebhookTriggered: false
+      };
+      
+      await dbAdm.collection('payments').add(paymentRecord);
+
+      if (finalCampaignId) {
+          await dbAdm.collection('campaigns').doc(finalCampaignId).set({
+            status: 'ACTIVE',
+            paymentStatus: 'PAID',
+            paymentReceived: true,
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+      } else if (campaignData) {
+          await dbAdm.collection('campaigns').add({
+            ...campaignData,
+            status: 'ACTIVE',
+            paymentStatus: 'PAID',
+            paymentReceived: true,
+            updatedAt: FieldValue.serverTimestamp()
+          });
+      }
+
+      res.status(200).json({ success: true, status: "SUCCESS" });
+    } catch (error: any) {
+      console.error("[RAZORPAY] Verify error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: Razorpay Webhook
+  app.post("/api/razorpay/webhook", async (req, res) => {
+    try {
+      const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+      if (!secret) return res.status(500).json({ error: "Webhook secret missing" });
+
+      const signature = req.headers['x-razorpay-signature'] as string;
+      const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+
+      if (expectedSignature !== signature) {
+        return res.status(400).json({ error: "Invalid signature" });
+      }
+      
+      const { event, payload } = req.body;
+      const paymentEntity = payload?.payment?.entity;
+      
+      if (event === 'payment.captured' || event === 'order.paid') {
+        const orderId = paymentEntity.order_id;
+        const paymentId = paymentEntity.id;
+        const campaignId = paymentEntity.notes?.campaignId || paymentEntity.notes?.campaign_id;
+        
+        const existing = await dbAdm.collection('payments').where('transactionId', '==', paymentId).get();
+        if (existing.empty) {
+           await dbAdm.collection('payments').add({
+             transactionId: paymentId,
+             orderId: orderId,
+             amount: paymentEntity.amount / 100,
+             status: 'SUCCESS',
+             createdAt: FieldValue.serverTimestamp(),
+             isWebhookTriggered: true,
+             customerId: paymentEntity.notes?.customerId || 'UNKNOWN',
+             campaignId: campaignId || 'PENDING'
+           });
+           
+           if (campaignId) {
+              await dbAdm.collection('campaigns').doc(campaignId).update({
+                status: 'ACTIVE',
+                paymentReceived: true,
+                updatedAt: FieldValue.serverTimestamp()
+              });
+           }
+        }
+      }
+      res.json({ status: 'ok' });
+    } catch (err: any) {
+      console.error("[WEBHOOK] Error:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
   // API: Demo Setup (Internal)
   app.post("/api/demo/setup", async (req, res) => {
     try {
-        await createDemoCampaign();
+        await createDemoCampaign(dbAdm);
         res.json({ status: "success" });
     } catch (e: any) {
         res.status(500).json({ error: e.message });
@@ -411,14 +466,37 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
+  // API 404 handler
+  app.use("/api", (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // Static Assets and SPA Fallback
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
+    
+    // Explicitly handle all other requests by serving transformed index.html
+    app.get("*all", async (req, res, next) => {
+      if (req.originalUrl.startsWith("/api")) return next();
+      
+      try {
+        const url = req.originalUrl;
+        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.resolve(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -426,14 +504,6 @@ async function startServer() {
       res.sendFile(path.resolve(distPath, "index.html"));
     });
   }
-
-  // 404 handler
-  app.use((req: any, res: any) => {
-    res.status(404).json({
-      success: false,
-      error: `Route not found: ${req.method} ${req.originalUrl}`
-    });
-  });
 
   // GLOBAL ERROR HANDLER
   app.use((err: any, req: any, res: any, next: any) => {
@@ -445,7 +515,7 @@ async function startServer() {
   });
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
     console.log("[MANDATORY CHECK STAGE 1] Registered backend startup payment routes:");
     console.log("  - POST /debug/activate-campaign (Emergency Manual Activation)");
     
@@ -455,4 +525,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("CRITICAL SERVER STARTUP ERROR:", err);
+  process.exit(1);
+});

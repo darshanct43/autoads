@@ -1509,6 +1509,29 @@ export const firebaseService = {
     }
   },
 
+  async updateDriverAgreement(driverId: string, agreementData: any) {
+    try {
+      await setDoc(doc(db, 'drivers', driverId, 'agreement', 'current'), {
+        ...agreementData,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `drivers/${driverId}/agreement`);
+      throw e;
+    }
+  },
+
+  subscribeToAgreement(driverId: string, callback: (agreement: any) => void) {
+    const docRef = doc(db, 'drivers', driverId, 'agreement', 'current');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.data());
+      } else {
+        callback(null);
+      }
+    }, (error) => handleFirestoreError(error, OperationType.GET, `drivers/${driverId}/agreement`, true));
+  },
+
   async updateDriverLocation(uid: string, data: any) {
     const batch = writeBatch(db);
     // Update latest location

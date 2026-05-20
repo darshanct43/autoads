@@ -25,6 +25,8 @@ import {
   Settings,
   Video,
   ShieldCheck,
+  Shield,
+  FileText,
   Lock,
   Gift,
   LogOut,
@@ -312,6 +314,7 @@ export default function AdminPortal({
   const [isUpdatingMedia, setIsUpdatingMedia] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
+  const [selectedDriverForAgreement, setSelectedDriverForAgreement] = useState<any | null>(null);
   const [driverDocuments, setDriverDocuments] = useState<any[]>([]);
   const [showDocModal, setShowDocModal] = useState(false);
   const [pricingSubTab, setPricingSubTab] = useState<'BASE' | 'DESIGNER'>('BASE');
@@ -4093,6 +4096,14 @@ export default function AdminPortal({
                             <div className="flex gap-2 items-center justify-end">
                               <button
                                 onClick={() => {
+                                  setSelectedDriverForAgreement(d);
+                                }}
+                                className="text-[8px] font-black bg-blue-100 text-blue-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-blue-200 transition-all font-mono"
+                              >
+                                Review
+                              </button>
+                              <button
+                                onClick={() => {
                                   setSelectedDriverForEarning(d);
                                   setShowEarningModal(true);
                                 }}
@@ -5483,6 +5494,102 @@ export default function AdminPortal({
         )}
       </AnimatePresence>
     </div>
+      <AnimatePresence>
+        {selectedDriverForAgreement && (
+          <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedDriverForAgreement(null)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center shrink-0">
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center">
+                         <Shield className="text-white w-6 h-6" />
+                      </div>
+                      <div>
+                         <h3 className="text-xl font-black italic uppercase text-slate-900 leading-none">Agreement Vault</h3>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Operator: {selectedDriverForAgreement.name}</p>
+                      </div>
+                   </div>
+                   <button onClick={() => setSelectedDriverForAgreement(null)} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:bg-slate-100"><X size={20} /></button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                   {selectedDriverForAgreement.agreementAccepted ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-6 text-center">
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Verification Selfie</p>
+                              <div className="w-full aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-sm">
+                                 <img src={selectedDriverForAgreement.verificationSelfieUrl} className="w-full h-full object-cover" alt="Selfie" />
+                              </div>
+                           </div>
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Digital Signature</p>
+                              <div className="w-full aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-4">
+                                 <img src={selectedDriverForAgreement.signatureUrl} className="max-w-full max-h-full object-contain" alt="Signature" />
+                              </div>
+                           </div>
+                        </div>
+
+                        <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4">
+                           <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Digital Contract (PDF)</p>
+                              <span className="px-2 py-1 bg-green-500 text-white rounded text-[8px] font-black uppercase">v1.0 Signed</span>
+                           </div>
+                           <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 group hover:bg-white/10 transition-all cursor-pointer" 
+                                onClick={() => window.open(selectedDriverForAgreement.agreementPdfUrl, '_blank')}>
+                              <div className="flex items-center gap-3">
+                                 <FileText className="text-amber-500" size={20} />
+                                 <span className="text-xs font-black uppercase tracking-tight">Open Generated Contract</span>
+                              </div>
+                              <ExternalLink size={16} className="text-slate-500 group-hover:text-amber-500 transition-colors" />
+                           </div>
+                        </div>
+
+                        <div className="p-6 bg-blue-50 rounded-3xl border border-blue-100 flex items-center gap-4">
+                           <ShieldCheck className="text-blue-500 w-8 h-8" />
+                           <div>
+                              <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Compliance Signal</p>
+                              <p className="text-sm font-bold text-slate-700">Driver has legally accepted the partnership agreement and successfully completed biometric selfie verification.</p>
+                           </div>
+                        </div>
+                      </>
+                   ) : (
+                      <div className="h-64 flex flex-col items-center justify-center text-center space-y-4 grayscale opacity-40">
+                         <FileText size={48} className="text-slate-300" strokeWidth={1} />
+                         <div>
+                            <p className="text-xs font-black text-slate-900 uppercase tracking-widest italic">Awaiting Signature</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Driver has not yet initialized the digital agreement sequence.</p>
+                         </div>
+                      </div>
+                   )}
+                </div>
+
+                <div className="p-8 border-t border-slate-100 flex gap-4 shrink-0 bg-white">
+                   <button 
+                     onClick={() => setSelectedDriverForAgreement(null)}
+                     className="flex-1 py-4 bg-slate-100 rounded-2xl text-[10px] font-black uppercase text-slate-400 tracking-widest"
+                   >
+                     Close Vault
+                   </button>
+                   {selectedDriverForAgreement.agreementAccepted && selectedDriverForAgreement.kycStatus === 'PENDING' && (
+                      <button 
+                        onClick={async () => {
+                           if (confirm("Approve all documents and driver and enable payouts?")) {
+                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.uid, { kycStatus: 'APPROVED', status: 'active' });
+                              showToast("Driver Network Profile Approved.", 'success');
+                              setSelectedDriverForAgreement(null);
+                           }
+                        }}
+                        className="flex-1 py-4 bg-green-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-green-500/20"
+                      >
+                        Approve Operator
+                      </button>
+                   )}
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </ErrorBoundary>
   );
 }

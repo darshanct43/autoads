@@ -11,6 +11,7 @@ import { UserRole } from '@/types';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
+import DriverDigitalAgreement from './DriverDigitalAgreement';
 import DriverKYC from './DriverKYC';
 
 interface DriverPortalProps {
@@ -29,6 +30,8 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const status = (driverProfile?.status === 'active' || driverProfile?.status === 'ACTIVE') ? 'ACTIVE' : 'OFFLINE';
   const [activeTab, setActiveTab] = useState<'EARNINGS' | 'WITHDRAW' | 'SETTINGS'>('EARNINGS');
   const [showKYC, setShowKYC] = useState(false);
+  const [showAgreement, setShowAgreement] = useState(false);
+  const [agreement, setAgreement] = useState<any>(null);
   const [showCompliance, setShowCompliance] = useState(false);
   const [compliancePage, setCompliancePage] = useState<CompliancePage>('ABOUT');
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -60,6 +63,10 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const availableBalance = totalEarnings - totalWithdrawn - pendingWithdrawalAmount;
 
   const handleEnterDisplayMode = () => {
+    if (!agreement?.agreementAccepted) {
+      alert("Please accept the Driver Agreement in the Digital Partnership Hub (under Settings if not shown) before launching Display Mode.");
+      return;
+    }
     if (confirm("Confirm: Switching to Display Terminal Mode. This will hide your dashboard and start showing advertisements.")) {
       localStorage.setItem('auto_ads_is_terminal', 'true');
       window.location.reload();
@@ -100,9 +107,19 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
              });
           }
         });
+        const unsubscribeAgreement = firebaseService.subscribeToAgreement(u.uid, (agr) => {
+            setAgreement(agr);
+            if (agr && agr.agreementAccepted) {
+                setShowAgreement(false);
+            } else {
+                setShowAgreement(true);
+            }
+        });
+
         return () => {
           unsubscribe();
           unsubscribeProfile();
+          unsubscribeAgreement();
         }
       }
     });
@@ -255,6 +272,10 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
 
   const handleWithdrawClick = () => {
+    if (!agreement?.agreementAccepted) {
+      alert("Please accept the Digital Partnership Agreement before requesting withdrawals.");
+      return;
+    }
     if (driverProfile?.kycStatus !== 'APPROVED') {
         alert("Please complete KYC by uploading required documents under Settings to withdraw funds.");
         return;
@@ -693,6 +714,20 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       <main className="p-4 md:p-8 space-y-6 md:space-y-10 max-w-4xl mx-auto">
         {renderContent()}
       </main>
+
+      <AnimatePresence>
+        {showAgreement && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" />
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl">
+                <DriverDigitalAgreement 
+                  driverId={user?.uid!} 
+                  onSigned={() => setShowAgreement(false)} 
+                />
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showWithdraw && (

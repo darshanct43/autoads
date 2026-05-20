@@ -11,19 +11,6 @@ interface DriverKYCProps {
   onSuccess: () => void;
 }
 
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { CloudUpload, User, FileText, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { uploadToS3 } from '@/services/awsService';
-import { firebaseService } from '@/services/firebaseService';
-import { cn } from '@/lib/utils';
-import { DriverProfile, DriverDocument } from '@/types';
-
-interface DriverKYCProps {
-  driverId: string;
-  onSuccess: () => void;
-}
-
 export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState<Partial<DriverDocument>>({});
