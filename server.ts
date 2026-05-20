@@ -748,19 +748,20 @@ async function startServer() {
     });
   }
 
-  // GLOBAL ERROR HANDLERS
+  // 404 handler
+  app.use((req: any, res: any) => {
+    res.status(404).json({
+      success: false,
+      error: `Route not found: ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // GLOBAL ERROR HANDLER
   app.use((err: any, req: any, res: any, next: any) => {
     console.error("SERVER ERROR:", err);
     res.status(500).json({
       success: false,
       error: err.message || "Server error"
-    });
-  });
-
-  app.use((req: any, res: any) => {
-    res.status(404).json({
-      success: false,
-      error: `Route not found: ${req.method} ${req.originalUrl}`
     });
   });
 
