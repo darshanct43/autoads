@@ -1,9 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import formidable from 'formidable';
+import fs from 'fs';
 import { uploadToS3 } from '../src/services/awsService.ts';
-
-// Note: Vercel serverless functions handle body parsing differently.
-// For file uploads, we might need to use a library like 'formidable' or 'busboy'
-// Since this is a migration, I'll provide a structure that clarifies this.
 
 export const config = {
   api: {
@@ -16,9 +14,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Implementation for Vercel S3 Upload would typically involve formidable
-  // For now, I'll stick to the requested flat API files and basic structures.
-  // The user specifically asked for payment flows to be migrated first.
+  const form = formidable({});
   
-  res.status(501).json({ error: "Upload API migration in progress. Use standard S3 direct upload for client-side if possible or configure formidable." });
+  try {
+    const [fields, files] = await form.parse(req);
+    const file = Array.isArray(files.file) ? files.file[0] : files.file;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const fileBuffer = fs.readFileSync(file.filepath);
+    const fileName = `${Date.now()}-${file.originalFilename || 'upload'}`;
+    const url = await uploadToS3(fileBuffer, fileName, file.mimetype || 'application/octet-stream');
+
+    res.status(200).json({ url });
+  } catch (error: any) {
+    console.error('[SERVERLESS] Upload error:', error);
+    res.status(500).json({ error: 'Failed to upload file' });
+  }
 }

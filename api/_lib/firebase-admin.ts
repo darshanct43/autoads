@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 
 if (!admin.apps.length) {
   try {
@@ -21,6 +22,15 @@ if (!admin.apps.length) {
   }
 }
 
-export const dbAdm = admin.firestore();
+const getDb = () => {
+  try {
+    const dbId = process.env.FIRESTORE_DATABASE_ID || '(default)';
+    // Correct way to get a named database in firebase-admin
+    return getFirestore(admin.apps[0], dbId);
+  } catch (e) {
+    return admin.firestore();
+  }
+};
+export const dbAdm = getDb();
 export const authAdm = admin.auth();
 export { admin };
