@@ -11,6 +11,7 @@ import { UserRole } from '@/types';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
+import DriverKYC from './DriverKYC';
 
 interface DriverPortalProps {
   onLogout: () => void;
@@ -27,6 +28,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const status = (driverProfile?.status === 'active' || driverProfile?.status === 'ACTIVE') ? 'ACTIVE' : 'OFFLINE';
   const [activeTab, setActiveTab] = useState<'EARNINGS' | 'WITHDRAW' | 'SETTINGS'>('EARNINGS');
+  const [showKYC, setShowKYC] = useState(false);
   const [showCompliance, setShowCompliance] = useState(false);
   const [compliancePage, setCompliancePage] = useState<CompliancePage>('ABOUT');
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -75,7 +77,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       if (u) {
         setUser(u);
         const unsubscribeProfile = firebaseService.subscribeToDriverProfile(u.uid, (profile) => {
-          if (profile) {
+            if (profile) {
             setDriverProfile(profile);
             if (profile.bankDetails) setBankDetails(profile.bankDetails);
           } else {
@@ -253,7 +255,10 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
 
   const handleWithdrawClick = () => {
-    // Verification requirement removed as requested
+    if (driverProfile?.kycStatus !== 'APPROVED') {
+        alert("Please complete KYC by uploading required documents under Settings to withdraw funds.");
+        return;
+    }
     setShowWithdraw(true);
   };
 
@@ -304,6 +309,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   };
 
   const renderContent = () => {
+    if (showKYC) return <DriverKYC driverId={user?.uid!} onSuccess={() => setShowKYC(false)} />;
     switch (activeTab) {
       case 'SETTINGS':
         return (
@@ -322,6 +328,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
                 <div className="grid grid-cols-1 gap-4">
                    {[
+                     { id: 'KYC', label: 'KYC Verification', icon: CloudUpload, color: 'text-rose-500' },
                      { id: 'ABOUT', label: 'About AutoAds', icon: Info, color: 'text-blue-500' },
                      { id: 'PRIVACY', label: 'Privacy Policy', icon: Shield, color: 'text-emerald-500' },
                      { id: 'TERMS', label: 'Terms of Use', icon: FileText, color: 'text-indigo-500' },
@@ -330,7 +337,10 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                    ].map((item) => (
                      <button 
                         key={item.id}
-                        onClick={() => { setCompliancePage(item.id as CompliancePage); setShowCompliance(true); }}
+                        onClick={() => {
+                          if (item.id === 'KYC') setShowKYC(true);
+                          else { setCompliancePage(item.id as CompliancePage); setShowCompliance(true); }
+                        }}
                         className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100 hover:bg-white hover:border-slate-200 transition-all group"
                      >
                         <div className="flex items-center gap-4">

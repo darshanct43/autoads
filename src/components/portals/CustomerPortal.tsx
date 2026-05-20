@@ -722,7 +722,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     const amount = baseAmount + (needDesigner ? (selectedPlan.designerPrice || 0) : 0);
     
     try {
-      const orderResponse = await fetch('https://ais-dev-ekg3akgeks2b33ctivvphe-141352367606.asia-southeast1.run.app/api/razorpay/create-order', {
+      const orderResponse = await fetch('/api/razorpay/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -792,9 +792,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           alert("HANDLER FIRED");
 
           try {
-           const verifyResult = await fetch(
-  "https://ais-dev-ekg3akgeks2b33ctivvphe-141352367606.asia-southeast1.run.app/api/razorpay/verify-payment",
-  {
+           const verifyResult = await fetch('/api/razorpay/verify-payment', {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -871,7 +869,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             setLoading(true);
             
             console.log("SENDING VERIFY REQUEST");
-            const fetchUrl = 'https://ais-dev-ekg3akgeks2b33ctivvphe-141352367606.asia-southeast1.run.app/api/razorpay/verify-payment';
+            const fetchUrl = '/api/razorpay/verify-payment';
             console.log("[MANDATORY CHECK STAGE 3] Preparing payment verification request:");
             console.log("  - Exact Target Fetch URL:", fetchUrl);
             console.log("  - Campaign ID to send:", createdCampaignId || localStorage.getItem('last_created_campaign') || '');

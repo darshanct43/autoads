@@ -8,6 +8,23 @@ export interface User {
   avatar?: string;
 }
 
+export type KYCStatus = 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED';
+
+export interface DriverDocument {
+  aadhaar: string;
+  drivingLicense: string;
+  selfie: string;
+}
+
+export interface DriverProfile {
+  driverId: string;
+  kycStatus: KYCStatus;
+  payoutEnabled: boolean;
+  adminApproved: boolean;
+  documents: DriverDocument;
+  upiId?: string;
+}
+
 export interface AdCampaign {
   id: string;
   title: string;
