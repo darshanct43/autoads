@@ -450,7 +450,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
       setShowPaymentState(false);
       setLoading(false);
-      setIsVerifyingManual(false);
 
       if (typeof (window as any).showToast === 'function') {
         (window as any).showToast("Campaign activated successfully!", "success");

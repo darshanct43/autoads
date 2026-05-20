@@ -731,11 +731,6 @@ async function startServer() {
     }
   });
 
-  // 404 for API
-  app.all("/api/*all", (req, res) => {
-    res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
-  });
-
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -750,6 +745,22 @@ async function startServer() {
       res.sendFile(path.resolve(distPath, "index.html"));
     });
   }
+
+  // GLOBAL ERROR HANDLERS
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("SERVER ERROR:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message || "Server error"
+    });
+  });
+
+  app.use((req: any, res: any) => {
+    res.status(404).json({
+      success: false,
+      error: `Route not found: ${req.method} ${req.originalUrl}`
+    });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
