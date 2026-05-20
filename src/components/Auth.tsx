@@ -194,12 +194,12 @@ export default function Auth({ onLogin }: AuthProps) {
                 throw new Error("Demo account exists but password mismatch. Please use the correct password or administrative recovery.");
               }
               if (createErr.code === 'auth/operation-not-allowed' || createErr.code === 'auth/invalid-credential' || (createErr.message && createErr.message.toLowerCase().includes('invalid-credential'))) {
-                throw new Error(`AUTHENTICATION ERROR: The 'Email/Password' sign-in provider is disabled or restricted in your Firebase project '${firebaseConfig.projectId}'. Go to the Firebase Console > Authentication > Sign-in method, add/edit "Email/Password" and enable it.`);
+                throw new Error(`AUTHENTICATION ERROR: The 'Email/Password' sign-in method could be disabled. Please enable it in your Firebase Console > Authentication > Sign-in method.`);
               }
               throw createErr;
             }
           } else {
-            throw new Error("Invalid credentials. If this is a new account, please sign up via the 'Register' tab first. (If this is your own project, make sure 'Email/Password' is enabled in the Firebase Console under Authentication > Sign-in method).");
+            throw new Error("Invalid email or password. Please try again, or register if you are a new user.");
           }
         } else {
           throw authErr;

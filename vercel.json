@@ -1,0 +1,8 @@
+{
+"rewrites": [
+{
+"source": "/api/(.*)",
+"destination": "https://ais-dev-ekg3akgeks2b33ctivvphe-141352367606.asia-southeast1.run.app/api/$1"
+}
+]
+}
