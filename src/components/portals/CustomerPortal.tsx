@@ -13,6 +13,7 @@ import { compressImage } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
+import { SubscriptionManager } from '../subscription/SubscriptionManager';
 
 declare const Razorpay: any;
 
@@ -643,6 +644,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     </motion.div>
   );
 
+  const renderSubscriptionTab = () => <SubscriptionManager />;
+
   const handlePaymentSuccess = async (txnId?: string) => {
     try {
       setLoading(true);
@@ -778,12 +781,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     const razorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
     
     try {
-      if (typeof (window as any).Razorpay === 'undefined') {
-        alert("Payment SDK still loading. Please wait 2 seconds.");
-        return;
+      if (!(window as any).Razorpay) {
+        throw new Error("Razorpay SDK not loaded");
       }
 
       console.log("[PAYMENT_SYSTEM] Opening Modal...");
+      
+
+
       const options = {
         key: razorpayKey,
         amount: currentOrderData.amount,
@@ -793,46 +798,34 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         image: "https://darshanct43.github.io/autoads/logo.png",
         order_id: currentOrderData.id,
         handler: async function(response: any) {
-          console.log(
-            "[CRITICAL_HANDLER_FIRED]",
-            response
-          );
-
-          alert("HANDLER FIRED");
 
           try {
             const verifyRes = await fetch('/api/verify-payment', {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  ...response,
-                  uid: user?.uid,
-                  campaignId:
-                    createdCampaignId ||
-                    localStorage.getItem("last_created_campaign") ||
-                    "",
-                  planData: {
-                    amount: currentOrderData.amount / 100,
-                    planId: selectedPlan.id
-                  },
-                  campaignData: {
-                    title: campaignDetails.title,
-                    type: campaignDetails.type,
-                    customerId: user?.uid,
-                    targetCity:
-                      selectedCity === "Other"
-                        ? customCity
-                        : selectedCity,
-                    targetState: selectedState,
-                    duration: campaignDetails.duration,
-                    needDesigner: !!needDesigner,
-                    paymentStatus: "PAID",
-                    paymentId: response.razorpay_payment_id,
-                    paymentReceived: true,
-                    createdAt: new Date(),
-                    updatedAt: new Date()
-                  }
-                })
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...response,
+                uid: user?.uid,
+                campaignId: createdCampaignId || localStorage.getItem("last_created_campaign") || "",
+                planData: {
+                  amount: currentOrderData.amount / 100,
+                  planId: selectedPlan.id
+                },
+                campaignData: {
+                  title: campaignDetails.title,
+                  type: campaignDetails.type,
+                  customerId: user?.uid,
+                  targetCity: selectedCity === "Other" ? customCity : selectedCity,
+                  targetState: selectedState,
+                  duration: campaignDetails.duration,
+                  needDesigner: !!needDesigner,
+                  paymentStatus: "PAID",
+                  paymentId: response.razorpay_payment_id,
+                  paymentReceived: true,
+                  createdAt: new Date(),
+                  updatedAt: new Date()
+                }
+              })
             });
 
             const text = await verifyRes.text();
@@ -850,7 +843,17 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 throw new Error(data.error || "Payment verification failed");
             }
 
-            // Instant UI transitions
+            // Save successful payment history
+            await firebaseService.recordPayment({
+               transactionId: response.razorpay_payment_id || 'UNKNOWN',
+               orderId: response.razorpay_order_id || currentOrderData.id,
+               amount: currentOrderData.amount / 100,
+               paymentMethod: 'razorpay',
+               status: 'SUCCESS',
+               customerId: user?.uid || '',
+               createdAt: new Date()
+            }).catch(e => console.error("Failed to save payment history:", e));
+
             dispatch({ type: 'SET_ACTIVE' });
             setPaymentResult({
               status: 'SUCCESS',
@@ -859,214 +862,31 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               amount: currentOrderData.amount / 100
             });
             setLoading(false);
-
           } catch(err: any){
-            console.error(
-              "[VERIFY_FAILED]",
-              err
-            );
-          }
-        },
-        old_handler_backup: async (responseData: any) => {
-          console.log("PAYMENT STARTED");
-          console.log("RAZORPAY CALLBACK SUCCESS");
-          console.log("SUCCESS SCREEN OPENED");
-          console.log("VERIFYING BACKEND");
-
-          try {
-            console.log("Response Data:", responseData);
-            
-            if (!responseData || !responseData.razorpay_payment_id) {
-               throw new Error("Razorpay returned empty response or missing payment_id. Transaction state unknown.");
-            }
-            
-            dispatch({ type: 'SET_PAYMENT_PROCESSING' });
-            setLoading(true);
-            
-            console.log("SENDING VERIFY REQUEST");
-            const fetchUrl = '/api/verify-payment';
-            console.log("[MANDATORY CHECK STAGE 3] Preparing payment verification request:");
-            console.log("  - Exact Target Fetch URL:", fetchUrl);
-            console.log("  - Campaign ID to send:", createdCampaignId || localStorage.getItem('last_created_campaign') || '');
-            console.log("  - Order ID to send:", responseData.razorpay_order_id);
-            console.log("  - Payment ID to send:", responseData.razorpay_payment_id);
-            
-            let verifyResponse;
-            try {
-              verifyResponse = await fetch(fetchUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  razorpay_order_id: responseData.razorpay_order_id,
-                  razorpay_payment_id: responseData.razorpay_payment_id,
-                  razorpay_signature: responseData.razorpay_signature,
-                  uid: user?.uid,
-                  campaignId: createdCampaignId || localStorage.getItem('last_created_campaign') || '',
-                  planData: { amount: currentOrderData.amount / 100, planId: selectedPlan.id },
-                  campaignData: {
-                    title: campaignDetails.title,
-                    type: campaignDetails.type,
-                    customerId: user?.uid,
-                    targetCity: selectedCity === 'Other' ? customCity : selectedCity,
-                    targetState: selectedState,
-                    duration: campaignDetails.duration,
-                    needDesigner: !!needDesigner,
-                    paymentStatus: 'PAID',
-                    paymentId: responseData.razorpay_payment_id,
-                    paymentReceived: true,
-                    createdAt: new Date(),
-                    updatedAt: new Date()
-                  }
-                })
-              });
-            } catch (fetchErr: any) {
-               console.error("[PAYMENT_STRICT_DEBUG] Fetch failed entirely:", fetchErr);
-               throw new Error(`Network failure: ${fetchErr.message}`);
-            }
-
-            console.log("VERIFY RESPONSE RECEIVED", verifyResponse);
-            
-            let result;
-            try {
-              const rawText =
-  await verifyResponse.text();
-
-console.log(
-  "[RAW_VERIFY_RESPONSE]",
-  rawText
-);
-
-try {
-
-  result = JSON.parse(rawText);
-
-} catch(err) {
-
-  console.error(
-    "[INVALID_JSON_RESPONSE]",
-    rawText
-  );
-
-  throw new Error(
-    rawText
-  );
-}
-            } catch (jsonErr: any) {
-               console.error("[PAYMENT_STRICT_DEBUG] JSON Parse failed:", jsonErr);
-               throw new Error("Invalid response format from server (non-JSON)");
-            }
-            
-            console.log("[PAYMENT_STRICT_DEBUG] Verify API JSON Data:", result);
-            
-            if (!result || (result.success !== true && result.status !== "SUCCESS")) {
-               const errorMsg = result?.error || result?.message || "Verification Failed on Server";
-               throw new Error(errorMsg);
-            }
-
-            // SUCCESS PATH STARTS HERE
-            console.log("WRITING FIRESTORE SUCCESS");
-            
-            const planAmount = selectedPlan.price === 'Free' ? 0 : parseFloat(String(selectedPlan.price).replace(/[^0-9.]/g, ''));
-            
-            setPaymentResult({
-                status: 'SUCCESS',
-                txId: responseData.razorpay_payment_id,
-                orderId: responseData.razorpay_order_id,
-                amount: currentOrderData.amount / 100,
-                error: "Verification Complete. Your campaign is being activated..."
-            });
-            
-            console.log("UI SUCCESS TRIGGERED");
-            dispatch({ type: 'SET_ACTIVE' });
+            console.error("[VERIFY_FAILED]", err);
             setLoading(false);
+          }
+        }
+      };
 
-            // Requirement 10: Instant lookup fallback check in case of delayed realtime listener delivery
-            const targetId = createdCampaignId || localStorage.getItem('last_created_campaign') || '';
-            if (targetId) {
-               console.log("[PAYMENT_STRICT_DEBUG] Payment success handler instant lookup check active for campaignId:", targetId);
-               const queryRef = doc(db, 'campaigns', targetId);
-               getDocFromServer(queryRef).then((directSnap) => {
-                  if (directSnap.exists()) {
-                     const data = directSnap.data();
-                     console.log("[PAYMENT_STRICT_DEBUG] Instant lookup check returned status:", data?.status);
-                     // Force local UI success transition if doc status or payment is marked success
-                     if (data?.status === 'PAID' || data?.status === 'ACTIVE' || data?.paymentReceived === true) {
-                        console.log("[PAYMENT_STRICT_DEBUG] Force transitioning UI state via instant lookup...");
-                        handleSuccessTransition(data, targetId);
-                     }
-                  }
-               }).catch((directErr) => {
-                  console.error("[PAYMENT_STRICT_DEBUG] Error during success callback instant lookup check:", directErr);
-               });
-            }
+      const razor = new window.Razorpay(options);
+      razor.on('modal.closed', function() {
+        setLoading(false);
+      });
+      razor.open();
+
+
+
+
+
             
-            // Hard fallback reload (retained as backup if UI gets stuck)
-            setTimeout(() => {
-                if (window.location.hash.includes('success') || document.body.innerHTML.includes('SUCCESS')) return;
-                window.location.reload();
-            }, 5000);
-
-            if (typeof (window as any).showToast === 'function') {
-               (window as any).showToast("SUCCESS: Payment Verified!", "success");
-            }
+// const planAmount = selectedPlan.price === 'Free' ? 0 : parseFloat(String(selectedPlan.price).replace(/[^0-9.]/g, ''));
             
-            setActiveOrderId(responseData.razorpay_order_id);
-            paymentProcessedRef.current = false; // Reset lock for new payment
 
-            // Now perform DB operations in the background
-            try {
-              console.log("[PAYMENT_STRICT_DEBUG] Performing background Firestore sync...");
-              
-              const campaignDataToSave = {
-                title: campaignDetails.title,
-                type: campaignDetails.type,
-                customerId: user?.uid,
-                targetCity: selectedCity === 'Other' ? customCity : selectedCity,
-                targetState: selectedState,
-                duration: campaignDetails.duration,
-                needDesigner: !!needDesigner,
-                status: 'ACTIVE' as any,
-                paymentStatus: 'PAID',
-                paymentReceived: true,
-                budget: planAmount
-              };
 
-              const targetCampaignId = createdCampaignId || localStorage.getItem('last_created_campaign');
-              let finalCampaignIdToUse = targetCampaignId || '';
 
-              if (targetCampaignId) {
-                console.log("[PAYMENT_STRICT_DEBUG] Updating existing campaign status to ACTIVE:", targetCampaignId);
-                await firebaseService.updateCampaign(targetCampaignId, {
-                  status: 'ACTIVE' as any,
-                  paymentStatus: 'PAID',
-                  paymentReceived: true,
-                  budget: planAmount
-                } as any);
-                setPaymentResult(prev => ({ ...prev!, campaignId: targetCampaignId }));
-              } else {
-                console.log("[PAYMENT_STRICT_DEBUG] Saving brand new campaign to Firestore...");
-                const campaignRef = await firebaseService.createCampaign(campaignDataToSave);
-                console.log("[PAYMENT_STRICT_DEBUG] New Campaign Saved ID:", campaignRef.id);
-                finalCampaignIdToUse = campaignRef.id;
-                setPaymentResult(prev => ({ ...prev!, campaignId: campaignRef.id }));
-                localStorage.setItem('last_created_campaign', campaignRef.id);
-              }
-              
-              console.log("[PAYMENT_STRICT_DEBUG] Recording Payment Record for campaign:", finalCampaignIdToUse);
-              await firebaseService.recordPayment({
-                campaignId: finalCampaignIdToUse || 'PENDING',
-                orderId: responseData.razorpay_order_id,
-                transactionId: responseData.razorpay_payment_id,
-                amount: currentOrderData.amount / 100, // INR
-                status: 'SUCCESS',
-                customerId: user?.uid || 'UNKNOWN',
-                paymentMethod: 'razorpay'
-              });
-              console.log("[PAYMENT_STRICT_DEBUG] Final Sync Complete");
-            } catch (dbError: any) {
-              console.error("[PAYMENT_STRICT_DEBUG] Background Firestore Write Error:", dbError);
-              (window as any).showToast?.("Payment OK, but DB Sync delayed. Our team is activating it manually.", "warning");
-            }
+
+
           } catch (verifyErr: any) {
             console.error("[PAYMENT_STRICT_DEBUG] Verification Error Caught:", verifyErr);
             firebaseService.recordPayment({
@@ -1085,31 +905,16 @@ try {
             dispatch({ type: 'SET_FAILED', error: verifyErr.message || 'Verification Error' });
             setLoading(false);
           }
+/*
         },
-        prefill: {
-          name: user?.displayName || "Client",
-          email: user?.email || ""
-        },
-        theme: { color: "#f59e0b" },
-        modal: {
-          ondismiss: () => {
-             console.log("[PAYMENT_SYSTEM] Modal dismissed by user");
-             // Log the cancelled attempt
-             firebaseService.recordPayment({
-                orderId: currentOrderData.id,
-                amount: currentOrderData.amount / 100,
-                paymentMethod: 'razorpay',
-                status: 'CANCELLED',
-                failureReason: 'User closed payment window',
-                customerId: user?.uid || '',
-                customerPhone: phone || ''
-             }).catch(console.error);
-             setLoading(false);
-          }
-        }
+        theme: { color: "#f59e0b" }
       };
 
-      const rzpObj = new (window as any).Razorpay(options);
+      const rzpObj = razor;
+      // rzpObj.on('modal.closed', function() {
+        setLoading(false);
+      });
+      rzpObj.open();
       activeRazorpayRef.current = rzpObj;
       const rzp = rzpObj;
 
@@ -1118,7 +923,6 @@ try {
            "[PAYMENT_FAILED]",
            response
          );
-         alert("PAYMENT FAILED");
       });
       
       rzpObj.on('payment.failed', async (responseData: any) => {
@@ -1473,9 +1277,7 @@ try {
     }
   };
 
-  return (
-    <ErrorBoundary componentName="Client Command Center">
-      <div className="min-h-screen bg-[#f8fafc]">
+  return <div className="min-h-screen bg-[#f8fafc]">
       {/* Navigation */}
       <nav className="h-16 border-b border-slate-200 flex items-center justify-between px-4 md:px-8 bg-white/80 backdrop-blur-md sticky top-0 z-[100]">
         <div className="flex items-center gap-3">
@@ -1501,7 +1303,8 @@ try {
               { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
               { id: 'HISTORY', label: 'History', icon: History },
               { id: 'TICKETS', label: 'Support', icon: MessageSquare },
-              { id: 'DESIGN_HELP', label: 'Designer', icon: Plus }
+              { id: 'DESIGN_HELP', label: 'Designer', icon: Plus },
+              { id: 'SUBSCRIPTIONS', label: 'Plans', icon: Zap }
             ].map((tab) => (
               <button 
                 key={tab.id}
@@ -1530,79 +1333,6 @@ try {
       </nav>
 
       {/* Mobile Menu Overlay */}
-      <AnimatePresence>
-        {showMobileMenu && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowMobileMenu(false)}
-              className="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[55] md:hidden"
-            />
-            <motion.div
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-[60] md:hidden shadow-2xl flex flex-col"
-            >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-950 text-white">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black uppercase tracking-tighter italic">Auto<span className="text-amber-500">Ads</span> Portal</span>
-                </div>
-                <button onClick={() => setShowMobileMenu(false)} className="text-slate-400">
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                {[
-                  { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
-                  { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
-                  { id: 'HISTORY', label: 'History', icon: History },
-                  { id: 'TICKETS', label: 'Support', icon: MessageSquare },
-                  { id: 'DESIGN_HELP', label: 'Designer', icon: Plus }
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id as any);
-                      setShowMobileMenu(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
-                      activeTab === item.id ? "bg-slate-900 text-amber-500 shadow-xl" : "text-slate-500 hover:bg-slate-50"
-                    )}
-                  >
-                    <item.icon size={18} />
-                    {item.label}
-                    {activeTab === item.id && <ChevronRight size={14} className="ml-auto" />}
-                  </button>
-                ))}
-              </div>
-
-              <div className="p-4 border-t border-slate-100 space-y-4">
-                 <div className="flex items-center gap-3 px-4">
-                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
-                      <User size={20} />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-black text-slate-900 uppercase">{user.email?.split('@')[0]}</p>
-                        <p className="text-[8px] font-bold text-slate-400 uppercase">Customer Portal</p>
-                    </div>
-                 </div>
-                 <button 
-                  onClick={onLogout}
-                  className="w-full flex items-center gap-4 px-4 py-4 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition-all text-left"
-                 >
-                    <LogOut size={18} />
-                    Logout Session
-                 </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-4 md:space-y-8">
         {activeTab === 'LEGAL' && (
@@ -2118,6 +1848,7 @@ try {
         {/* Removed OFFERS tab as requested - consolidated into DASHBOARD */}
 
         {activeTab === 'HISTORY' && renderHistoryTab()}
+        {activeTab === 'SUBSCRIPTIONS' && renderSubscriptionTab()}
         
         {activeTab === 'CAMPAIGNS' && (
           <motion.div
@@ -3068,21 +2799,11 @@ try {
           </div>
         )}
       </AnimatePresence>
-
+      
       {!showPayment && (
-        <AdminAssistant 
-          activeTab={activeTab} 
-          role="customer" 
-          systemContext={{
-             userName: user?.displayName || 'Enterprise User',
-             balance: customerBalance,
-             transactions: payments,
-             activeTickets: tickets.filter(t => t.status === 'open' || t.status === 'OPEN').length,
-             liveUnitsCount: activeDevicesCount
-          }}
-        />
+        <div className="fixed bottom-4 right-4 p-4 bg-white shadow-xl rounded-2xl border border-slate-100 uppercase text-[8px] font-black tracking-widest text-slate-500 z-[120]">
+          Verified Infrastructure
+        </div>
       )}
-    </div>
-    </ErrorBoundary>
-  );
+    </div>;
 }

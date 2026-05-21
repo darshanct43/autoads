@@ -28,9 +28,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     res.status(200).json({
-      success: true,
-      order,
-      key: key_id
+      id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: key_id
     });
   } catch (error: any) {
     console.error('[RAZORPAY] Create error:', error);
