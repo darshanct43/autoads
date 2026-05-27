@@ -9,13 +9,14 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
   useEffect(() => {
     // 2-Stroke "Tuk-Tuk" Sound Synthesis
     const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
+    // Don't return early here, as it skips the 3000ms timeout!
 
     let context: AudioContext | null = null;
     let interval: any = null;
 
     const startSound = () => {
       try {
+        if (!AudioContextClass) return;
         if (!context) context = new AudioContextClass();
         if (context.state === 'suspended') context.resume();
 
@@ -67,7 +68,10 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
   }, [onComplete]);
 
   return (
-    <div className="fixed inset-0 bg-[#f8fafc] z-[200] flex flex-col items-center justify-center overflow-hidden cursor-pointer selection:bg-none">
+    <div 
+      onClick={onComplete}
+      className="fixed inset-0 bg-[#f8fafc] z-[200] flex flex-col items-center justify-center overflow-hidden cursor-pointer selection:bg-none"
+    >
       {/* The Road */}
       <motion.div 
         initial={{ opacity: 0 }}

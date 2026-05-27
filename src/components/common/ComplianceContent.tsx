@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { X, Shield, FileText, RefreshCcw, Info, MessageSquare, ExternalLink, Mail, Phone, MapPin } from 'lucide-react';
 
-export type CompliancePage = 'ABOUT' | 'PRIVACY' | 'TERMS' | 'REFUND' | 'CONTACT';
+export type CompliancePage = 'ABOUT' | 'PRIVACY' | 'TERMS' | 'CONTACT';
 
 interface ComplianceContentProps {
   page: CompliancePage;
@@ -67,22 +67,6 @@ export default function ComplianceContent({ page, onClose, isEmbed = false }: Co
             </div>
           </div>
         );
-      case 'REFUND':
-        return (
-          <div className="space-y-6 text-sm text-slate-600 leading-relaxed">
-            <h2 className="text-2xl font-black italic uppercase text-slate-900 tracking-tight">Refund Policy</h2>
-            <div className="space-y-4">
-              <section>
-                <h4 className="font-bold text-slate-900 uppercase text-[10px] tracking-widest mb-1">1. CANCELLATION</h4>
-                <p>Campaigns can be cancelled before start for a full refund. Active campaigns are non-refundable after 24 hours of live deployment.</p>
-              </section>
-              <section>
-                <h4 className="font-bold text-slate-900 uppercase text-[10px] tracking-widest mb-1">2. FAILED UPTIME</h4>
-                <p>If network uptime falls below 90% for your campaign tier, we will issue a pro-rata credit or refund to your wallet.</p>
-              </section>
-            </div>
-          </div>
-        );
       case 'CONTACT':
         return (
           <div className="space-y-8">
@@ -94,19 +78,25 @@ export default function ComplianceContent({ page, onClose, isEmbed = false }: Co
                 </div>
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email Support</p>
-                  <p className="text-sm font-bold text-slate-900">support@autoads.in</p>
+                  <p className="text-sm font-bold text-slate-900">serviceprovider43@outlook.com</p>
                 </div>
               </div>
-              <div className="flex items-center gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100 group">
+              <a 
+                href="https://wa.me/919481027833" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100 group hover:border-green-500 transition-all"
+              >
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:bg-green-500 group-hover:text-white transition-all">
                   <MessageSquare size={24} />
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">WhatsApp Business</p>
-                  <p className="text-sm font-bold text-slate-900">+91 [CONTACT_ID]</p>
+                  <p className="text-sm font-bold text-slate-900">Contact Support Team</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                <ExternalLink size={14} className="text-slate-300 group-hover:text-green-500" />
+              </a>
+              <div className="flex items-center gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100 italic opacity-60">
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
                   <MapPin size={24} />
                 </div>

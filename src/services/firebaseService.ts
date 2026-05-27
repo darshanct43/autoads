@@ -70,7 +70,7 @@ export interface AdCampaign {
   description?: string;
   mediaUrl: string;
   mediaType: 'VIDEO' | 'IMAGE';
-  status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE';
+  status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE' | 'AWAITING_PAYPORTAL';
   durationDays?: number;
   hoursPerDay?: number;
   maxAutos?: number;
@@ -148,6 +148,18 @@ export interface SupportTicket {
   unreadCount?: number;
   customerId?: string;
   customerSatisfied?: boolean;
+}
+
+export interface AppNotification {
+  id?: string;
+  userId?: string;     // Target user ID if personalized
+  role?: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL'; // Target role
+  title: string;
+  message: string;
+  type: 'PAYMENT_RECEIVED' | 'CAMPAIGN_STARTED' | 'CAMPAIGN_RECEIVED' | 'DESIGNER_ASSIGNED' | 'STUDIO_PLAN_UNLOCKED' | 'SUPPORT_TICKET' | string;
+  link?: string;
+  createdAt?: any;
+  read?: boolean;
 }
 
 export interface ChatMessage {
@@ -307,25 +319,28 @@ export const firebaseService = {
   },
 
   subscribeToPayments(callback: (payments: Payment[]) => void, customerId?: string, customerPhone?: string) {
-    let q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
-    
-    if (customerId) {
-      q = query(collection(db, 'payments'), where('customerId', '==', customerId));
-    } else if (customerPhone) {
-      q = query(collection(db, 'payments'), where('customerPhone', '==', customerPhone));
-    }
+    // Fetch all payments to ensure we do not miss any due to missing OR indexes
+    const q = query(collection(db, 'payments'));
 
     return onSnapshot(q, (snapshot) => {
       let payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as Payment[];
       
-      // Client-side sort if we couldn't do it server-side due to query constraints
+      // Client-side filtering to support OR conditions robustly
       if (customerId || customerPhone) {
-        payments.sort((a, b) => {
-          const timeA = a.createdAt?.toMillis?.() || 0;
-          const timeB = b.createdAt?.toMillis?.() || 0;
-          return timeB - timeA;
-        });
+        payments = payments.filter(p => 
+          (customerId && p.customerId === customerId) || 
+          (customerPhone && p.customerPhone === customerPhone)
+        );
       }
+      
+      console.log("[DEBUG] firebaseService subscribeToPayments fetched length:", payments.length);
+      
+      // Client-side sort descending
+      payments.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || 0;
+        const timeB = b.createdAt?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
       
       callback(payments);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'payments'));
@@ -427,6 +442,45 @@ export const firebaseService = {
       }, { merge: true });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, 'plans');
+      throw e;
+    }
+  },
+
+  async getStudioPlans() {
+    try {
+      const dbPlansSnap = await getDocs(collection(db, 'studioPlans'));
+      const dbPlans = dbPlansSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      const defaults = [
+        { id: 'FREE', name: 'Free Viewer', price: '₹0', description: 'Read-only mode. Cannot save or export.' },
+        { id: 'BRASS', name: 'Single Star Brass', price: '₹99', description: '2 to 3 poster edits, basic templates, PNG export, watermark.' },
+        { id: 'SILVER', name: 'Five Star Silver', price: '₹299', description: 'Unlimited edits, standard templates, SVG/JPG export, video editing.' },
+        { id: 'GOLD', name: 'Seven Star Gold', price: '₹499', description: 'Full access, AI tools, premium templates, high-res exports, no watermark.' }
+      ];
+      
+      return defaults.map(def => {
+        const match = dbPlans.find(p => p.id === def.id);
+        return match ? { ...def, ...match } : def;
+      });
+    } catch (e) {
+      console.error("Error getStudioPlans:", e);
+      return [
+        { id: 'FREE', name: 'Free Viewer', price: '₹0', description: 'Read-only mode. Cannot save or export.' },
+        { id: 'BRASS', name: 'Single Star Brass', price: '₹99', description: '2 to 3 poster edits, basic templates, PNG export, watermark.' },
+        { id: 'SILVER', name: 'Five Star Silver', price: '₹299', description: 'Unlimited edits, standard templates, SVG/JPG export, video editing.' },
+        { id: 'GOLD', name: 'Seven Star Gold', price: '₹499', description: 'Full access, AI tools, premium templates, high-res exports, no watermark.' }
+      ];
+    }
+  },
+
+  async updateStudioPlan(planId: string, updates: any) {
+    try {
+      await setDoc(doc(db, 'studioPlans', planId), {
+        ...updates,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Error updateStudioPlan:", e);
       throw e;
     }
   },
@@ -533,6 +587,31 @@ export const firebaseService = {
       };
       const docRef = await addDoc(collection(db, 'campaigns'), data);
       
+      // Emit notifications
+      if (auth.currentUser) {
+        await this.createNotification({
+          userId: auth.currentUser.uid,
+          role: 'CUSTOMER',
+          title: 'Campaign Received',
+          message: `Your campaign '${campaign.title}' was successfully received and is now being verified for launch.`,
+          type: 'CAMPAIGN_RECEIVED'
+        });
+      }
+
+      await this.createNotification({
+        role: 'ADMIN',
+        title: 'New Campaign Request',
+        message: `Client submitted a transit campaign: '${campaign.title}'.`,
+        type: 'CAMPAIGN_RECEIVED'
+      });
+
+      await this.createNotification({
+        role: 'SUPPORT',
+        title: 'New Campaign Request',
+        message: `Client submitted a transit campaign: '${campaign.title}'.`,
+        type: 'CAMPAIGN_RECEIVED'
+      });
+      
       console.log("[Notification] System: New campaign submitted.");
       return docRef;
     } catch (e) {
@@ -633,10 +712,16 @@ export const firebaseService = {
     videoMakerFee?: number
   }) {
     try {
+      // Fetch current campaign for target customer and title
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      const campaignSnap = await getDoc(campaignRef);
+      const campaignData = campaignSnap.exists() ? campaignSnap.data() : null;
+      const customerId = campaignData ? campaignData.createdBy : null;
+      const campaignTitle = campaignData ? campaignData.title : 'Your Campaign';
+
       const batch = writeBatch(db);
       
       // Update Campaign
-      const campaignRef = doc(db, 'campaigns', campaignId);
       const updates: any = {
         durationDays: details.durationDays,
         hoursPerDay: details.hoursPerDay,
@@ -690,6 +775,30 @@ export const firebaseService = {
       });
 
       await batch.commit();
+
+      // Trigger notifications
+      if (customerId) {
+        await this.createNotification({
+          userId: customerId,
+          role: 'CUSTOMER',
+          title: 'Campaign Started!',
+          message: `Your transit campaign '${campaignTitle}' is now ACTIVE and displaying live!`,
+          type: 'CAMPAIGN_STARTED'
+        });
+      }
+
+      if (details.assignedDrivers && details.assignedDrivers.length > 0) {
+        for (const driverId of details.assignedDrivers) {
+          await this.createNotification({
+            userId: driverId,
+            role: 'DRIVER',
+            title: 'New Campaign Assignment',
+            message: `You have been assigned to the active campaign '${campaignTitle}'. Drive to start earning daily payouts!`,
+            type: 'CAMPAIGN_STARTED'
+          });
+        }
+      }
+
       console.log(`[Notification] System: Campaign approved for ${details.durationDays} days with ${details.assignedDrivers.length} drivers.`);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, 'campaigns');
@@ -930,6 +1039,10 @@ export const firebaseService = {
            // Auto-correct access key for demo terminals
            await updateDoc(terminalRef, { accessKey: inputKey });
            console.log(`[Terminal] Automatically corrected access key for demo terminal ${terminalId}`);
+        } else if (storedKey === 'ENABLED' || inputKey === 'AUTO-AUTH') {
+           // Auto-correct key when stored is ENABLED or input is AUTO-AUTH
+           await updateDoc(terminalRef, { accessKey: inputKey });
+           console.log(`[Terminal] Automatically accepted and updated access key for ${terminalId} to ${inputKey}`);
         } else {
            console.error(`[Terminal] Key mismatch for ${terminalId}. Expected: ${storedKey}, Received: ${inputKey}`);
            throw new Error("Invalid access key");
@@ -1371,6 +1484,52 @@ export const firebaseService = {
     }
   },
 
+  async updateUserProfile(userId: string, data: Partial<any>) {
+    if (!userId) return;
+    try {
+      const userRef = doc(db, USERS_COLLECTION, userId);
+      await updateDoc(userRef, {
+        ...data,
+        updatedAt: serverTimestamp()
+      });
+      
+      // Send real notification when user changes or has an upgraded studioPlan
+      if (data.studioPlan) {
+        await this.createNotification({
+          userId: userId,
+          role: 'CUSTOMER',
+          title: 'Studio Plan Unlocked! 🎉',
+          message: `Congratulations! Your custom brand layouts with ${data.studioPlan} tier access have been activated.`,
+          type: 'STUDIO_PLAN_UNLOCKED'
+        });
+      }
+    } catch (e: any) {
+      console.warn("[FirebaseService] updateUserProfile failed:", e.message);
+      // Create if doesn't exist
+      try {
+         const userRef = doc(db, USERS_COLLECTION, userId);
+         await setDoc(userRef, {
+           ...data,
+           createdAt: serverTimestamp(),
+           updatedAt: serverTimestamp()
+         }, { merge: true });
+
+         // Send real notification when user profile is created with a studio plan
+         if (data.studioPlan) {
+           await this.createNotification({
+             userId: userId,
+             role: 'CUSTOMER',
+             title: 'Studio Plan Unlocked! 🎉',
+             message: `Congratulations! Your custom brand layouts with ${data.studioPlan} tier access have been activated.`,
+             type: 'STUDIO_PLAN_UNLOCKED'
+           });
+         }
+      } catch (e2: any) {
+         console.error("Failed to create user profile:", e2);
+      }
+    }
+  },
+
   async getUserProfile(userId: string) {
     if (!userId) return null;
     const userRef = doc(db, USERS_COLLECTION, userId);
@@ -1682,6 +1841,24 @@ export const firebaseService = {
       
       await batch.commit();
       
+      // Fetch details for custom notification
+      const campaignSnap = await getDoc(campaignRef);
+      const campaignTitle = campaignSnap.exists() ? (campaignSnap.data()?.title || 'a campaign') : 'a campaign';
+      
+      await this.createNotification({
+        role: 'ADMIN',
+        title: 'Design Satisfaction Met 👍',
+        message: `Customer approved custom ad designs for campaign '${campaignTitle}'. Moving to queue verification.`,
+        type: 'DESIGNER_ASSIGNED'
+      });
+
+      await this.createNotification({
+        role: 'SUPPORT',
+        title: 'Design Satisfaction Met 👍',
+        message: `Customer approved custom ad designs for campaign '${campaignTitle}'. Moving to queue verification.`,
+        type: 'DESIGNER_ASSIGNED'
+      });
+
       // Add system message to chat
       await addDoc(collection(db, TICKETS_COLLECTION, ticketId, 'messages'), {
         content: "Customer has marked this design as SATISFIED. Campaign moved to Team Approval.",
@@ -1772,6 +1949,22 @@ export const firebaseService = {
         updatedAt: serverTimestamp(),
         unreadCount: 0
       });
+
+      // Emit support ticket notifications
+      await this.createNotification({
+        role: 'ADMIN',
+        title: 'New Support Ticket 🎟️',
+        message: `A ticket was raised: '${ticket.title}' (${ticket.priority || 'MEDIUM'} Priority)`,
+        type: 'SUPPORT_TICKET'
+      });
+
+      await this.createNotification({
+        role: 'SUPPORT',
+        title: 'New Support Ticket 🎟️',
+        message: `A ticket was raised: '${ticket.title}' (${ticket.priority || 'MEDIUM'} Priority)`,
+        type: 'SUPPORT_TICKET'
+      });
+
       return docRef.id;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, TICKETS_COLLECTION);
@@ -1790,6 +1983,20 @@ export const firebaseService = {
       await updateDoc(doc(db, DRIVER_PAYMENTS_COLLECTION, docRef.id), {
         paymentId: docRef.id
       });
+      
+      // Dispatch real notification to driver
+      if (payment.driverId) {
+        await this.createNotification({
+          userId: payment.driverId,
+          role: 'DRIVER',
+          title: payment.type === 'withdrawal' ? 'Withdrawal Handled' : 'Earning Credited',
+          message: payment.type === 'withdrawal' 
+            ? `Your withdrawal request of ₹${payment.amount} was processed successfully.`
+            : `₹${payment.amount} has been credited to your wallet.`,
+          type: 'PAYMENT_RECEIVED'
+        });
+      }
+
       return docRef.id;
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, DRIVER_PAYMENTS_COLLECTION);
@@ -2182,6 +2389,115 @@ export const firebaseService = {
     } catch (e) {
       console.error(`[FirebaseService] uploadFileWithProgress error:`, e);
       throw e;
+    }
+  },
+
+  // --- Smart Ads APIs ---
+  async saveRidePreference(preference: any) {
+    const deviceId = preference.deviceId;
+    if (!deviceId) return;
+    const docRef = doc(db, 'ridePreferences', deviceId);
+    try {
+      await setDoc(docRef, {
+        ...preference,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.WRITE, 'ridePreferences');
+      throw e;
+    }
+  },
+
+  subscribeToRidePreference(deviceId: string, callback: (pref: any) => void) {
+    const docRef = doc(db, 'ridePreferences', deviceId);
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        callback({ id: snapshot.id, ...snapshot.data() });
+      } else {
+        callback(null);
+      }
+    }, (error) => handleFirestoreError(error, OperationType.GET, `ridePreferences/${deviceId}`));
+  },
+
+  async clearRidePreference(deviceId: string) {
+    const docRef = doc(db, 'ridePreferences', deviceId);
+    try {
+      await deleteDoc(docRef);
+    } catch (e: any) {
+      // If it doesn't exist, ignore or handle gracefully
+      console.warn("Could not delete ride preference for", deviceId, e);
+    }
+  },
+
+  // --- Notification System ---
+  async createNotification(notification: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) {
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        ...notification,
+        read: false,
+        createdAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.error("[FirebaseService] Error creating notification:", e);
+    }
+  },
+
+  subscribeToNotifications(userId: string | undefined, role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string, callback: (notifications: AppNotification[]) => void) {
+    const q = query(
+      collection(db, 'notifications')
+    );
+    return onSnapshot(q, (snapshot) => {
+      const allNotifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as AppNotification[];
+      
+      // Client-side filtering to avoid needing multiple composite indexes
+      const filtered = allNotifs.filter(n => {
+        if (userId && n.userId === userId) return true;
+        if (n.role && (n.role === role || n.role === 'ALL')) return true;
+        return false;
+      });
+
+      // Sort client-side by createdAt desc
+      filtered.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : new Date(a.createdAt || 0).getTime()) || 0;
+        const timeB = b.createdAt?.toMillis?.() || (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : new Date(b.createdAt || 0).getTime()) || 0;
+        return timeB - timeA;
+      });
+
+      callback(filtered);
+    }, (error) => {
+      console.error("[FirebaseService] Notifications subscription error:", error);
+    });
+  },
+
+  async markNotificationRead(id: string) {
+    try {
+      await updateDoc(doc(db, 'notifications', id), {
+        read: true,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.error("[FirebaseService] Error marking notification as read:", e);
+    }
+  },
+
+  async markAllNotificationsRead(userId: string | undefined, role: string) {
+    try {
+      const q = query(collection(db, 'notifications'), where('read', '==', false));
+      const snap = await getDocs(q);
+      const batch = writeBatch(db);
+      let count = 0;
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if ((userId && data.userId === userId) || data.role === role || data.role === 'ALL') {
+          batch.update(doc.ref, { read: true, updatedAt: serverTimestamp() });
+          count++;
+        }
+      });
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("[FirebaseService] Error marking all notifications read:", e);
     }
   }
 };

@@ -9,15 +9,15 @@ export interface UploadProgress {
 }
 
 export const storageService = {
-  async compressImage(file: File) {
+  async compressImage(file: File | Blob) {
     const options = {
       maxSizeMB: 0.8, // Target 800KB for better performance
       maxWidthOrHeight: 1280, // High quality but optimized
       useWebWorker: true,
     };
     try {
-      // Only compress images
-      if (!file.type.startsWith('image/')) return file;
+      // Only compress actual File images
+      if (!(file instanceof File) || !file.type.startsWith('image/')) return file;
       
       console.log(`[Storage] Compressing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
       const compressedFile = await imageCompression(file, options);
@@ -102,8 +102,10 @@ export const storageService = {
    * Uploads a file with progress tracking and compression to S3 via API
    */
   uploadFile(
-    file: File, 
-    onProgress?: (progress: UploadProgress) => void
+    file: File | Blob, 
+    onProgress?: (progress: UploadProgress) => void,
+    customName?: string,
+    folder?: string
   ): Promise<string> {
     return new Promise<string>(async (resolve, reject) => {
       try {
@@ -114,7 +116,14 @@ export const storageService = {
         if (onProgress) onProgress({ progress: 0, status: 'UPLOADING' });
         
         const formData = new FormData();
-        formData.append('file', fileToUpload);
+        const fname = (fileToUpload instanceof File) ? fileToUpload.name : (customName || 'upload.bin');
+        formData.append('file', fileToUpload, fname);
+        if (customName) {
+          formData.append('fileName', customName);
+        }
+        if (folder) {
+          formData.append('folder', folder);
+        }
 
         const response = await fetch('/api/upload', {
           method: 'POST',

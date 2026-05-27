@@ -160,6 +160,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin() || isStaff() || isSignedIn();
     }
+
+    match /ridePreferences/{deviceId} {
+      allow read, write: if true;
+    }
   }
 }
 

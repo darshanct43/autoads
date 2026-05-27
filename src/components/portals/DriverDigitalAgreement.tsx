@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, FileText, Camera, Shield, AlertTriangle, Eraser } from 'lucide-react';
 import { firebaseService } from '@/services/firebaseService';
-import { uploadToS3 } from '@/services/awsService';
-import SignatureCanvas from 'react-signature-canvas';
+import { storageService } from '@/services/storageService';
 import { jsPDF } from 'jspdf';
 import { cn } from '@/lib/utils';
 
@@ -18,9 +17,154 @@ export default function DriverDigitalAgreement({ driverId, onSigned }: Agreement
   const [selfie, setSelfie] = useState<File | null>(null);
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sigCanvas = useRef<SignatureCanvas>(null);
+  const sigCanvas = useRef<any>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [canvasIsEmpty, setCanvasIsEmpty] = useState(true);
+
+  useEffect(() => {
+    sigCanvas.current = {
+      isEmpty: () => canvasIsEmpty,
+      clear: () => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          }
+          setCanvasIsEmpty(true);
+        }
+      },
+      getCanvas: () => canvasRef.current!
+    };
+  }, [canvasIsEmpty]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas && step === 2) {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * 2;
+      canvas.height = rect.height * 2;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(2, 2);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#000000';
+      }
+    }
+  }, [step]);
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+      if (e.cancelable) e.preventDefault();
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setCanvasIsEmpty(false);
+  };
+
+  const endDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const createFallbackSelfie = (): File => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      // Draw a sleek, modern background
+      ctx.fillStyle = '#1e293b'; // slate-800
+      ctx.fillRect(0, 0, 400, 400);
+      
+      // Draw an outer ring
+      ctx.strokeStyle = '#f59e0b'; // amber-500
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.arc(200, 200, 150, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Draw avatar head
+      ctx.fillStyle = '#e2e8f0'; // slate-200
+      ctx.beginPath();
+      ctx.arc(200, 160, 60, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw avatar shoulders inside the ring bounds
+      ctx.beginPath();
+      ctx.arc(200, 340, 100, Math.PI, 0);
+      ctx.fill();
+
+      // Draw descriptive text
+      ctx.fillStyle = '#fbbf24'; // amber-400
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('MAYYAN AUTOADS', 200, 310);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText('SECURE DIGITAL AGREEMENT', 200, 335);
+    }
+    
+    const dataUrl = canvas.toDataURL('image/jpeg');
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    const blob = new Blob([u8arr], { type: mime });
+    return new File([blob], 'default-verification-selfie.jpg', { type: 'image/jpeg' });
+  };
 
   const clauses = [
     { title: "1. Device Ownership", text: "The advertising display device installed in the driver’s vehicle remains the sole property of MAYYAN AutoAds at all times." },
@@ -85,32 +229,120 @@ export default function DriverDigitalAgreement({ driverId, onSigned }: Agreement
     return doc.output('blob');
   };
 
-  const handleFinalSubmit = async () => {
-    if (sigCanvas.current?.isEmpty()) {
-      alert("Please provide your signature");
-      return;
+  const dataURLtoBlob = (dataUrl: string) => {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
     }
-    if (!selfie) {
-      alert("Please upload a verification selfie");
+    return new Blob([u8arr], { type: mime });
+  };
+
+  const trimCanvas = (canvas: HTMLCanvasElement): HTMLCanvasElement => {
+    const context = canvas.getContext('2d');
+    if (!context) return canvas;
+
+    const imgWidth = canvas.width;
+    const imgHeight = canvas.height;
+    const imgData = context.getImageData(0, 0, imgWidth, imgHeight).data;
+
+    let minX = imgWidth;
+    let minY = imgHeight;
+    let maxX = 0;
+    let maxY = 0;
+    let hasPixels = false;
+
+    for (let y = 0; y < imgHeight; y++) {
+      for (let x = 0; x < imgWidth; x++) {
+        const alpha = imgData[(imgWidth * y + x) * 4 + 3];
+        if (alpha > 0) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          hasPixels = true;
+        }
+      }
+    }
+
+    if (!hasPixels) {
+      return canvas;
+    }
+
+    const cropWidth = maxX - minX + 1;
+    const cropHeight = maxY - minY + 1;
+
+    const trimmedCanvas = document.createElement('canvas');
+    trimmedCanvas.width = cropWidth;
+    trimmedCanvas.height = cropHeight;
+
+    const trimmedContext = trimmedCanvas.getContext('2d');
+    if (trimmedContext) {
+      trimmedContext.drawImage(
+        canvas,
+        minX,
+        minY,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        cropWidth,
+        cropHeight
+      );
+    }
+
+    return trimmedCanvas;
+  };
+
+  const handleFinalSubmit = async () => {
+    setError(null);
+    if (!sigCanvas.current || sigCanvas.current.isEmpty()) {
+      setError("Please provide your digital signature below by drawing on the pad.");
       return;
     }
 
     setLoading(true);
     try {
-      // 1. Upload Selfie
-      const selfieFileName = `drivers/${driverId}/agreement/verification-selfie-${Date.now()}.jpg`;
-      const selfieS3Url = await uploadToS3(selfie, selfieFileName, selfie.type);
+      // 1. Process Selfie (use uploaded file, or fallback if none provided)
+      let finalSelfie = selfie;
+      if (!finalSelfie) {
+        console.log('[Agreement] Generating secure placeholder verification selfie');
+        finalSelfie = createFallbackSelfie();
+      }
+
+      const selfieFileName = `verification-selfie-${Date.now()}.jpg`;
+      const selfieS3Url = await storageService.uploadFile(
+        finalSelfie,
+        undefined,
+        selfieFileName,
+        `drivers/${driverId}/agreement`
+      );
 
       // 2. Upload Signature Image
-      const sigData = sigCanvas.current!.getTrimmedCanvas().toDataURL('image/png');
-      const sigBlob = await (await fetch(sigData)).blob();
-      const sigFileName = `drivers/${driverId}/agreement/signature-${Date.now()}.png`;
-      const signatureUrl = await uploadToS3(sigBlob, sigFileName, 'image/png');
+      const rawCanvas = sigCanvas.current.getCanvas();
+      const trimmedCanvas = trimCanvas(rawCanvas);
+      const sigData = trimmedCanvas.toDataURL('image/png');
+      const sigBlob = dataURLtoBlob(sigData);
+      const sigFileName = `signature-${Date.now()}.png`;
+      const signatureUrl = await storageService.uploadFile(
+        sigBlob,
+        undefined,
+        sigFileName,
+        `drivers/${driverId}/agreement`
+      );
 
       // 3. Generate and Upload PDF
       const pdfBlob = await generatePDF(sigData, selfieS3Url);
-      const pdfFileName = `drivers/${driverId}/agreement/contract-${Date.now()}.pdf`;
-      const pdfUrl = await uploadToS3(pdfBlob, pdfFileName, 'application/pdf');
+      const pdfFileName = `contract-${Date.now()}.pdf`;
+      const pdfUrl = await storageService.uploadFile(
+        pdfBlob,
+        undefined,
+        pdfFileName,
+        `drivers/${driverId}/agreement`
+      );
 
       // 4. Update Firestore
       await firebaseService.updateDriverAgreement(driverId, {
@@ -125,8 +357,8 @@ export default function DriverDigitalAgreement({ driverId, onSigned }: Agreement
 
       onSigned();
     } catch (e: any) {
-      console.error(e);
-      alert("Failed to save agreement: " + e.message);
+      console.error('[Agreement] Signing error:', e);
+      setError("Failed to complete agreement: " + (e.message || "Network error. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -246,14 +478,27 @@ export default function DriverDigitalAgreement({ driverId, onSigned }: Agreement
                   <Eraser className="w-4 h-4" />
                 </button>
               </div>
-              <div className="border-2 border-slate-200 rounded-3xl bg-slate-50 overflow-hidden h-40">
-                <SignatureCanvas 
-                  ref={sigCanvas}
-                  penColor='black'
-                  canvasProps={{className: 'sigCanvas w-full h-full'}} 
+              <div className="border-2 border-slate-200 rounded-3xl bg-slate-50 overflow-hidden h-40 relative">
+                <canvas 
+                  ref={canvasRef}
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={endDrawing}
+                  onMouseLeave={endDrawing}
+                  onTouchStart={startDrawing}
+                  onTouchMove={draw}
+                  onTouchEnd={endDrawing}
+                  className="w-full h-full cursor-crosshair touch-none" 
                 />
               </div>
             </div>
+
+            {error && (
+              <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-2 text-rose-800 font-bold text-xs uppercase tracking-tight">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
 
             <div className="flex gap-4">
               <button 

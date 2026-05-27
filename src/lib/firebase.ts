@@ -82,7 +82,7 @@ export const googleLogin = async () => {
   } catch (error: any) {
     console.error("[Firebase Auth Error]", error);
     if (error.code === 'auth/network-request-failed') {
-      throw new Error("Authentication failed due to a network error. Please ensure you are not blocking popups or third-party cookies, and that your domain is authorized in Firebase Console.");
+      throw new Error("User sign-in did not complete due to a network error. Please ensure you are not blocking popups or third-party cookies, and that your domain is authorized in Firebase Console.");
     }
     if (error.code === 'auth/operation-not-allowed') {
        throw new Error("Google Sign-in is not enabled in your Firebase Console. Please enable it in Authentication > Sign-in method.");

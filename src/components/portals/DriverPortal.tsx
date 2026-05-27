@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity, CloudUpload } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity, CloudUpload, Baby, Users, VolumeX, School, Sun, Moon, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -13,6 +13,7 @@ import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
 import DriverDigitalAgreement from './DriverDigitalAgreement';
 import DriverKYC from './DriverKYC';
+import NotificationCenter from '../common/NotificationCenter';
 
 interface DriverPortalProps {
   onLogout: () => void;
@@ -47,6 +48,107 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [showBankModal, setShowBankModal] = useState(false);
   const [withdrawUpiId, setWithdrawUpiId] = useState('');
+  const [activeRidePref, setActiveRidePref] = useState<any>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!driverProfile?.terminalId) return;
+    const unsubscribe = firebaseService.subscribeToRidePreference(driverProfile.terminalId, (pref) => {
+      if (pref) {
+        const expiresAt = pref.expiresAt ? new Date(pref.expiresAt) : null;
+        if (!expiresAt || expiresAt > new Date()) {
+          setActiveRidePref(pref);
+        } else {
+          setActiveRidePref(null);
+        }
+      } else {
+        setActiveRidePref(null);
+      }
+    });
+
+    const checkExpiry = setInterval(() => {
+      if (activeRidePref?.expiresAt && new Date(activeRidePref.expiresAt) < new Date()) {
+        setActiveRidePref(null);
+        firebaseService.clearRidePreference(driverProfile.terminalId);
+      }
+    }, 10000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(checkExpiry);
+    };
+  }, [driverProfile?.terminalId, activeRidePref?.expiresAt]);
+
+  const handleDriverSelectRideMode = async (mode: 'CHILDREN' | 'FAMILY' | 'SILENT' | 'SCHOOL_TRIP' | 'NORMAL', durationMinutes: number = 30) => {
+    if (!driverProfile?.terminalId) {
+      showToast("No active display terminal provisioned. Activate Display Mode first.", "error");
+      return;
+    }
+
+    if (mode === 'NORMAL') {
+      try {
+        await firebaseService.clearRidePreference(driverProfile.terminalId);
+        setActiveRidePref(null);
+        showToast("Ride audience configuration reset to normal queue.", "success");
+      } catch (err) {
+        console.error(err);
+      }
+      return;
+    }
+
+    const now = new Date();
+    const expires = new Date(now.getTime() + durationMinutes * 60 * 1000);
+
+    const payload = {
+      rideId: `ride_${Date.now()}`,
+      deviceId: driverProfile.terminalId,
+      childrenPresent: mode === 'CHILDREN' || mode === 'SCHOOL_TRIP',
+      familyMode: mode === 'FAMILY' || mode === 'CHILDREN' || mode === 'SCHOOL_TRIP',
+      muteAds: mode === 'SILENT',
+      blockedCategories: mode === 'CHILDREN' || mode === 'SCHOOL_TRIP' ? ['alcohol', 'betting', 'gambling', 'political'] : mode === 'FAMILY' ? ['alcohol', 'political'] : [],
+      nightMode: false,
+      createdAt: now.toISOString(),
+      expiresAt: expires.toISOString(),
+      driverOverrideMode: mode
+    };
+
+    try {
+      await firebaseService.saveRidePreference(payload);
+    } catch (err) {
+      showToast("Failed to sync active ride mode.", "error");
+    }
+  };
+
+  const handleDriverSelectBrightnessMode = async (mode: 'AUTO' | 'BOOST' | 'NIGHT' | 'MANUAL', level?: number) => {
+    if (!driverProfile?.terminalId) {
+      showToast("No active display terminal provisioned. Activate Display Mode first.", "error");
+      return;
+    }
+
+    const payload = {
+      deviceId: driverProfile.terminalId,
+      brightnessMode: mode,
+      manualBrightnessLevel: level !== undefined ? level : (activeRidePref?.manualBrightnessLevel ?? 75),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await firebaseService.saveRidePreference(payload);
+    } catch (err) {
+      showToast("Failed to sync active brightness configuration.", "error");
+    }
+  };
 
   const totalEarnings = payments
     .filter(p => p.type === 'earning')
@@ -64,7 +166,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
   const handleEnterDisplayMode = () => {
     if (!agreement?.agreementAccepted) {
-      alert("Please accept the Driver Agreement in the Digital Partnership Hub (under Settings if not shown) before launching Display Mode.");
+      showToast("Please accept the Driver Agreement in the Digital Partnership Hub (under Settings if not shown) before launching Display Mode.", "info");
       return;
     }
     if (confirm("Confirm: Switching to Display Terminal Mode. This will hide your dashboard and start showing advertisements.")) {
@@ -264,33 +366,37 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       await firebaseService.updateDriverProfile(user.uid, { bankDetails: details });
       setBankDetails(details);
       setShowBankModal(false);
-      alert("Bank Details Linked Successfully!");
+      showToast("Bank Details Linked Successfully!", "success");
     } catch (e) {
-      alert("Failed to save bank details.");
+      showToast("Failed to save bank details.", "error");
     }
   };
 
 
   const handleWithdrawClick = () => {
-    if (!agreement?.agreementAccepted) {
-      alert("Please accept the Digital Partnership Agreement before requesting withdrawals.");
-      return;
-    }
-    if (driverProfile?.kycStatus !== 'APPROVED') {
-        alert("Please complete KYC by uploading required documents under Settings to withdraw funds.");
-        return;
-    }
     setShowWithdraw(true);
   };
 
   const handleWithdrawAction = async (amount: number, upiId: string) => {
     if (!user) return;
+    if (!agreement?.agreementAccepted) {
+      showToast("Please accept the Digital Partnership Agreement before requesting withdrawals.", "info");
+      return;
+    }
+    if (driverProfile?.kycStatus !== 'APPROVED') {
+      showToast("Please complete KYC by uploading required documents under Settings to withdraw funds.", "info");
+      return;
+    }
+    if (amount <= 0) {
+      showToast("Please enter a withdrawal amount greater than zero.", "error");
+      return;
+    }
     if (amount > availableBalance) {
-      alert("Insufficient Balance!");
+      showToast("Insufficient Balance!", "error");
       return;
     }
     if (!upiId || !upiId.includes('@')) {
-      alert("Please enter a valid UPI ID (e.g. yourname@upi)");
+      showToast("Please enter a valid UPI ID (e.g. yourname@upi)", "error");
       return;
     }
     try {
@@ -307,10 +413,10 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
         setDriverProfile(prev => ({ ...prev, upiId }));
       }
 
-      alert("Withdrawal Request Raised! Amount will be credited to your UPI ID within 48 hours.");
+      showToast("Withdrawal Request Raised! Amount will be credited to your UPI ID within 48 hours.", "success");
       setShowWithdraw(false);
     } catch (e) {
-      alert("Failed to raise withdrawal request.");
+      showToast("Failed to raise withdrawal request.", "error");
     }
   };
 
@@ -420,6 +526,51 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                   <p className="text-[10px] font-bold uppercase text-slate-400 leading-tight tracking-wide">Pending Settlements: ₹{(pendingWithdrawalAmount || 0).toLocaleString()}</p>
               </div>
             </div>
+
+            {(!agreement?.agreementAccepted || driverProfile?.kycStatus !== 'APPROVED') && (
+              <div className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-[2rem] space-y-4">
+                 <div className="flex items-start gap-3">
+                    <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={20} />
+                    <div className="space-y-1">
+                       <h4 className="text-xs font-black uppercase text-amber-500 tracking-wider">Payout Access Restricted</h4>
+                       <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide leading-relaxed">
+                          {!agreement?.agreementAccepted 
+                            ? "Please sign your Digital Partnership Agreement first." 
+                            : driverProfile?.kycStatus === 'UNDER_REVIEW'
+                              ? "Your KYC documentation is currently under manual audit by our verification team."
+                              : driverProfile?.kycStatus === 'REJECTED'
+                                ? "Your KYC documentation has been rejected. Please re-upload verified documents."
+                                : "Please upload Aadhaar, DL, and selfie documents to pass KYC verification."
+                          }
+                       </p>
+                    </div>
+                 </div>
+                 <div className="flex gap-2">
+                    {!agreement?.agreementAccepted && (
+                       <button 
+                         onClick={() => setShowAgreement(true)} 
+                         className="px-4 py-2.5 bg-slate-900 border border-slate-800 text-amber-500 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                       >
+                         Sign Partnership Agreement
+                       </button>
+                    )}
+                    {driverProfile?.kycStatus !== 'APPROVED' && driverProfile?.kycStatus !== 'UNDER_REVIEW' && (
+                       <button 
+                         onClick={() => setShowKYC(true)} 
+                         className="px-4 py-2.5 bg-slate-900 border border-slate-800 text-amber-500 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                       >
+                         {driverProfile?.kycStatus === 'REJECTED' ? "Re-upload Documents" : "Upload KYC Documents"}
+                       </button>
+                    )}
+                    {driverProfile?.kycStatus === 'UNDER_REVIEW' && (
+                       <span className="px-4 py-2.5 bg-slate-900/10 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-900/10">
+                         Verification In Progress
+                       </span>
+                    )}
+                 </div>
+              </div>
+            )}
+
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50">
                                <div className="space-y-3">
                   {payments.slice(0, 15).map((p, i) => (
@@ -566,7 +717,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                          className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center cursor-pointer transition-all hover:bg-white/10"
                          onClick={() => {
                            if (driverProfile?.accessKey) {
-                             alert(`Your Terminal Access Key is: ${driverProfile.accessKey} (Visible on Dashboard)`);
+                             showToast(`Access Key: ${driverProfile.accessKey}`, "info");
                            }
                          }}
                        >
@@ -585,6 +736,240 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                        </p>
                     </div>
                   </div>
+              </div>
+
+              {/* SMART RIDE AUDIENCE CONTROLS */}
+              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 space-y-6">
+                <div>
+                   <h3 className="text-lg font-black text-slate-900 italic tracking-tighter uppercase leading-none font-sans">Smart Ride Audience</h3>
+                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Passenger safety & preference controls</p>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 space-y-4">
+                  {/* Active mode indicator */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Active Mode:</span>
+                    <span className="px-3 py-1 bg-amber-500 text-slate-950 rounded-full text-[9px] font-black uppercase tracking-widest">
+                      {activeRidePref?.driverOverrideMode === 'CHILDREN' || activeRidePref?.childrenPresent ? '👶 Kids Safe' :
+                       activeRidePref?.driverOverrideMode === 'FAMILY' || activeRidePref?.familyMode ? '👨‍👩‍👧 Family Safe' :
+                       activeRidePref?.driverOverrideMode === 'SILENT' || activeRidePref?.muteAds ? '🔇 Silent Mode' :
+                       activeRidePref?.driverOverrideMode === 'SCHOOL_TRIP' ? '🎓 School Safe' :
+                       '🛍 Standard Safe'}
+                    </span>
+                  </div>
+
+                  {activeRidePref && (
+                    <div className="p-3 bg-green-50 rounded-2xl flex items-center justify-between border border-green-100 leading-none">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={12} className="text-green-600" />
+                        <span className="text-[8px] font-black text-green-700 uppercase tracking-wider">Active Overrides Triggered</span>
+                      </div>
+                      {activeRidePref.expiresAt && (
+                        <span className="text-[8px] font-mono font-bold text-green-600">
+                          Expires: {new Date(activeRidePref.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleDriverSelectRideMode('CHILDREN')}
+                      className={cn(
+                        "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                        (activeRidePref?.driverOverrideMode === 'CHILDREN' || activeRidePref?.childrenPresent) && !activeRidePref?.muteAds
+                          ? "bg-amber-500 border-amber-600 text-slate-950 font-black"
+                          : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                      )}
+                    >
+                      <Baby size={18} className="mb-2" />
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-tight">Children Ride</p>
+                        <p className={cn("text-[7px] font-medium leading-none mt-0.5", (activeRidePref?.driverOverrideMode === 'CHILDREN' || activeRidePref?.childrenPresent) && !activeRidePref?.muteAds ? "text-slate-900" : "text-slate-400")}>Clean Education Ads</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => handleDriverSelectRideMode('FAMILY')}
+                      className={cn(
+                        "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                        activeRidePref?.driverOverrideMode === 'FAMILY' || activeRidePref?.familyMode
+                          ? "bg-amber-500 border-amber-600 text-slate-950 font-black"
+                          : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                      )}
+                    >
+                      <Users size={18} className="mb-2" />
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-tight">Family safe</p>
+                        <p className={cn("text-[7px] font-medium leading-none mt-0.5", activeRidePref?.driverOverrideMode === 'FAMILY' || activeRidePref?.familyMode ? "text-slate-900" : "text-slate-400")}>General Audiences</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => handleDriverSelectRideMode('SILENT')}
+                      className={cn(
+                        "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                        activeRidePref?.driverOverrideMode === 'SILENT' || activeRidePref?.muteAds
+                          ? "bg-amber-500 border-amber-600 text-slate-950 font-black"
+                          : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                      )}
+                    >
+                      <VolumeX size={18} className="mb-2" />
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-tight">Silent Display</p>
+                        <p className={cn("text-[7px] font-medium leading-none mt-0.5", activeRidePref?.driverOverrideMode === 'SILENT' || activeRidePref?.muteAds ? "text-slate-950" : "text-slate-400")}>Dimmed/No Audio</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => handleDriverSelectRideMode('SCHOOL_TRIP')}
+                      className={cn(
+                        "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                        activeRidePref?.driverOverrideMode === 'SCHOOL_TRIP'
+                          ? "bg-amber-500 border-amber-600 text-slate-950 font-black"
+                          : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                      )}
+                    >
+                      <School size={18} className="mb-2" />
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-tight">School Trip</p>
+                        <p className={cn("text-[7px] font-medium leading-none mt-0.5", activeRidePref?.driverOverrideMode === 'SCHOOL_TRIP' ? "text-slate-950 font-black" : "text-slate-400")}>Special Curated Ads</p>
+                      </div>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => handleDriverSelectRideMode('NORMAL')}
+                    className="w-full py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-850 transition-all flex items-center justify-center gap-2 border border-slate-800"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Reset to Standard Queue</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* SMART AUTO BRIGHTNESS & DISPLAY LIGHT SYSTEM */}
+              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 space-y-6">
+                <div>
+                   <h3 className="text-lg font-black text-slate-900 italic tracking-tighter uppercase leading-none font-sans flex items-center gap-2">
+                     <Sun size={20} className="text-amber-500" />
+                     <span>Display Panel Brightness</span>
+                   </h3>
+                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Smart Auto Brightness & Manual Overrides</p>
+                </div>
+
+                <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 space-y-5">
+                   {/* Current status display */}
+                   <div className="flex items-center justify-between">
+                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Active Mode:</span>
+                     <div className="flex items-center gap-2">
+                       <span className="px-3 py-1 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest font-mono">
+                         {activeRidePref?.brightnessMode || 'AUTO'}
+                       </span>
+                       <span className="px-3 py-1 bg-amber-500 text-slate-950 rounded-full text-[9px] font-black uppercase tracking-widest font-mono">
+                         {activeRidePref?.brightnessMode === 'BOOST' ? '100%' :
+                          activeRidePref?.brightnessMode === 'NIGHT' ? '30%' :
+                          activeRidePref?.brightnessMode === 'MANUAL' ? `${activeRidePref?.manualBrightnessLevel ?? 75}%` :
+                          'Adaptive %'}
+                       </span>
+                     </div>
+                   </div>
+
+                   {/* Mode Select Buttons */}
+                   <div className="grid grid-cols-2 gap-2">
+                     <button
+                       onClick={() => handleDriverSelectBrightnessMode('AUTO')}
+                       className={cn(
+                         "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                         (!activeRidePref?.brightnessMode || activeRidePref?.brightnessMode === 'AUTO')
+                           ? "bg-amber-500 border-amber-600 text-slate-950 font-black shadow-lg shadow-amber-500/10"
+                           : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                       )}
+                     >
+                       <Sun size={18} className="mb-2" />
+                       <div>
+                         <p className="text-[9px] font-black uppercase tracking-tight">Auto System</p>
+                         <p className="text-[6.5px] font-medium leading-none mt-0.5 opacity-70">Adaptive Diurnal PWM</p>
+                       </div>
+                     </button>
+
+                     <button
+                       onClick={() => handleDriverSelectBrightnessMode('BOOST')}
+                       className={cn(
+                         "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                         (activeRidePref?.brightnessMode === 'BOOST')
+                           ? "bg-amber-500 border-amber-600 text-slate-950 font-black shadow-lg shadow-amber-500/10"
+                           : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                       )}
+                     >
+                       <Zap size={18} className="mb-2" />
+                       <div>
+                         <p className="text-[9px] font-black uppercase tracking-tight">Day Boost</p>
+                         <p className="text-[6.5px] font-medium leading-none mt-0.5 opacity-70">Forced Sun Visible (100%)</p>
+                       </div>
+                     </button>
+
+                     <button
+                       onClick={() => handleDriverSelectBrightnessMode('NIGHT')}
+                       className={cn(
+                         "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                         (activeRidePref?.brightnessMode === 'NIGHT')
+                           ? "bg-amber-500 border-amber-600 text-slate-950 font-black shadow-lg shadow-amber-500/10"
+                           : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                       )}
+                     >
+                       <Moon size={18} className="mb-2" />
+                       <div>
+                         <p className="text-[9px] font-black uppercase tracking-tight">Night Comfort</p>
+                         <p className="text-[6.5px] font-medium leading-none mt-0.5 opacity-70">Soft Eco-dim (30%)</p>
+                       </div>
+                     </button>
+
+                     <button
+                       onClick={() => handleDriverSelectBrightnessMode('MANUAL')}
+                       className={cn(
+                         "p-4 rounded-2xl border text-left flex flex-col justify-between transition-all",
+                         (activeRidePref?.brightnessMode === 'MANUAL')
+                           ? "bg-amber-500 border-amber-600 text-slate-950 font-black shadow-lg shadow-amber-500/10"
+                           : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+                       )}
+                     >
+                       <Settings size={18} className="mb-2" />
+                       <div>
+                         <p className="text-[9px] font-black uppercase tracking-tight">Manual Override</p>
+                         <p className="text-[6.5px] font-medium leading-none mt-0.5 opacity-70">Disable Auto Temporarily</p>
+                       </div>
+                     </button>
+                   </div>
+
+                   {/* Slider section for MANUAL mode */}
+                   {(activeRidePref?.brightnessMode === 'MANUAL') && (
+                     <motion.div 
+                       initial={{ opacity: 0, y: -10 }}
+                       animate={{ opacity: 1, y: 0 }}
+                       className="p-4 bg-white border border-slate-200 rounded-2xl space-y-3"
+                     >
+                       <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-slate-500 leading-none">
+                         <span>Luminosity Level</span>
+                         <span className="text-amber-650 font-black">{activeRidePref?.manualBrightnessLevel ?? 75}%</span>
+                       </div>
+                       
+                       <input 
+                         type="range"
+                         min="10"
+                         max="100"
+                         step="5"
+                         value={activeRidePref?.manualBrightnessLevel ?? 75}
+                         onChange={(e) => handleDriverSelectBrightnessMode('MANUAL', parseInt(e.target.value))}
+                         className="w-full accent-amber-500 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                       />
+                       
+                       <p className="text-[7.5px] leading-tight text-slate-400 font-bold uppercase tracking-wider">
+                         * Manual overrides disable adaptive diurnal cycles immediately.
+                       </p>
+                     </motion.div>
+                   )}
+                </div>
               </div>
 
               <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 space-y-6">
@@ -681,6 +1066,19 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+           <NotificationCenter 
+             role="DRIVER" 
+             userId={user?.uid} 
+             onNavigateToTab={(tab) => { 
+               if (tab === 'PAYOUTS' || tab === 'WITHDRAW') { 
+                 setActiveTab('WITHDRAW'); 
+               } else if (tab === 'TICKETS') { 
+                 setShowSupport(true); 
+               } else { 
+                 setActiveTab('EARNINGS'); 
+               } 
+             }} 
+           />
            <button onClick={() => setShowLangPicker(true)} className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-600 border border-slate-100"><Globe size={18} /></button>
            <button 
              onClick={onLogout}
@@ -733,7 +1131,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
         {showWithdraw && (
           <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowWithdraw(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
-             <motion.div initial={{ y: '100% '}} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] p-8 shadow-2xl space-y-8">
+             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] p-8 shadow-2xl space-y-8">
                 <div className="flex justify-between items-start">
                    <div className="flex flex-col">
                       <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">Withdraw Funds</h3>
@@ -897,23 +1295,26 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       <AnimatePresence>
         {showSupport && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowSupport(false)} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl space-y-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowSupport(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl space-y-6 text-white selection:bg-amber-500/30">
               <div className="flex justify-between items-center">
-                <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter">Support Hub</h3>
-                <button onClick={() => setShowSupport(false)}><X size={20} /></button>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                  <h3 className="text-xl font-black italic text-amber-500 uppercase tracking-tighter">Support Hub</h3>
+                </div>
+                <button onClick={() => setShowSupport(false)} className="text-slate-400 hover:text-white p-2 hover:bg-white/5 rounded-xl transition-all"><X size={20} /></button>
               </div>
               
               <div className="space-y-4">
-                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-800">
                    {supportTickets.map((ticket) => (
                      <button 
                         key={ticket.id} 
                         onClick={() => { setActiveTicketId(ticket.id!); setShowSupport(false); }}
-                        className="w-full p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-100 flex items-center justify-between transition-colors text-left"
+                        className="w-full p-4 bg-slate-950/60 hover:bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between transition-colors text-left border-l border-l-[6px] border-l-amber-500"
                      >
                         <div>
-                           <p className="text-[10px] font-black text-slate-900 uppercase italic leading-none">{ticket.title}</p>
+                           <p className="text-[11px] font-black text-white uppercase italic leading-none">{ticket.title}</p>
                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 line-clamp-1">{ticket.lastMessage || ticket.description}</p>
                         </div>
                         <ChevronRight size={14} className="text-slate-300" />
@@ -924,9 +1325,9 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                    )}
                 </div>
 
-                <div className="pt-4 border-t border-slate-100">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 italic">Initiate New Conversation</p>
-                  <textarea placeholder="e.g. Ad screen flicker, payment delay..." className="w-full p-4 bg-slate-50 border rounded-2xl font-medium min-h-[100px] text-sm" id="support-desc" />
+                <div className="pt-4 border-t border-slate-800/80">
+                  <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3 italic">Initiate New Conversation</p>
+                  <textarea placeholder="e.g. Ad screen flicker, payment delay..." className="w-full p-4 bg-slate-950/70 border-2 border-slate-800 rounded-2xl font-semibold text-slate-200 placeholder-slate-600 min-h-[90px] text-sm focus:border-amber-500 focus:outline-none transition-all" id="support-desc" />
                   <button 
                     onClick={async () => {
                       const desc = (document.getElementById('support-desc') as HTMLTextAreaElement).value;
@@ -957,7 +1358,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                       });
                       (document.getElementById('support-desc') as HTMLTextAreaElement).value = '';
                     }}
-                    className="w-full mt-4 py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-xl transition-all active:scale-95"
+                    className="w-full mt-4 py-4.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-amber-500/10 cursor-pointer"
                   >
                     Start New Chat
                   </button>
@@ -997,6 +1398,37 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
           </div>
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
+            exit={{ opacity: 0, y: 20, scale: 0.9, x: "-50%" }}
+            className="fixed bottom-28 left-1/2 z-[250] w-[90%] max-w-sm"
+          >
+            <div className={cn(
+              "flex items-center gap-3 p-4 rounded-2xl shadow-2xl border backdrop-blur-md",
+              toast.type === 'success' 
+                ? "bg-emerald-600 border-emerald-500 text-white" 
+                : toast.type === 'error' 
+                  ? "bg-rose-600 border-rose-500 text-white" 
+                  : "bg-slate-900 border-slate-800 text-amber-500"
+            )}>
+              {toast.type === 'success' ? (
+                <CheckCircle2 size={18} className="shrink-0" />
+              ) : toast.type === 'error' ? (
+                <AlertTriangle size={18} className="shrink-0" />
+              ) : (
+                <Info size={18} className="shrink-0" />
+              )}
+              <span className="text-xs font-black uppercase tracking-wider leading-tight">
+                {toast.message}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AdminAssistant 
         activeTab={activeTab}
         role="driver"

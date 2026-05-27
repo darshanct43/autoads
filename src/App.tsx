@@ -11,6 +11,9 @@ import DriverPortal from './components/portals/DriverPortal';
 import CustomerPortal from './components/portals/CustomerPortal';
 import SupportPortal from './components/portals/SupportPortal';
 import DevicePortal from './components/portals/DevicePortal';
+import PassengerPortal from './components/smartAds/PassengerPortal';
+import { CanvaStudio } from './components/studio/customer/CanvaStudio';
+import PaymentSuccess from './components/common/PaymentSuccess';
 import BootAnimation from './components/common/BootAnimation';
 import BrandIntroduction from './components/common/BrandIntroduction';
 import BrandPopup from './components/common/BrandPopup';
@@ -39,12 +42,25 @@ export default function App() {
     }
     return null;
   });
-  const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL'>(() => {
+  const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL' | 'STUDIO' | 'PAYMENT_SUCCESS'>(() => {
     if (typeof window !== 'undefined') {
+      const hash = window.location.hash.slice(1);
+      if (hash === 'payment-success') return 'PAYMENT_SUCCESS';
+      
       const params = new URLSearchParams(window.location.search);
       // If we have a terminal session, skip the intros and go straight to Portal
       if (params.has('terminalId') || localStorage.getItem('auto_ads_is_terminal') === 'true') {
         return 'PORTAL';
+      }
+      
+      // Check for studio direct access
+      if (window.location.hash === '#studio') {
+        return 'STUDIO';
+      }
+
+      // Bypass long intros of Boot/Branding screen if already seen in current browser session
+      if (sessionStorage.getItem('auto_ads_intro_seen') === 'true') {
+        return 'AUTH';
       }
     }
     return 'BOOT';
@@ -53,6 +69,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isOfflineVerified, setIsOfflineVerified] = useState(false);
+  const [isPassenger, setIsPassenger] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.location.hash.startsWith('#passenger');
+    }
+    return false;
+  });
 
   const handleBootComplete = () => {
     setSystemState(prev => {
@@ -62,6 +84,11 @@ export default function App() {
   };
 
   const handleIntroComplete = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('auto_ads_intro_seen', 'true');
+      }
+    } catch (e) {}
     setSystemState(prev => {
       // If onAuthStateChanged already set us to PORTAL, don't revert to AUTH
       if (prev === 'INTRO') return 'AUTH';
@@ -86,10 +113,17 @@ export default function App() {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
       console.log("[App] Hash Change detected:", hash);
-      if (hash === 'auth' || hash === '') {
+      if (hash.startsWith('passenger')) {
+        setIsPassenger(true);
+      } else if (hash === 'payment-success') {
+        setSystemState('PAYMENT_SUCCESS');
+      } else if (hash === 'auth' || hash === '') {
+        setIsPassenger(false);
         setSystemState('AUTH');
         setRole(null);
         setIsOfflineVerified(false);
+      } else {
+        setIsPassenger(false);
       }
     };
 
@@ -97,13 +131,24 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  const handleOpenStudio = () => {
+    setSystemState('STUDIO');
+    window.location.hash = 'studio';
+  };
+
+  const handleCloseStudio = () => {
+    setSystemState('PORTAL');
+    if (role) window.location.hash = role.toLowerCase();
+  };
+
   useEffect(() => {
+    if (isPassenger) return;
     if (systemState === 'AUTH' && role === null) {
       if (window.location.hash !== '#auth') window.location.hash = 'auth';
     } else if (systemState === 'PORTAL' && role) {
       if (window.location.hash !== `#${role.toLowerCase()}`) window.location.hash = role.toLowerCase();
     }
-  }, [systemState, role]);
+  }, [systemState, role, isPassenger]);
 
   useEffect(() => {
     // Watch for online status to trigger sync
@@ -237,44 +282,65 @@ export default function App() {
   return (
     <div className="min-h-screen font-sans selection:bg-amber-500/30 overflow-x-hidden">
       <AnimatePresence mode="wait">
-        {systemState === 'BOOT' && (
-          <BootAnimation onComplete={handleBootComplete} />
-        )}
-
-        {systemState === 'INTRO' && (
-          <BrandIntroduction onComplete={handleIntroComplete} />
-        )}
-
-        {systemState === 'AUTH' && (
+        {isPassenger ? (
           <motion.div
-            key="auth"
+            key="passenger"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <Auth onLogin={handleLogin} />
+            <PassengerPortal onClose={() => setIsPassenger(false)} />
           </motion.div>
-        )}
+        ) : (
+          <>
+            {systemState === 'BOOT' && (
+              <BootAnimation onComplete={handleBootComplete} />
+            )}
 
-        {systemState === 'PORTAL' && role && (
-          <motion.div
-            key="portal"
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            className="relative"
-          >
-            <ErrorBoundary componentName={`${role} Portal`}>
-              {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-              {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
-              {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
-              {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-              {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
-            </ErrorBoundary>
+            {systemState === 'INTRO' && (
+              <BrandIntroduction onComplete={handleIntroComplete} />
+            )}
+
+            {systemState === 'AUTH' && (
+              <motion.div
+                key="auth"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Auth onLogin={handleLogin} />
+              </motion.div>
+            )}
+
+            {systemState === 'PORTAL' && role && (
+              <motion.div
+                key="portal"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                className="relative"
+              >
+                <ErrorBoundary componentName={`${role} Portal`}>
+                  {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
+                  {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
+                  {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
+                  {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
+                  {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
+                </ErrorBoundary>
+                
+                {/* Brand Popup (Mayaan) */}
+                <BrandPopup />
+              </motion.div>
+            )}
+
+            {systemState === 'STUDIO' && (
+              <CanvaStudio onClose={handleCloseStudio} userRole={role || undefined} />
+            )}
             
-            {/* Brand Popup (Mayaan) */}
-            <BrandPopup />
-          </motion.div>
+            {systemState === 'PAYMENT_SUCCESS' && (
+              <PaymentSuccess />
+            )}
+          </>
         )}
       </AnimatePresence>
     </div>

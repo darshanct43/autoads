@@ -1,11 +1,11 @@
 import { disableDevWebsocketLogs } from '@/lib/websocketProtection';
 import React, { useState, useEffect, useMemo, useRef, useReducer } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download } from 'lucide-react';
+import { Plus, Palette, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, Device, SupportTicket, ChatMessage } from '@/services/firebaseService';
 import { auth, googleLogin, storage, db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, onSnapshot, getDoc, getDocFromServer } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, onSnapshot, getDoc, getDocFromServer, enableNetwork } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { storageService } from '@/services/storageService';
@@ -14,13 +14,14 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
 import { SubscriptionManager } from '../subscription/SubscriptionManager';
+import NotificationCenter from '../common/NotificationCenter';
 
 declare const Razorpay: any;
 
 const plans = [
-  { id: 'BASIC', name: 'Basic Plan', price: '₹999', description: 'Entry level plan', color: 'bg-emerald-500' },
-  { id: 'STARTER', name: 'Starter Plan', price: '₹1999', description: 'Core features for growth', color: 'bg-indigo-500' },
-  { id: 'PRO', name: 'Pro Plan', price: '₹4999', description: 'Advanced features for scaling', color: 'bg-slate-900' },
+  { id: 'BASIC', name: 'Elite Starter', price: '₹999', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', color: 'bg-emerald-500' },
+  { id: 'STARTER', name: 'Brand Velocity', price: '₹1999', description: '7 Auto Displays • 2 Days • High Retention', color: 'bg-indigo-500' },
+  { id: 'PRO', name: 'Dominion Pro', price: '₹4999', description: 'Priority Network • 7 Days • Pro Strategy', color: 'bg-slate-900' },
 ];
 
 const getSafeUrl = (url: string | undefined | null) => {
@@ -32,6 +33,24 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('https://https://', 'https://');
   } else if (cleaned.startsWith('http://https://')) {
     cleaned = cleaned.replace('http://https://', 'https://');
+  }
+
+  // Rewrite legacy non-CORS commondatastorage.googleapis.com endpoints to CORS-compliant storage.googleapis.com
+  if (cleaned.includes('commondatastorage.googleapis.com')) {
+    cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
+  }
+
+  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
+  if (cleaned.toLowerCase().includes('mixkit')) {
+    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
+    } else {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    }
   }
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
@@ -111,9 +130,10 @@ interface Plan {
 
 interface CustomerPortalProps {
   onLogout: () => void;
+  onOpenStudio: () => void;
 }
 
-export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
+export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPortalProps) {
   const triggerToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     console.log(`[TOAST] [${type.toUpperCase()}] ${msg}`);
     if (typeof (window as any).showToast === 'function') {
@@ -124,10 +144,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
   };
 
-  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(() => localStorage.getItem('last_created_campaign'));
+  const [isFirestoreOffline, setIsFirestoreOffline] = useState(false);
   const [activeCampaignData, setActiveCampaignData] = useState<any>(null);
   const [editablePlans, setEditablePlans] = useState<Plan[]>(plans.map(p => ({...p})));
   const [activePlan, setActivePlan] = useState('BASIC');
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [showPayment, setShowPaymentState] = useState(false);
   const hasUserInitiatedPayment = useRef(false);
 
@@ -162,29 +184,67 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     } else {
       hasUserInitiatedPayment.current = false;
       setShowPaymentState(false);
-      setActiveOrderId(null); // Stop polling when modal is closed
     }
   };
 
   const openPaymentModal = (campaignId?: string) => {
     if (showPayment) return; // Prevent repeated opening
+    console.log("[PAYMENT_SYSTEM] Opening payment modal, campaignId:", campaignId);
     if (campaignId) {
       setCreatedCampaignId(campaignId);
       localStorage.setItem('last_created_campaign', campaignId);
+      
+      const foundAd = myCampaigns?.find(c => c.id === campaignId) as any;
+      if (foundAd) {
+         setCampaignDetails({
+            title: foundAd.title || '',
+            type: (foundAd.type || foundAd.mediaType || 'IMAGE') as 'IMAGE' | 'VIDEO',
+            asset: foundAd.assetUrl || foundAd.mediaUrl || '',
+            budget: String(foundAd.budget || ''),
+            duration: String(foundAd.duration || '30')
+         });
+         setNeedDesigner(!!foundAd.needDesigner);
+         const matchedPlan = mergedPlans.find(p => p.id === foundAd.planId) || 
+                             plans.find(p => p.id === foundAd.planId) || 
+                             (foundAd.duration === 7 ? (mergedPlans.find(p => p.id === 'PRO') || plans[2]) : 
+                              foundAd.duration === 2 ? (mergedPlans.find(p => p.id === 'STARTER') || plans[1]) : 
+                              (mergedPlans.find(p => p.id === 'BASIC') || plans[0]));
+         setSelectedPlan(matchedPlan);
+         if (foundAd.targetCity) {
+            setSelectedCity(foundAd.targetCity);
+            localStorage.setItem('last_selected_city', foundAd.targetCity);
+         }
+         if (foundAd.targetState) {
+            setSelectedState(foundAd.targetState);
+            localStorage.setItem('last_selected_state', foundAd.targetState);
+         }
+      }
       dispatch({ type: 'SET_AWAITING_PAYMENT' });
     } else {
+      // Clear storage and state for a brand new campaign
       localStorage.removeItem('last_created_campaign');
       setCreatedCampaignId(null);
       setActiveCampaignData(null);
+      setCampaignDetails({
+         title: '',
+         type: 'IMAGE',
+         asset: '',
+         budget: '',
+         duration: '30'
+      });
+      setSelectedCity('');
+      setSelectedState('');
+      setCustomCity('');
+      setNeedDesigner(null);
       dispatch({ type: 'INIT_DETAILS' });
     }
     hasUserInitiatedPayment.current = true;
     setShowPayment(true);
   };
   const [needDesigner, setNeedDesigner] = useState<boolean | null>(null);
-  const [selectedState, setSelectedState] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
-  const [customCity, setCustomCity] = useState('');
+  const [selectedState, setSelectedState] = useState(() => localStorage.getItem('last_selected_state') || '');
+  const [selectedCity, setSelectedCity] = useState(() => localStorage.getItem('last_selected_city') || '');
+  const [customCity, setCustomCity] = useState(() => localStorage.getItem('last_custom_city') || '');
   const [targetArea, setTargetArea] = useState('');
   const [paymentStage, setPaymentStage] = useState<'SELECTION' | 'PREPARATION'>('SELECTION');
   const [manualTxnId, setManualTxnId] = useState('');
@@ -216,11 +276,60 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     'Others': ['Select "Other" below and specify city', 'Other']
   };
 
-  const [step, setStep] = useState<'DASHBOARD' | 'CREATE' | 'FLEET' | 'SUPPORT' | 'LEGAL'>('DASHBOARD');
+  useEffect(() => {
+    if (selectedState) {
+      localStorage.setItem('last_selected_state', selectedState);
+    } else {
+      localStorage.removeItem('last_selected_state');
+    }
+  }, [selectedState]);
+
+  useEffect(() => {
+    if (selectedCity) {
+      localStorage.setItem('last_selected_city', selectedCity);
+    } else {
+      localStorage.removeItem('last_selected_city');
+    }
+  }, [selectedCity]);
+
+  useEffect(() => {
+    if (customCity) {
+      localStorage.setItem('last_custom_city', customCity);
+    } else {
+      localStorage.removeItem('last_custom_city');
+    }
+  }, [customCity]);
+
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsFirestoreOffline(false);
+      try {
+        await enableNetwork(db);
+      } catch (err) {
+        console.error("[FIREBASE_RECOVERY] Failed to enable Firestore network:", err);
+      }
+    };
+    
+    const handleOffline = () => {
+      setIsFirestoreOffline(true);
+    };
+
+    if (!navigator.onLine) {
+      setIsFirestoreOffline(true);
+    }
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   const [paymentResult, setPaymentResult] = useState<{status: string, txId?: string, orderId?: string, amount?: number, campaignId?: string, error?: string} | null>(null);
   const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
   const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL' | 'IMPACT' | 'SUBSCRIPTIONS'>('DASHBOARD');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -337,99 +446,46 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   const workflowState = machineState.workflowState;
 
-  // Realtime Firestore Campaign Status listener + 2s Polling fallback (Double-Engine system)
+  // Realtime Firestore Campaign Status listener (Engine 1)
   useEffect(() => {
     const activeId = createdCampaignId || localStorage.getItem('last_created_campaign');
     if (!activeId) {
-      console.log("[PAYMENT_STRICT_DEBUG] No active campaignId found. Transitioning state machine to DETAILS.");
-      dispatch({ type: 'INIT_DETAILS' });
-      setActiveCampaignData(null);
       return;
     }
 
     if (!user) {
-      console.log("[PAYMENT_STRICT_DEBUG] Realtime monitoring standby (Waiting for active customer session)");
       return;
     }
 
-    console.log("[PAYMENT_STRICT_DEBUG] Live Firestore listener attaching for campaignId:", activeId);
     const docRef = doc(db, 'campaigns', activeId);
 
     // Engine 1: Realtime Snapshot Listener
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      console.log("[PAYMENT_STRICT_DEBUG] Firestore update received. Exists:", docSnap.exists());
       if (docSnap.exists()) {
         const campaign = docSnap.data();
-        console.log("[PAYMENT_STRICT_DEBUG] Realtime document status:", campaign.status, campaign);
         setActiveCampaignData(campaign);
 
         if (campaign.status === 'ACTIVE' || campaign.status === 'APPROVED' || campaign.status === 'LIVE') {
-          console.log("[PAYMENT_STRICT_DEBUG] ACTIVE status detected. Transitioning state machine to ACTIVE.");
           dispatch({ type: 'SET_ACTIVE' });
         } else if (campaign.status === 'PENDING_VERIFICATION' || campaign.status === 'VERIFYING' || campaign.status === 'PAYMENT_PROCESSING') {
-          console.log("[PAYMENT_STRICT_DEBUG] PAYMENT_PROCESSING status detected. Transitioning to PAYMENT_PROCESSING.");
           dispatch({ type: 'SET_PAYMENT_PROCESSING' });
         } else if (campaign.status === 'FAILED' || campaign.status === 'REJECTED') {
-          console.log("[PAYMENT_STRICT_DEBUG] FAILED status detected. Transitioning state machine to FAILED.");
           dispatch({ type: 'SET_FAILED', error: campaign.failureReason || 'Verification failed. Please check payment logs.' });
         } else {
-          console.log("[PAYMENT_STRICT_DEBUG] Awaiting payment status detected. Transitioning state machine to AWAITING_PAYMENT.");
           dispatch({ type: 'SET_AWAITING_PAYMENT' });
         }
       } else {
-         console.warn("[PAYMENT_STRICT_DEBUG] Document with ID doesn't exist yet.");
          dispatch({ type: 'SET_AWAITING_PAYMENT' });
       }
     }, (err) => {
-      console.error("[PAYMENT_STRICT_DEBUG] Firestore onSnapshot Error:", err);
+      console.error("Firestore onSnapshot Error:", err);
+      if (err.message?.includes('offline') || err.code === 'unavailable') {
+        setIsFirestoreOffline(true);
+      }
     });
-
-    // Engine 2: 2-Second Polling Fallback (Double-Engine)
-    let pollCount = 0;
-    const maxPolls = 15; // 30 seconds threshold
-    const interval = setInterval(async () => {
-      pollCount++;
-      if (pollCount > maxPolls) {
-        console.warn("[PAYMENT_STRICT_DEBUG] 30 seconds polling limit reached. Poller stopping.");
-        clearInterval(interval);
-        return;
-      }
-
-      try {
-        console.log(`[PAYMENT_STRICT_DEBUG] Double-Engine Polling Check #${pollCount} for: ${activeId}`);
-        let pollSnap;
-        try {
-          pollSnap = await getDocFromServer(docRef);
-        } catch (srvErr) {
-          pollSnap = await getDoc(docRef);
-        }
-
-        if (pollSnap.exists()) {
-          const campaign = pollSnap.data();
-          console.log("[PAYMENT_STRICT_DEBUG] Poller read status:", campaign.status);
-          setActiveCampaignData(campaign);
-
-          if (campaign.status === 'ACTIVE' || campaign.status === 'APPROVED' || campaign.status === 'LIVE') {
-            console.log("[PAYMENT_STRICT_DEBUG] ACTIVE status detected via poller. Actioning transition.");
-            dispatch({ type: 'SET_ACTIVE' });
-            clearInterval(interval);
-          } else if (campaign.status === 'PENDING_VERIFICATION' || campaign.status === 'VERIFYING' || campaign.status === 'PAYMENT_PROCESSING') {
-             dispatch({ type: 'SET_PAYMENT_PROCESSING' });
-          } else if (campaign.status === 'FAILED' || campaign.status === 'REJECTED') {
-             dispatch({ type: 'SET_FAILED', error: campaign.failureReason || 'Failed verification.' });
-          } else {
-             dispatch({ type: 'SET_AWAITING_PAYMENT' });
-          }
-        }
-      } catch (pollErr) {
-        console.error("[PAYMENT_STRICT_DEBUG] Polling Error:", pollErr);
-      }
-    }, 2000);
 
     return () => {
       unsubscribe();
-      clearInterval(interval);
-      console.log("[PAYMENT_STRICT_DEBUG] Cleanup of Firestore listener & poller complete.");
     };
   }, [createdCampaignId, user?.uid, showPayment]);
 
@@ -471,7 +527,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   }, []);
 
   const updatePlanPrice = (planId: string, newPrice: string) => {
-    setEditablePlans(prev => prev.map(p => p.id === planId ? {...p, price: newPrice} : p));
+    // Editing disabled in Customer Portal
   };
 
   const [selectedPlan, setSelectedPlan] = useState<any>(plans[1]);
@@ -515,7 +571,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     };
   }, [isUploadingMedia]);
 
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState('9876543210');
+  
+  // States for optional upload before paying
+  const [optionalUploadFile, setOptionalUploadFile] = useState<File | null>(null);
+  const [optionalUploadProgress, setOptionalUploadProgress] = useState<number>(0);
+  const [isUploadingOptional, setIsUploadingOptional] = useState<boolean>(false);
   const [campaignDetails, setCampaignDetails] = useState({
     title: '',
     type: 'VIDEO' as 'IMAGE' | 'VIDEO',
@@ -525,31 +586,32 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   });
 
   const renderHistoryTab = () => (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="space-y-8"
+    <div
+      className="space-y-8 bg-slate-50 min-h-[500px] p-6 rounded-[2rem] border border-slate-200"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tight leading-none">Financial History</h2>
+          <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tight leading-none flex items-center gap-2">
+            <Wallet className="text-amber-500" /> Financial History
+          </h2>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic">History of Transactions and Campaigns</p>
         </div>
-        <div className="bg-slate-900 text-white px-6 py-3 rounded-2xl flex items-center gap-3 shadow-xl">
-           <Wallet className="text-amber-500" size={18} />
+        <div className="bg-slate-900 text-white px-6 py-4 rounded-2xl flex items-center gap-3 shadow-xl">
+           <Wallet className="text-amber-500" size={24} />
            <div className="text-right">
               <p className="text-[7px] font-black uppercase text-slate-400 tracking-[0.2em] leading-none">Net Volume</p>
-              <p className="text-sm font-black italic tracking-tight">₹{payments.reduce((acc, curr) => acc + (curr.amount || 0), 0).toLocaleString()}</p>
+              <p className="text-xl font-black italic tracking-tight">₹{(payments || []).filter(p => ['SUCCESS', 'success', 'PAID', 'paid'].includes(p.status)).reduce((acc, curr) => acc + (curr.amount || 0), 0).toLocaleString()}</p>
            </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-slate-50">
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden block w-full">
+        <div className="overflow-x-auto w-full">
+          <table className="w-full text-left min-w-[800px]">
+            <thead className="bg-slate-50/50">
+              <tr className="border-b border-slate-100">
                 <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Transaction ID</th>
+                <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Type</th>
                 <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] hidden sm:table-cell">Campaign</th>
                 <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Amount Paid</th>
                 <th className="px-5 sm:px-8 py-6 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Payment Status</th>
@@ -558,18 +620,36 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 italic">
-              {payments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((p) => (
+              {(!payments || payments.length === 0) ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-24 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-4">
+                      <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center">
+                        <Database className="text-slate-300" size={32} />
+                      </div>
+                      <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em] italic">No Financial Logs Detected</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : payments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
                   <td className="px-5 sm:px-8 py-5">
                     <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight break-all max-w-[120px] sm:max-w-none">{p.transactionId === 'UNKNOWN' ? (p.orderId ? `ORD:${p.orderId.substring(0,8)}` : 'SIGNAL_INIT') : (p.transactionId || 'SIGNAL_INIT')}</p>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">{p.paymentMethod || 'RAZORPAY'}</p>
                   </td>
+                  <td className="px-5 sm:px-8 py-5">
+                    <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[8px] font-black uppercase tracking-widest leading-none">
+                      {p.orderId?.startsWith('sub_') ? 'Subscription' : 'Campaign'}
+                    </span>
+                  </td>
                   <td className="px-5 sm:px-8 py-5 hidden sm:table-cell">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
-                        <Database size={14} />
+                        {p.orderId?.startsWith('sub_') ? <Zap size={14} /> : <Database size={14} />}
                       </div>
-                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">{p.campaignId ? shortenId(p.campaignId) : 'Campaign Hub'}</p>
+                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">
+                        {p.orderId?.startsWith('sub_') ? p.orderId.split('_')[1]?.toUpperCase() + ' PLAN' : (p.campaignId ? shortenId(p.campaignId) : 'Campaign Hub')}
+                      </p>
                     </div>
                   </td>
                   <td className="px-5 sm:px-8 py-5">
@@ -617,14 +697,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                   </td>
                 </tr>
               ))}
-              {payments.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-5 sm:px-8 py-20 text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] italic">No Financial Logs Detected in Current Node</td>
-                </tr>
-              )}
             </tbody>
           </table>
-          {payments.length > itemsPerPage && (
+          {payments && payments.length > itemsPerPage && (
             <div className="flex items-center justify-between p-6 border-t border-slate-50">
                 <button 
                   disabled={currentPage === 1}
@@ -641,7 +716,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 
   const renderSubscriptionTab = () => <SubscriptionManager />;
@@ -688,7 +763,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       if (typeof (window as any).showToast === 'function') {
          (window as any).showToast("Campaign Submitted successfully!", "success");
       } else {
-         alert("Campaign Submitted successfully!");
+         triggerToast("Campaign Submitted successfully!", "success");
       }
       setLoading(false);
     } catch (e: any) {
@@ -700,7 +775,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       } catch (parseError) {
         errorMsg = e.message || errorMsg;
       }
-      alert(errorMsg);
+      triggerToast(errorMsg, "error");
       setLoading(false);
     }
   };
@@ -709,20 +784,35 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [isPreparingOrder, setIsPreparingOrder] = useState(false);
 
   const prepareOrder = async (campaignId?: string) => {
-    if (!user) { alert('Please login'); return null; }
-    
-    // STEP 5 — VALID PHONE ONLY
-    const isValidIndianPhone = /^[6-9]\d{9}$/.test(phone);
-    if (!isValidIndianPhone) {
-      alert('Please enter a valid 10-digit Indian phone number (starting with 6-9) to proceed with payment.');
+    if (isPreparingOrder) return orderData;
+    if (!user) { 
+      triggerToast('Authentication required. Please log in.', 'error'); 
+      return null; 
+    }
+
+    const activeCid = campaignId || createdCampaignId || localStorage.getItem('last_created_campaign');
+    if (!activeCid) {
+      triggerToast('No active campaign detected. First launch/create a campaign to pay.', 'error');
+      return null;
+    }
+
+    const currentCity = selectedCity === 'Other' ? customCity : selectedCity;
+    if (!currentCity || !currentCity.trim()) {
+      triggerToast('Please select a target city before proceeding.', 'error');
+      return null;
+    }
+
+    const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+    const amount = baseAmount + (needDesigner ? 1000 : 0);
+    if (!amount || amount <= 0) {
+      triggerToast('Invalid order amount.', 'error');
       return null;
     }
     
+    console.log("FRONTEND AMOUNT:", amount);
+
     setIsPreparingOrder(true);
     setLoading(true);
-
-    const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    const amount = baseAmount + (needDesigner ? (selectedPlan.designerPrice || 0) : 0);
     
     try {
       const response = await fetch('/api/create-order', {
@@ -740,29 +830,37 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         })
       });
 
-      const text = await response.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        console.error("NON JSON RESPONSE:", text);
-        throw new Error("Invalid response from server");
-      }
+      const data = await response.json();
+
+      console.log("SERVER RESPONSE:", data);
+      console.log("CREATE ORDER RESPONSE:", data);
 
       if (!response.ok) {
-        throw new Error(data.error || "Order creation failed on server");
+        throw new Error(
+          data?.description ||
+          data?.message ||
+          "Payment failed"
+        );
       }
       
-      const order = data;
-      if (order.amount < 100) {
+      const order = data.order || data;
+      const keyId = data.key_id || order.key_id || data.key || order.key;
+      const finalOrderData = {
+        ...order,
+        key_id: keyId
+      };
+      
+      console.log(finalOrderData.id);
+      
+      if (finalOrderData.amount < 100) {
         throw new Error("Invalid order amount. Minimum charge not met.");
       }
-      setOrderData(order);
-      setActiveOrderId(order.id);
-      return order;
+      setOrderData(finalOrderData);
+      setActiveOrderId(finalOrderData.id);
+      return finalOrderData;
     } catch (e: any) {
-      alert(`Initialization Error: ${e.message}`);
-      return null;
+      console.error(`Server initialization failed: ${e.message}`);
+      throw e;
     } finally {
       setIsPreparingOrder(false);
       setLoading(false);
@@ -770,6 +868,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   const handlePaymentAndSubmit = async () => {
+    console.log("[PAYMENT_SYSTEM] Payment button clicked debug");
+    if (isPreparingOrder || paymentProcessedRef.current) return;
+    console.log("[PAYMENT_SYSTEM] Payment button clicked");
     console.log("[PAYMENT_SYSTEM] Opening Modal from:", new Error().stack);
     let currentOrderData = orderData;
     if (!currentOrderData) {
@@ -782,175 +883,77 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     
     try {
       if (!(window as any).Razorpay) {
+        console.error("Razorpay SDK not loaded");
         throw new Error("Razorpay SDK not loaded");
       }
-
-      console.log("[PAYMENT_SYSTEM] Opening Modal...");
-      
-
 
       const options = {
         key: razorpayKey,
         amount: currentOrderData.amount,
         currency: currentOrderData.currency,
         name: "AutoAds Pro",
-        description: `Activation: ${campaignDetails.title}`,
-        image: "https://darshanct43.github.io/autoads/logo.png",
+        description: "Campaign Payment",
         order_id: currentOrderData.id,
-        handler: async function(response: any) {
-
+        redirect: true,
+        callback_url: window.location.origin + "/#payment-success",
+        handler: async function (response: any) {
+          alert("RAZORPAY CALLBACK FIRED");
+          console.log("RAZORPAY CALLBACK SUCCESS", response);
+          localStorage.setItem("payment_pending", currentOrderData.id);
+          setLoading(true);
           try {
-            const verifyRes = await fetch('/api/verify-payment', {
+            const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json"
+              },
               body: JSON.stringify({
                 ...response,
                 uid: user?.uid,
-                campaignId: createdCampaignId || localStorage.getItem("last_created_campaign") || "",
-                planData: {
-                  amount: currentOrderData.amount / 100,
-                  planId: selectedPlan.id
-                },
-                campaignData: {
-                  title: campaignDetails.title,
-                  type: campaignDetails.type,
-                  customerId: user?.uid,
-                  targetCity: selectedCity === "Other" ? customCity : selectedCity,
-                  targetState: selectedState,
-                  duration: campaignDetails.duration,
-                  needDesigner: !!needDesigner,
-                  paymentStatus: "PAID",
-                  paymentId: response.razorpay_payment_id,
-                  paymentReceived: true,
-                  createdAt: new Date(),
-                  updatedAt: new Date()
-                }
+                campaignId: createdCampaignId
               })
             });
+            const verifyData = await verifyRes.json();
+            console.log("VERIFY RESULT:", verifyData);
 
-            const text = await verifyRes.text();
-            let data;
-            try {
-              data = JSON.parse(text);
-            } catch (e) {
-              console.error("NON JSON RESPONSE:", text);
-              throw new Error("Invalid response from server");
+            if (verifyData.success) {
+              localStorage.removeItem("payment_pending");
+              setShowPaymentState(false);
+              triggerToast("Payment successful!", "success");
+              dispatch({ type: 'SET_ACTIVE' });
+            } else {
+              throw new Error(verifyData.error || "Verification failed");
             }
-            
-            console.log("[VERIFY_RESPONSE]", data);
-            
-            if (!verifyRes.ok) {
-                throw new Error(data.error || "Payment verification failed");
-            }
-
-            // Save successful payment history
-            await firebaseService.recordPayment({
-               transactionId: response.razorpay_payment_id || 'UNKNOWN',
-               orderId: response.razorpay_order_id || currentOrderData.id,
-               amount: currentOrderData.amount / 100,
-               paymentMethod: 'razorpay',
-               status: 'SUCCESS',
-               customerId: user?.uid || '',
-               createdAt: new Date()
-            }).catch(e => console.error("Failed to save payment history:", e));
-
-            dispatch({ type: 'SET_ACTIVE' });
-            setPaymentResult({
-              status: 'SUCCESS',
-              txId: response.razorpay_payment_id,
-              orderId: response.razorpay_order_id,
-              amount: currentOrderData.amount / 100
-            });
-            setLoading(false);
-          } catch(err: any){
-            console.error("[VERIFY_FAILED]", err);
+          } catch (err) {
+            console.error("VERIFY ERROR:", err);
+            triggerToast("Payment verification failed.", "error");
+          } finally {
             setLoading(false);
           }
+        },
+        modal: {
+          ondismiss: function () {
+            console.log("PAYMENT CANCELLED");
+          }
+        },
+        prefill: {
+          name: user?.displayName || "",
+          email: user?.email || "",
+          contact: phone || user?.phoneNumber?.replace('+91', '') || ""
+        },
+        theme: {
+          color: "#2563eb"
         }
       };
 
-      const razor = new window.Razorpay(options);
-      razor.on('modal.closed', function() {
-        setLoading(false);
+      localStorage.setItem("pending_order", currentOrderData.id);
+      const razor = new (window as any).Razorpay(options);
+      razor.on('payment.success', function(resp: any) {
+        console.log("EVENT SUCCESS", resp);
       });
       razor.open();
-
-
-
-
-
-            
-// const planAmount = selectedPlan.price === 'Free' ? 0 : parseFloat(String(selectedPlan.price).replace(/[^0-9.]/g, ''));
-            
-
-
-
-
-
-          } catch (verifyErr: any) {
-            console.error("[PAYMENT_STRICT_DEBUG] Verification Error Caught:", verifyErr);
-            firebaseService.recordPayment({
-               transactionId: responseData?.razorpay_payment_id || 'UNKNOWN',
-               orderId: responseData?.razorpay_order_id || currentOrderData.id,
-               amount: currentOrderData.amount / 100,
-               paymentMethod: 'razorpay',
-               status: 'FAILED',
-               failureReason: verifyErr.message || 'Verification Error',
-               customerId: user?.uid || '',
-               customerPhone: phone || '',
-               attemptNumber: 1
-            }).catch(console.error);
-
-            setPaymentResult({ status: 'FAILED', error: verifyErr.message || 'Verification Error' });
-            dispatch({ type: 'SET_FAILED', error: verifyErr.message || 'Verification Error' });
-            setLoading(false);
-          }
-/*
-        },
-        theme: { color: "#f59e0b" }
-      };
-
-      const rzpObj = razor;
-      // rzpObj.on('modal.closed', function() {
-        setLoading(false);
-      });
-      rzpObj.open();
-      activeRazorpayRef.current = rzpObj;
-      const rzp = rzpObj;
-
-      rzp.on('payment.failed', function (response: any){
-         console.error(
-           "[PAYMENT_FAILED]",
-           response
-         );
-      });
-      
-      rzpObj.on('payment.failed', async (responseData: any) => {
-         console.warn("[PAYMENT_SYSTEM] Payment failed:", responseData?.error);
-         
-         await firebaseService.recordPayment({
-            transactionId: responseData?.error?.metadata?.payment_id || 'UNKNOWN',
-            orderId: responseData?.error?.metadata?.order_id || currentOrderData.id,
-            amount: currentOrderData.amount / 100,
-            paymentMethod: 'razorpay',
-            status: 'FAILED',
-            failureReason: responseData?.error?.description || responseData?.error?.reason || 'Unknown error',
-            customerId: user?.uid || '',
-            customerPhone: phone || '',
-            attemptNumber: 1
-         }).catch(console.error);
-         
-         setPaymentResult({ 
-            status: 'FAILED', 
-            error: responseData?.error?.description || 'Payment processing failed.' 
-         });
-         dispatch({ type: 'SET_FAILED', error: responseData?.error?.description || 'Payment processing failed.' });
-         setLoading(false);
-      });
-
-      rzpObj.open();
     } catch (e: any) {
-      alert(`Modal Error: ${e.message}`);
+      triggerToast(`Modal Error: ${e.message}`, "error");
     }
   };
 
@@ -981,6 +984,15 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   useEffect(() => {
     if (!user) return;
+    
+    firebaseService.getUserProfile(user.uid).then((prof) => {
+       setUserProfile(prof);
+       if (prof?.mobile && !phone) {
+         setPhone(prof.mobile.replace('+91', ''));
+       } else if (prof?.phone && !phone) {
+         setPhone(prof.phone.replace('+91', ''));
+       }
+    }).catch(console.error);
 
     const unsubscribeNotices = firebaseService.subscribeToPublicNotices((notices) => {
       setPromotions(notices);
@@ -991,7 +1003,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }, user.uid);
 
     const unsubscribePayments = firebaseService.subscribeToPayments((payDocs) => {
-      const successfulPayment = payDocs.find(p => ['SUCCESS', 'PAID', 'success', 'paid'].includes((p as any).status));
       setPayments(payDocs);
     }, user.uid, phone);
 
@@ -1039,7 +1050,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     try {
       const ticketId = await firebaseService.createSupportTicket({
         customerId: user.uid,
-        customerName: user.displayName || user.email || 'Customer',
+        customerName: userProfile?.name || user.displayName || user.email || 'Customer',
         title: ticketForm.title,
         description: ticketForm.description,
         priority: ticketForm.priority,
@@ -1055,6 +1066,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         priority: 'MEDIUM'
       });
       setActiveTicketId(ticketId);
+      setActiveTab('TICKETS');
+      triggerToast("Support ticket raised successfully! Connecting to Help Desk chat...", "success");
     } catch (err: any) {
       console.error(err);
       alert("Failed to create ticket: " + err.message);
@@ -1069,7 +1082,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       await firebaseService.sendChatMessage(activeTicketId, {
         content: newMessage,
         senderId: user.uid,
-        senderName: user.displayName || 'Customer'
+        senderName: userProfile?.name || user.displayName || 'Customer'
       });
       setNewMessage('');
     } catch (e) {
@@ -1235,7 +1248,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   const handleActivePlanChange = (planId: string) => {
     setActivePlan(planId);
-    setSelectedPlan(plans.find(p => p.id === planId));
+    setSelectedPlan(mergedPlans.find(p => p.id === planId) || plans.find(p => p.id === planId));
     setOrderData(null); // Reset order data when plan changes
   };
 
@@ -1262,7 +1275,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       // Also log the interest via support ticket for tracking
       await firebaseService.createSupportTicket({
         customerId: user.uid,
-        customerName: user.displayName || 'Customer',
+        customerName: userProfile?.name || user.displayName || 'Customer',
         title: `Design Request: ${type}`,
         description: `Customer clicked ${type} and was directed to checkout.`,
         priority: 'MEDIUM',
@@ -1277,7 +1290,73 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
   };
 
-  return <div className="min-h-screen bg-[#f8fafc]">
+  return (
+    <div className="min-h-screen bg-[#f8fafc] flex flex-col relative overflow-x-hidden">
+      {/* Immersive Animated Background */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0 bg-[#f8fafc]">
+        {/* Futuristic Grid */}
+        <div className="absolute inset-0 opacity-[0.03]" 
+             style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+        
+        {/* Dynamic Orbs */}
+        <motion.div 
+          animate={{ 
+            x: [0, 100, 0], 
+            y: [0, -50, 0],
+            scale: [1, 1.2, 1]
+          }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          className="absolute top-[-20%] left-[-10%] w-[80%] h-[80%] rounded-full bg-blue-500/10 blur-[160px]" 
+        />
+        <motion.div 
+          animate={{ 
+            x: [0, -80, 0], 
+            y: [0, 100, 0],
+            scale: [1, 1.3, 1]
+          }}
+          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+          className="absolute bottom-[-30%] right-[-10%] w-[70%] h-[70%] rounded-full bg-amber-500/10 blur-[160px]" 
+        />
+        
+        {/* Floating Particles */}
+        {Array.from({ length: 8 }).map((_, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ 
+              opacity: [0, 0.4, 0], 
+              scale: [0.5, 1.5, 0.5],
+              y: [-100, -1000],
+              x: Math.random() * 1000
+            }}
+            transition={{ 
+              duration: 10 + Math.random() * 10, 
+              repeat: Infinity, 
+              delay: Math.random() * 20 
+            }}
+            className="absolute w-1 h-1 bg-blue-400 rounded-full blur-[2px]"
+            style={{ left: `${Math.random() * 100}%`, bottom: '-10px' }}
+          />
+        ))}
+      </div>
+
+      {/* Top Announcement Bar */}
+      <div className="bg-slate-950 text-white h-8 flex items-center justify-center px-4 overflow-hidden relative z-[110]">
+         <div className="flex items-center gap-6 animate-marquee whitespace-nowrap">
+            <span className="text-[9px] font-black uppercase tracking-widest flex items-center gap-2">
+               <Zap size={10} className="text-amber-500" /> New Expansion Live: Bangalore Central District Screens Active Now!
+            </span>
+            <span className="w-2 h-2 bg-slate-700 rounded-full" />
+            <span className="text-[9px] font-black uppercase tracking-widest flex items-center gap-2 text-amber-400">
+               <Sparkles size={10} /> Exclusive Offer: Get 20% extra impressions on all Pro Plans this week!
+            </span>
+            <span className="w-2 h-2 bg-slate-700 rounded-full" />
+            <span className="text-[9px] font-black uppercase tracking-widest">
+               Latest Driver Stats: 450+ Verified Terminals Syncing Globally.
+            </span>
+         </div>
+      </div>
+
       {/* Navigation */}
       <nav className="h-16 border-b border-slate-200 flex items-center justify-between px-4 md:px-8 bg-white/80 backdrop-blur-md sticky top-0 z-[100]">
         <div className="flex items-center gap-3">
@@ -1290,7 +1369,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             {showMobileMenu ? <X size={26} /> : <Menu size={26} />}
           </button>
           <div className="flex flex-col">
-            <span className="font-bold text-slate-900 tracking-tight text-xs md:text-sm uppercase tracking-widest leading-none">Auto <span className="text-amber-500 italic">Ads</span></span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-900 tracking-tight text-xs md:text-sm uppercase tracking-widest leading-none">Auto <span className="text-amber-500 italic">Ads</span></span>
+            </div>
             <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.3em] leading-none mt-1 md:mt-1.5 flex items-center gap-1">
               by <span className="text-slate-600 font-bold uppercase tracking-widest italic">Mayaan</span>
             </span>
@@ -1300,26 +1381,66 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           <div className="hidden md:flex h-full items-center gap-6">
             {[
               { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+              { id: 'IMPACT', label: 'Impact', icon: PlayCircle },
               { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
               { id: 'HISTORY', label: 'History', icon: History },
               { id: 'TICKETS', label: 'Support', icon: MessageSquare },
-              { id: 'DESIGN_HELP', label: 'Designer', icon: Plus },
+              { id: 'DESIGN_STUDIO', label: 'Studio', icon: Palette, special: true },
+              { id: 'DESIGN_HELP', label: 'Experts', icon: Sparkles },
               { id: 'SUBSCRIPTIONS', label: 'Plans', icon: Zap }
             ].map((tab) => (
               <button 
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)} 
+                onClick={() => {
+                  if (tab.id === 'DESIGN_STUDIO') {
+                    onOpenStudio();
+                  } else {
+                    setActiveTab(tab.id as any);
+                  }
+                }} 
                 className={cn(
-                  "h-full px-0 transition-all whitespace-nowrap text-[10px] font-black uppercase tracking-widest flex items-center", 
-                  activeTab === tab.id ? "text-amber-600 border-b-2 border-amber-500" : "text-slate-400 hover:text-slate-900"
+                  "h-full px-0 transition-all whitespace-nowrap text-[10px] font-black uppercase tracking-widest flex items-center gap-1", 
+                  activeTab === tab.id ? "text-amber-600 border-b-2 border-amber-500" : "text-slate-400 hover:text-slate-900",
+                  tab.special && "text-blue-600 hover:text-blue-800"
                 )}
               >
+                {tab.id === 'DESIGN_STUDIO' && <Palette size={12} />}
                 {tab.label}
               </button>
             ))}
           </div>
           {user && (
             <div className="flex items-center gap-2 md:gap-4 ml-2 md:border-l md:border-slate-100 md:pl-6 shrink-0">
+               <NotificationCenter role="CUSTOMER" userId={user?.uid} onNavigateToTab={(tab) => { if (tab === 'STUDIO') { onOpenStudio(); } else { setActiveTab(tab as any); } }} />
+               <div className="hidden sm:flex flex-col items-end mr-2 text-right">
+                  <span className="text-[9px] font-black text-slate-900 uppercase tracking-tighter">{userProfile?.name || user.displayName || user.email?.split('@')[0] || 'Customer'}</span>
+                  <div className="flex items-center gap-1">
+                     {userProfile?.studioPlan === 'GOLD' ? (
+                       <>
+                         <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" className="text-amber-500 mb-0.5"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                         <span className="text-[7px] font-black text-amber-500 uppercase tracking-widest leading-none mt-0.5">Gold Member</span>
+                       </>
+                     ) : userProfile?.studioPlan === 'SILVER' ? (
+                       <>
+                         <ShieldCheck width="10" height="10" className="text-slate-500 mb-0.5" />
+                         <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest leading-none mt-0.5">Silver Member</span>
+                       </>
+                     ) : userProfile?.studioPlan === 'BRASS' ? (
+                       <>
+                         <Star width="10" height="10" className="text-amber-700 mb-0.5" />
+                         <span className="text-[7px] font-black text-amber-700 uppercase tracking-widest leading-none mt-0.5">Brass Member</span>
+                       </>
+                     ) : (
+                       <>
+                         <span className="w-1 h-1 bg-green-500 rounded-full animate-ping mb-0.5" />
+                         <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mt-0.5">Network Verified</span>
+                       </>
+                     )}
+                  </div>
+               </div>
+               <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white shadow-xl group cursor-pointer overflow-hidden relative border-2 border-white">
+                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid || 'default'}`} alt="Avatar" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+               </div>
                <button 
                 onClick={() => onLogout()} 
                 className="p-1 px-2 md:px-4 md:py-2 bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all flex items-center gap-2"
@@ -1333,12 +1454,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       </nav>
 
       {/* Mobile Menu Overlay */}
-
-      <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-4 md:space-y-8">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-4 md:space-y-8 flex flex-col">
         {activeTab === 'LEGAL' && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
+          <div 
             className="space-y-8 pb-32"
           >
              <div>
@@ -1352,7 +1470,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       { id: 'ABOUT', label: 'About Network', icon: Info },
                       { id: 'PRIVACY', label: 'Privacy Policy', icon: ShieldCheck },
                       { id: 'TERMS', label: 'Terms of Use', icon: FileText },
-                      { id: 'REFUND', label: 'Refund Policy', icon: RefreshCw },
                       { id: 'CONTACT', label: 'Support Center', icon: MessageSquare }
                    ].map((item) => (
                       <button
@@ -1374,18 +1491,81 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    <ComplianceContent page={legalPage} isEmbed />
                 </div>
              </div>
-          </motion.div>
+          </div>
+        )}
+
+        {activeTab === 'IMPACT' && (
+          <div 
+            className="space-y-8 pb-20"
+          >
+            <div>
+              <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Network Impact</h2>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">See how our transit ads change the game</p>
+            </div>
+            
+          <div className="bg-white rounded-[3rem] overflow-hidden aspect-video relative group border-[12px] border-slate-50 shadow-2xl">
+            <div className="absolute inset-y-0 left-0 w-1/2 bg-slate-900 flex flex-col justify-center p-12 space-y-6 z-20">
+               <div className="space-y-2">
+                  <h3 className="text-4xl font-black italic text-white uppercase leading-tight tracking-tighter">Impact <br/><span className="text-amber-500">Visualization</span></h3>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Learn why transit ads win</p>
+               </div>
+               <p className="text-sm font-medium text-slate-300 leading-relaxed max-w-sm">
+                  Our network leverages high-mobility urban routes to put your brand in front of thousands of daily commuters where they can't look away.
+               </p>
+               <div className="flex gap-4">
+                  <div className="px-5 py-3 bg-white/5 rounded-xl border border-white/10">
+                     <p className="text-xl font-black text-white italic leading-none">2.4M</p>
+                     <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Monthly Reach</p>
+                  </div>
+                  <div className="px-5 py-3 bg-white/5 rounded-xl border border-white/10">
+                     <p className="text-xl font-black text-amber-500 italic leading-none">98%</p>
+                     <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Uptime Goal</p>
+                  </div>
+               </div>
+            </div>
+            
+            <div className="absolute inset-y-0 right-0 w-1/2 bg-slate-950 relative overflow-hidden group">
+              {/* VIDEO PLACEHOLDER */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-20 space-y-4">
+                <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 shadow-2xl animate-pulse group-hover:scale-110 transition-transform cursor-pointer">
+                  <PlayCircle size={40} />
+                </div>
+                <div className="text-center">
+                   <p className="text-white font-black italic uppercase text-lg leading-none">Presentation</p>
+                   <p className="text-amber-500/80 text-[8px] font-black uppercase tracking-widest mt-2">Tap to Play</p>
+                </div>
+              </div>
+              <img src="https://images.unsplash.com/photo-1542340916-951bb72c8f74?auto=format&fit=crop&q=80&w=2000" className="w-full h-full object-cover grayscale opacity-30" alt="Impact" />
+            </div>
+          </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+               {[
+                 { title: 'Attention Span', value: '+45%', desc: 'Longer visual engagement compared to static billboards' },
+                 { title: 'Recall Rate', value: '8x', desc: 'Higher brand recognition in congested urban zones' },
+                 { title: 'CPM Efficiency', value: '-30%', desc: 'Lower cost per thousand impressions than digital search' }
+               ].map((stat, i) => (
+                 <div key={i} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
+                    <h4 className="text-3xl font-black italic text-slate-900 mb-2">{stat.value}</h4>
+                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-4">{stat.title}</p>
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">{stat.desc}</p>
+                 </div>
+               ))}
+            </div>
+          </div>
         )}
 
         {activeTab === 'TICKETS' && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={cn("flex bg-white border border-slate-100 rounded-[3rem] overflow-hidden shadow-xl", activeTab === 'TICKETS' ? "h-[calc(100vh-200px)] md:h-[calc(100vh-250px)] min-h-[400px]" : "h-0")}
+          <div 
+            className={cn("flex bg-white/50 backdrop-blur-xl border border-slate-200/50 rounded-[3rem] overflow-hidden shadow-2xl relative", activeTab === 'TICKETS' ? "h-[calc(100vh-200px)] md:h-[calc(100vh-250px)] min-h-[400px]" : "h-0")}
           >
+            {/* Background elements for chat */}
+            <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 blur-[100px] pointer-events-none rounded-full" />
+            <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-500/5 blur-[100px] pointer-events-none rounded-full" />
+            
             {/* Sidebar */}
             <div className={cn(
-              "w-80 border-r border-slate-100 flex flex-col bg-slate-50/50 transition-all duration-300",
+              "w-80 border-r border-slate-100 flex flex-col bg-white/50 backdrop-blur-md transition-all duration-300 relative z-10",
               activeTicketId ? "hidden md:flex" : "flex w-full md:w-80"
             )}>
                <div className="p-8 border-b border-slate-100 bg-white flex justify-between items-center">
@@ -1446,12 +1626,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
             {/* Chat Area */}
             <div className={cn(
-              "flex-1 flex flex-col bg-white transition-all duration-300",
+              "flex-1 flex flex-col bg-transparent relative z-10 transition-all duration-300",
               !activeTicketId && "hidden md:flex"
             )}>
                {activeTicketId ? (
                  <>
-                   <div className="h-20 border-b border-slate-100 px-4 md:px-8 flex items-center justify-between bg-white">
+                   <div className="h-20 border-b border-slate-100 px-4 md:px-8 flex items-center justify-between bg-white/60 backdrop-blur-md">
                       <div className="flex items-center gap-2 md:gap-4">
                          <button 
                            onClick={() => setActiveTicketId(null)}
@@ -1606,38 +1786,40 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                  </div>
                )}
             </div>
-          </motion.div>
+          </div>
         )}
 
         {activeTab === 'DASHBOARD' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-8"
+          <div
+            className="space-y-8 min-h-[500px]"
           >
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
-                <div className="flex items-center justify-between bg-white p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                       <h1 className="text-xl font-black text-slate-900 uppercase italic leading-none">Campaign Dashboard</h1>
-                       <div className="px-2 py-0.5 bg-amber-500 text-[8px] font-black text-slate-950 rounded uppercase tracking-widest">Active</div>
+                <div className="flex items-center justify-between bg-white px-8 py-10 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-xl relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-3xl group-hover:bg-amber-500/10 transition-all pointer-events-none" />
+                  <div className="space-y-2 relative z-10">
+                    <div className="flex items-center gap-3">
+                       <h1 className="text-3xl font-black text-slate-900 uppercase italic leading-none tracking-tight">Campaign Console</h1>
+                       <div className="px-3 py-1 bg-amber-500 text-[10px] font-black text-slate-950 rounded-full uppercase tracking-widest shadow-lg shadow-amber-500/20">Active Network</div>
                     </div>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Overview of your ads and screens</p>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-[0.2em]">Mission Control & Real-time Signal Monitoring</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-4 items-center">
                     <div className="flex flex-col items-end">
-                       <p className={cn("text-xs font-black tabular-nums", activeDevicesCount > 0 ? "text-green-500" : "text-slate-400")}>
-                         {activeDevicesCount > 0 ? 'ACTIVE' : 'IDLE'}
+                       <p className={cn("text-sm font-black tabular-nums tracking-widest", activeDevicesCount > 0 ? "text-green-500" : "text-slate-400")}>
+                          {activeDevicesCount > 0 ? 'STATUS: ONLINE' : 'STATUS: SYNCING'}
                        </p>
-                       <p className="text-[7px] text-slate-400 font-black uppercase tracking-widest">System Status</p>
+                       <div className="flex items-center gap-2 mt-1">
+                          <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping" />
+                          <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Global Ingress Live</p>
+                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Live Activity / Promotions Banner */}
                 {promotions.length > 0 && (
-                  <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
+                  <div className="flex flex-wrap gap-4 pb-2">
                     {promotions.map((promo) => (
                       <div key={promo.id} className="min-w-[300px] bg-amber-500 p-6 rounded-[2rem] text-slate-950 relative overflow-hidden shrink-0 shadow-lg shadow-amber-500/10">
                         <div className="relative z-10 space-y-2">
@@ -1747,10 +1929,27 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">ID: {shortenId(ad.id)} | {ad.targetArea || 'Global'}</p>
                               </div>
                             </div>
-                            <div className={cn("px-2 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
-                              ad.status === 'ACTIVE' ? "bg-slate-900 text-amber-500" : "bg-slate-100 text-slate-400"
-                            )}>
-                              {ad.status}
+                            <div className="flex items-center gap-2">
+                              <div className={cn("px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
+                                ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500" :
+                                ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "bg-amber-50 text-amber-600 border border-amber-100 animate-pulse" :
+                                "bg-slate-100 text-slate-400"
+                              )}>
+                                {ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "Awaiting Payment" : ad.status}
+                              </div>
+                              {!ad.paymentReceived && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    openPaymentModal(ad.id);
+                                  }}
+                                  className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[7px] uppercase tracking-wider rounded transition-all flex items-center gap-1 shadow"
+                                >
+                                  <CreditCard size={10} />
+                                  <span>Pay Now</span>
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1842,7 +2041,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
 
         {/* Removed OFFERS tab as requested - consolidated into DASHBOARD */}
@@ -1851,14 +2050,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         {activeTab === 'SUBSCRIPTIONS' && renderSubscriptionTab()}
         
         {activeTab === 'CAMPAIGNS' && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-8"
+          <div
+            className="space-y-8 bg-slate-50 min-h-[500px] p-6 lg:p-12 rounded-[2rem] border border-slate-200"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                <div>
-                  <h1 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Campaign Portfolio</h1>
+                  <h1 className="text-3xl font-black italic uppercase text-slate-900 tracking-tight leading-none flex items-center gap-2">
+                     <Target className="text-amber-500" /> Campaign Portfolio
+                  </h1>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tracking and managing your active signals</p>
                </div>
                <div className="flex gap-3">
@@ -1877,22 +2076,21 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             </div>
 
             <div className="glass-card rounded-[2rem] overflow-hidden border border-slate-100 shadow-sm">
-               <div className="overflow-x-auto">
+               <div className="w-full">
                   <table className="w-full text-left border-collapse">
                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-100">
-                           <th className="px-8 py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Campaign Signal</th>
-                           <th className="px-8 py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Targeting</th>
-                           <th className="px-8 py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment</th>
-                           <th className="px-8 py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Status</th>
-                           <th className="px-8 py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Action</th>
+                        <tr className="bg-slate-50/50 border-b border-slate-100 italic">
+                           <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Network Signal</th>
+                           <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Geo-Target Zone</th>
+                           <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Uptime Meta</th>
+                           <th className="px-10 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Command Center</th>
                         </tr>
                      </thead>
-                     <tbody className="divide-y divide-slate-50 text-slate-900">
+                     <tbody className="divide-y divide-slate-100 text-slate-900">
                         {myCampaigns.map((ad, i) => (
-                           <tr key={ad.id} className="hover:bg-slate-50/50 transition-colors group">
-                              <td className="px-8 py-6">
-                                 <div className="flex items-center gap-4">
+                           <tr key={ad.id} className="hover:bg-slate-50 border-b border-slate-50 last:border-0 transition-all group cursor-pointer italic">
+                              <td className="px-10 py-12">
+                                 <div className="flex items-center gap-6">
                                     <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 overflow-hidden shrink-0">
                                        {ad.mediaType === 'VIDEO' ? <PlayCircle size={20} /> : <ImageIcon size={20} />}
                                     </div>
@@ -1921,18 +2119,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                     </div>
                                  </div>
                               </td>
-                              <td className="px-8 py-6">
+                              <td className="px-10 py-12">
                                  <div className="flex flex-col gap-1">
                                     <span className="text-[10px] font-bold text-slate-600 uppercase italic">{ad.targetCity}</span>
                                     <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{ad.targetState}</span>
                                  </div>
                               </td>
-                              <td className="px-8 py-6">
-                                 <div className="flex items-center gap-2">
-                                    <Zap size={12} className={cn(ad.status === 'LIVE' ? "text-amber-500 animate-pulse" : "text-slate-300")} />
-                                    <span className="text-[10px] font-bold text-slate-600 uppercase">{ad.assignedDrivers?.length || 0} Nodes</span>
-                                 </div>
-                              </td>
+
                               <td className="px-8 py-6">
                                  <div className="flex flex-col gap-2">
                                    <span className={cn("text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit", 
@@ -1942,10 +2135,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                       ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
                                       "bg-red-50 text-red-600 border-red-100"
                                    )}>
-                                      {!ad.paymentReceived && ad.status === 'PENDING' ? "PAYMENT FAILED / PENDING" :
+                                      {!ad.paymentReceived && (ad.status === 'PENDING' || ad.status === 'AWAITING_PAYPORTAL') ? "PAYMENT FAILED / INCOMPLETE" :
                                        ad.paymentReceived && !ad.mediaReceived && !ad.needDesigner && ad.status === 'PENDING' ? "WAITING FOR MEDIA" : 
                                        ad.paymentReceived && ad.needDesigner && ad.status === 'PENDING' ? "DESIGNER ASSIGNED" :
-                                       ad.paymentReceived && (ad.mediaReceived || ad.mediaUrl || ad.assetUrl) && ad.status === 'PENDING' ? "WAITING FOR TEAM APPROVAL" :
+                                       ad.paymentReceived && (ad.mediaReceived || ad.mediaUrl || ad.assetUrl) && (ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION') ? "PENDING TEAM APPROVAL" :
+                                       ad.status === 'REJECTED' ? "REJECTED (RE-UPLOAD)" :
                                        ad.status?.replace('_', ' ')}
                                    </span>
                                    {ad.paymentReceived && (
@@ -1965,44 +2159,51 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                    )}
                                  </div>
                               </td>
-                              <td className="px-8 py-6">
+<td className="px-8 py-6">
                                  <div className="flex items-center gap-2">
-                                    {(!ad.assetUrl && !ad.mediaUrl) && (
-                                       <div 
-                                         className="flex items-center gap-2"
-                                         onClick={(e) => e.stopPropagation()}
+                                    {!ad.paymentReceived ? (
+                                       <button 
+                                         onClick={(e) => {
+                                           e.preventDefault();
+                                           e.stopPropagation();
+                                           openPaymentModal(ad.id);
+                                         }}
+                                         className="cursor-pointer px-4.5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl hover:from-amber-600 hover:to-amber-700 hover:shadow-lg transition-all text-[8px] font-black uppercase tracking-widest flex items-center gap-2"
                                        >
-                                          <input 
-                                            type="file" 
-                                            id={`upload-${ad.id}`}
-                                            className="hidden" 
-                                            accept="image/*,video/*"
-                                            onChange={(e) => {
-                                              const file = e.target.files?.[0];
-                                              if (file) handleUploadMediaToCampaign(ad.id, file);
-                                            }}
-                                          />
-                                          <button 
-                                            onClick={(e) => {
-                                              e.preventDefault();
-                                              document.getElementById(`upload-${ad.id}`)?.click();
-                                            }}
-                                            className="cursor-pointer p-2.5 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
+                                         <CreditCard size={14} />
+                                         <span>Pay Now</span>
+                                       </button>
+                                    ) : (
+                                       (!ad.assetUrl && !ad.mediaUrl) && (
+                                          <div 
+                                            className="flex items-center gap-2"
+                                            onClick={(e) => e.stopPropagation()}
                                           >
-                                            <Upload size={14} />
-                                            <span className="text-[8px] font-black uppercase">{(ad.assetUrl || ad.mediaUrl) ? "Replace" : "Choose File"}</span>
-                                          </button>
-                                       </div>
+                                             <input 
+                                               type="file" 
+                                               id={`upload-${ad.id}`}
+                                               className="hidden" 
+                                               accept="image/*,video/*"
+                                               onChange={(e) => {
+                                                 const file = e.target.files?.[0];
+                                                 if (file) handleUploadMediaToCampaign(ad.id, file);
+                                               }}
+                                             />
+                        <button 
+                                               onClick={(e) => {
+                                                 e.preventDefault();
+                                                 document.getElementById(`upload-${ad.id}`)?.click();
+                                               }}
+                                               className="cursor-pointer p-2.5 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
+                                             >
+                                               <Upload size={14} />
+                                               <span className="text-[8px] font-black uppercase">{(ad.assetUrl || ad.mediaUrl) ? "Replace" : "Choose File"}</span>
+                                             </button>
+                                          </div>
+                                       )
                                     )}
                                     <button className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
                                        <ArrowUpRight size={16} />
-                                    </button>
-                                    <button 
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteCampaign(ad.id); }}
-                                      className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-red-500 hover:text-white transition-all group-hover:scale-105 active:scale-95 shadow-sm"
-                                      title="Delete Campaign"
-                                    >
-                                       <Trash2 size={16} />
                                     </button>
                                  </div>
                               </td>
@@ -2010,7 +2211,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         ))}
                         {myCampaigns.length === 0 && (
                            <tr>
-                              <td colSpan={5} className="px-8 py-16 text-center text-slate-400 text-[10px] font-bold uppercase tracking-widest italic leading-relaxed">Disconnected from Active Network. Launch New Campaign to Sync.</td>
+                              <td colSpan={4} className="px-8 py-16 text-center text-slate-400 text-[10px] font-bold uppercase tracking-widest italic leading-relaxed">Disconnected from Active Network. Launch New Campaign to Sync.</td>
                            </tr>
                         )}
                      </tbody>
@@ -2101,22 +2302,20 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                   ))}
                </div>
             </div>
-          </motion.div>
+          </div>
         )}
 
         {activeTab === 'DESIGN_HELP' && (
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="space-y-8"
+          <div
+            className="space-y-8 bg-slate-50 min-h-[500px] p-6 lg:p-12 rounded-[2rem] border border-slate-200"
           >
-             <div className="max-w-4xl mx-auto space-y-10 py-10">
+             <div className="max-w-4xl mx-auto space-y-10 py-10 opacity-100">
                 <div className="text-center space-y-4">
                    <div className="w-20 h-20 bg-amber-500/10 rounded-[2rem] flex items-center justify-center text-amber-500 mx-auto border border-amber-500/20 shadow-2xl shadow-amber-500/5">
                       <Sparkles size={40} />
                    </div>
                    <div className="space-y-2">
-                      <h2 className="text-3xl font-black italic text-slate-900 uppercase tracking-tight leading-relaxed">Designer Help</h2>
+                      <h2 className="text-3xl font-black italic text-slate-900 uppercase tracking-tight leading-relaxed">Professional Designer Service</h2>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Scale your story with expert design strategy</p>
                    </div>
                 </div>
@@ -2145,7 +2344,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    <div className="glass-card p-10 rounded-[3rem] bg-slate-900 border border-slate-800 shadow-2xl space-y-8 relative overflow-hidden group">
                       <div className="absolute -top-10 -right-10 bg-amber-500/10 w-40 h-40 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all" />
                       <div className="space-y-4 relative z-10">
-                         <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Video Making Service</h4>
+                         <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Video Ads Service</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">High-Impact 1080p motion graphics to grab maximum network attention.</p>
                          <h3 className="text-3xl font-black italic text-white tracking-tight">₹2000</h3>
                       </div>
@@ -2156,18 +2355,33 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> 72-Hour Prime Delivery</li>
                       </ul>
                       <button 
-                         onClick={() => handleRequestDesign('Video Making Service')}
+                         onClick={async () => {
+                           // Raise the ticket automatically
+                           if (!user) return;
+                           const ticketId = await firebaseService.createSupportTicket({
+                             customerId: user.uid,
+                             customerName: user.displayName || 'Customer',
+                             title: 'New Video Ad Request',
+                             description: 'Customer requested professional video ad creation service.',
+                             priority: 'HIGH',
+                             category: 'Design Strategy',
+                             type: 'CUSTOMER'
+                           });
+                           setActiveTicketId(ticketId);
+                           setActiveTab('TICKETS');
+                           triggerToast("Our video team will contact you shortly!", "success");
+                         }}
                          className="w-full py-5 bg-amber-500 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition-all shadow-2xl shadow-amber-500/20 relative z-10"
                       >
-                        Hire Motion Expert
+                        Start Expert Consultation
                       </button>
                    </div>
                 </div>
              </div>
-          </motion.div>
+          </div>
         )}
         {/* Production Footer Section */}
-        <div className="pt-20 pb-10">
+        <div className="pt-20 pb-10 mt-auto">
           <div className="bg-slate-900 rounded-[3rem] p-12 text-center space-y-8 relative overflow-hidden">
              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
              <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">GROW YOUR BRAND</h2>
@@ -2203,7 +2417,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                    <ul className="space-y-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                       <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('PRIVACY'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Privacy Center</li>
                       <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('TERMS'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Platform Terms</li>
-                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('REFUND'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Refund Policy</li>
+                      <li className="hover:text-white cursor-pointer transition-colors" onClick={() => { setLegalPage('CONTACT'); setActiveTab('LEGAL'); window.scrollTo(0,0); }}>Support Center</li>
                    </ul>
                 </div>
              </div>
@@ -2289,11 +2503,16 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     </motion.button>
                   )}
                   <div>
-                    <h3 className="text-2xl font-black italic tracking-tight uppercase">
+                    <h3 className="text-2xl font-black italic tracking-tight uppercase flex items-center gap-2">
                       {workflowState === 'DETAILS' ? "Campaign Config" : "Secure Payment"}
+                      {isFirestoreOffline && (
+                        <span className="text-[8px] bg-amber-500 text-white font-black px-2 py-0.5 rounded uppercase tracking-widest animate-pulse flex items-center gap-1">
+                          <Activity size={10} /> RECONNECTING
+                        </span>
+                      )}
                     </h3>
                     <p className="text-[10px] font-bold opacity-70 uppercase tracking-widest italic tracking-wider">
-                      {workflowState === 'DETAILS' ? "Configure Target Audience" : "Process Secure Payment"}
+                      {isFirestoreOffline ? "Offline. Restoring services gracefully..." : (workflowState === 'DETAILS' ? "Configure Target Audience" : "Process Secure Payment")}
                     </p>
                   </div>
                 </div>
@@ -2380,23 +2599,65 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                       <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Contact for Deployment</label>
-                       <div className="relative">
-                          <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                          <input 
-                             type="tel"
-                             placeholder="10-digit Mobile"
-                             value={phone}
-                             onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                             className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-12 pr-4 py-4 text-xs font-bold tracking-tight outline-none"
-                          />
-                       </div>
-                       {phone.length > 0 && !/^[6-9]\d{9}$/.test(phone) && (
-                         <div className="bg-red-500/10 border border-red-500/10 text-red-600 rounded-xl p-3 text-[10px] font-bold uppercase tracking-wider mt-1 text-left">
-                            ⚠️ Invalid number! Must start with 6, 7, 8, or 9. E.g. <span className="underline cursor-pointer" onClick={() => setPhone('9876543210')}>9876543210</span>. Please enter a valid Indian mobile number to proceed.
-                         </div>
+
+
+                    {/* Optional Media Payload Attachment */}
+                    <div className="space-y-2 p-5 bg-slate-50 border border-slate-100 rounded-2xl relative">
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                         Creative payload (Optional)
+                       </label>
+                       
+                       {!optionalUploadFile ? (
+                          <div 
+                            onClick={() => document.getElementById('optional-creative-file')?.click()}
+                            className="border-2 border-dashed border-slate-250 hover:border-amber-500/40 bg-white rounded-xl p-6 text-center cursor-pointer transition-all hover:bg-slate-50/50 flex flex-col items-center gap-2"
+                          >
+                             <Upload size={20} className="text-slate-400 group-hover:text-amber-500" />
+                             <p className="text-[10px] font-bold text-slate-700 uppercase">Attach file for ad screening</p>
+                             <p className="text-[8px] text-slate-400 uppercase">(Image or Video up to 100MB)</p>
+                             <input 
+                               type="file" 
+                               id="optional-creative-file" 
+                               className="hidden" 
+                               accept="image/*,video/*" 
+                               onChange={(e) => {
+                                 const f = e.target.files?.[0];
+                                 if (f) setOptionalUploadFile(f);
+                               }}
+                             />
+                          </div>
+                       ) : (
+                          <div className="flex flex-col gap-2">
+                             <div className="flex items-center justify-between bg-slate-950 text-white rounded-xl p-3 shadow-md">
+                                <div className="flex items-center gap-3">
+                                   <div className="p-2 bg-white/10 rounded-lg text-amber-500">
+                                      {optionalUploadFile.type.startsWith('video/') ? <PlayCircle size={16} /> : <ImageIcon size={16} />}
+                                   </div>
+                                   <div className="text-left">
+                                      <p className="text-[9px] font-bold uppercase tracking-tight max-w-[150px] truncate">{optionalUploadFile.name}</p>
+                                      <p className="text-[7px] text-slate-400 uppercase">Size: {(optionalUploadFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                                   </div>
+                                </div>
+                                <button 
+                                  onClick={() => setOptionalUploadFile(null)}
+                                  className="p-1.5 hover:bg-white/10 text-rose-450 hover:text-rose-550 rounded-lg transition-colors"
+                                >
+                                   <X size={14} />
+                                </button>
+                             </div>
+                             {isUploadingOptional && (
+                                <div className="space-y-1">
+                                   <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${optionalUploadProgress}%` }} />
+                                   </div>
+                                   <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest text-right">Uploading: {optionalUploadProgress}%</p>
+                                </div>
+                             )}
+                          </div>
                        )}
+                       <p className="text-[8px] text-slate-400 uppercase leading-relaxed">
+                         Note: Leaving this blank allows you to upload media later or have support design it for you.
+                       </p>
                     </div>
 
                     <button 
@@ -2416,6 +2677,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         }
                         try {
                            setLoading(true);
+                           
+                           // Create the campaign on Firestore first
                            const campaignRef = await firebaseService.createCampaign({
                              title: campaignDetails.title,
                              status: 'AWAITING_PAYPORTAL',
@@ -2432,6 +2695,39 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
                            setCreatedCampaignId(campaignRef.id);
                            localStorage.setItem('last_created_campaign', campaignRef.id);
+
+                           // If file is selected, upload to S3 first
+                           if (optionalUploadFile) {
+                             try {
+                               setIsUploadingOptional(true);
+                               setOptionalUploadProgress(0);
+                               triggerToast('Uploading optional campaign creative payload to AWS S3...', 'info');
+                               
+                               const res = await storageService.uploadCampaignMedia(campaignRef.id, optionalUploadFile, (p) => {
+                                 setOptionalUploadProgress(p);
+                               });
+                               
+                               const mediaType = optionalUploadFile.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+                               
+                               await firebaseService.updateCampaign(campaignRef.id, {
+                                 assetUrl: res.url,
+                                 mediaUrl: res.url,
+                                 videoThumbnail: res.thumbnailUrl || "",
+                                 mediaType: mediaType,
+                                 type: mediaType,
+                                 mediaReceived: true
+                               });
+                               
+                               triggerToast('Optional ad media uploaded to AWS!', 'success');
+                               setOptionalUploadFile(null); // Reset
+                             } catch (uploadErr) {
+                               console.error("AWS Upload error:", uploadErr);
+                               triggerToast('Failed optional S3 uploading, proceeding with regular configuration.', 'error');
+                             } finally {
+                               setIsUploadingOptional(false);
+                               setOptionalUploadProgress(0);
+                             }
+                           }
                            
                            openPaymentModal(campaignRef.id);
                            await prepareOrder(campaignRef.id);
@@ -2514,7 +2810,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                        </div>
                     </div>
 
-                    <button 
+                                         <button 
                       onClick={handlePaymentAndSubmit}
                       disabled={loading}
                       className={cn(
@@ -2666,24 +2962,32 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { id: 'DASHBOARD', icon: Activity, label: 'Home' },
+                  { id: 'DASHBOARD', icon: Activity, label: 'Control' },
+                  { id: 'IMPACT', icon: PlayCircle, label: 'Impact' },
                   { id: 'CAMPAIGNS', icon: Monitor, label: 'Campaigns' },
-                  { id: 'HISTORY', icon: Wallet, label: 'Payment Logs' },
-                  { id: 'TICKETS', icon: MessageSquare, label: 'Support Tickets' },
-                  { id: 'DESIGN_HELP', icon: Sparkles, label: 'Designer Studio' },
-                  { id: 'LEGAL', icon: ShieldCheck, label: 'Legal & Info' },
+                  { id: 'DESIGN_STUDIO', icon: Palette, label: 'Studio' },
+                  { id: 'HISTORY', icon: Wallet, label: 'Billing' },
+                  { id: 'SUBSCRIPTIONS', icon: Zap, label: 'Plans' },
+                  { id: 'TICKETS', icon: MessageSquare, label: 'Support' },
+                  { id: 'DESIGN_HELP', icon: Sparkles, label: 'Experts' },
+                  { id: 'LEGAL', icon: ShieldCheck, label: 'Legal' },
                 ].map((item) => (
                   <button
                     key={item.id}
                     onClick={() => {
-                      setActiveTab(item.id as any);
+                      if (item.id === 'DESIGN_STUDIO') {
+                         onOpenStudio();
+                      } else {
+                         setActiveTab(item.id as any);
+                      }
                       setShowMobileMenu(false);
                     }}
                     className={cn(
                       "flex flex-col items-center gap-3 p-6 rounded-3xl border transition-all",
                       activeTab === item.id 
                         ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
-                        : "bg-white border-slate-100 text-slate-400"
+                        : "bg-white border-slate-100 text-slate-400",
+                      item.id === 'DESIGN_STUDIO' && "border-blue-100 bg-blue-50/30 text-blue-600"
                     )}
                   >
                     <item.icon size={24} />
@@ -2754,6 +3058,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-xs font-bold tracking-tight text-slate-950 outline-none focus:border-amber-500 transition-all cursor-pointer appearance-none"
                     >
                       <option value="Campaign Assistance">Campaign Assistance</option>
+                      <option value="System Issue">System Issue</option>
                       <option value="Billing & Invoices">Billing & Invoices</option>
                       <option value="Technical Support">Technical Support</option>
                       <option value="Hardware / Installation">Hardware / Installation</option>
@@ -2800,10 +3105,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         )}
       </AnimatePresence>
       
-      {!showPayment && (
-        <div className="fixed bottom-4 right-4 p-4 bg-white shadow-xl rounded-2xl border border-slate-100 uppercase text-[8px] font-black tracking-widest text-slate-500 z-[120]">
-          Verified Infrastructure
-        </div>
-      )}
-    </div>;
+      
+    </div>
+  );
 }

@@ -65,6 +65,7 @@ import { UserRole } from "@/types";
 import RoadmapChart from "../common/RoadmapChart";
 import AdminAssistant from "../common/AdminAssistant";
 import { ErrorBoundary } from "../common/ErrorBoundary";
+import NotificationCenter from "../common/NotificationCenter";
 
 import {
   MapContainer,
@@ -166,6 +167,24 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('http://https://', 'https://');
   }
 
+  // Rewrite legacy non-CORS commondatastorage.googleapis.com endpoints to CORS-compliant storage.googleapis.com
+  if (cleaned.includes('commondatastorage.googleapis.com')) {
+    cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
+  }
+
+  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
+  if (cleaned.toLowerCase().includes('mixkit')) {
+    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
+    } else {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    }
+  }
+
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
     return undefined;
@@ -234,12 +253,86 @@ const getCampaignExpiration = (campaign: any) => {
 interface AdminPortalProps {
   onRoleJump?: (role: UserRole) => void;
   onLogout: () => void;
+  onOpenStudio?: () => void;
 }
 
 export default function AdminPortal({
   onRoleJump,
   onLogout,
+  onOpenStudio,
 }: AdminPortalProps) {
+  const [selectedTheme, setSelectedTheme] = useState<'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar'>(() => (localStorage.getItem('admin_premium_theme') as any) || 'default');
+  
+  const selectTheme = (theme: 'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar') => {
+    setSelectedTheme(theme);
+    localStorage.setItem('admin_premium_theme', theme);
+  };
+
+  const themeClasses = (() => {
+    switch (selectedTheme) {
+      case 'tokyo':
+        return {
+          bg: 'bg-stone-950',
+          text: 'text-fuchsia-400',
+          accent: 'bg-fuchsia-500',
+          border: 'border-fuchsia-500/30',
+          card: 'bg-purple-950/40 border-purple-900/40',
+          textAccent: 'text-fuchsia-400',
+          btn: 'bg-fuchsia-500 text-slate-950 hover:bg-fuchsia-400',
+          glow: 'shadow-[0_0_15px_rgba(217,70,239,0.35)]',
+          badge: 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-400'
+        };
+      case 'emerald':
+        return {
+          bg: 'bg-stone-950',
+          text: 'text-emerald-400',
+          accent: 'bg-emerald-500',
+          border: 'border-emerald-500/30',
+          card: 'bg-emerald-950/40 border-emerald-900/30',
+          textAccent: 'text-emerald-400',
+          btn: 'bg-emerald-500 text-slate-950 hover:bg-emerald-400',
+          glow: 'shadow-[0_0_15px_rgba(16,185,129,0.35)]',
+          badge: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+        };
+      case 'ocean':
+        return {
+          bg: 'bg-slate-950',
+          text: 'text-cyan-400',
+          accent: 'bg-cyan-500',
+          border: 'border-cyan-500/30',
+          card: 'bg-cyan-950/40 border-cyan-900/40',
+          textAccent: 'text-cyan-400',
+          btn: 'bg-cyan-500 text-slate-950 hover:bg-cyan-400',
+          glow: 'shadow-[0_0_15px_rgba(6,182,212,0.35)]',
+          badge: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-400'
+        };
+      case 'solar':
+        return {
+          bg: 'bg-slate-950',
+          text: 'text-yellow-400',
+          accent: 'bg-yellow-500',
+          border: 'border-yellow-500/30',
+          card: 'bg-yellow-950/40 border-yellow-900/40',
+          textAccent: 'text-yellow-400',
+          btn: 'bg-yellow-500 text-slate-950 hover:bg-yellow-400',
+          glow: 'shadow-[0_0_15px_rgba(234,179,8,0.35)]',
+          badge: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
+        };
+      default:
+        return {
+          bg: 'bg-[#05070a]',
+          text: 'text-amber-500',
+          accent: 'bg-amber-500',
+          border: 'border-amber-500/20',
+          card: 'bg-white/5 border-white/5',
+          textAccent: 'text-amber-500',
+          btn: 'bg-amber-500 text-slate-950 hover:bg-amber-400',
+          glow: 'shadow-[0_0_15px_rgba(245,158,11,0.3)]',
+          badge: 'border-amber-500/20 bg-amber-500/10 text-amber-500'
+        };
+    }
+  })();
+
   const [activeTab, setActiveTab] = useState("DASHBOARD");
   const [notices, setNotices] = useState<any[]>([]);
   const [newNotice, setNewNotice] = useState({
@@ -518,6 +611,9 @@ export default function AdminPortal({
     return (topCities || []).map(([name, count]) => {
       const cityRevenue = (payments || [])
         .filter((p) => {
+          if (!p || !["success", "SUCCESS", "paid", "PAID"].includes(p.status)) {
+            return false;
+          }
           // Attribute strictly by driverId
           if (p.driverId) {
             const driver = (drivers || []).find((d) => d.uid === p.driverId);
@@ -552,7 +648,7 @@ export default function AdminPortal({
   };
 
   const totalSuccessfulRevenue = (payments || [])
-    .filter((p) => p && (p.status === "success" || p.status === "SUCCESS"))
+    .filter((p) => p && ["success", "SUCCESS", "paid", "PAID"].includes(p.status))
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   useEffect(() => {
@@ -1316,10 +1412,18 @@ export default function AdminPortal({
             { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
+            { id: "PACKAGES", icon: Zap, title: "Package Config" },
+            { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => {
+                if (tab.id === "STUDIO") {
+                  onOpenStudio?.();
+                } else {
+                  setActiveTab(tab.id as any);
+                }
+              }}
               className={cn(
                 "p-3 rounded-2xl transition-all relative group",
                 activeTab === tab.id
@@ -1340,6 +1444,42 @@ export default function AdminPortal({
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-4 pb-4">
+          {/* Gold Premium Seal Badge */}
+          <div className="relative group flex flex-col items-center">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center animate-bounce shadow-md shadow-amber-500/5 cursor-help">
+              <span className="text-[12px]">👑</span>
+            </div>
+            <div className="absolute left-full ml-4 px-3 py-2 bg-slate-900 border border-slate-800 text-white text-[8px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-50">
+              <span className="text-amber-400">👑 Premium Unlocked</span>
+            </div>
+          </div>
+
+          {/* Vertical Theme Selector Chain */}
+          <div className="flex flex-col items-center gap-1.5 p-1.5 bg-white/5 border border-white/10 rounded-2xl">
+            {[
+              { id: 'default', color: 'bg-amber-500', name: 'Amber' },
+              { id: 'tokyo', color: 'bg-fuchsia-500', name: 'Neon' },
+              { id: 'emerald', color: 'bg-emerald-500', name: 'Green' },
+              { id: 'ocean', color: 'bg-cyan-500', name: 'Cyan' },
+              { id: 'solar', color: 'bg-yellow-500', name: 'Solar' }
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => selectTheme(t.id as any)}
+                className={cn(
+                  "w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all hover:scale-125 relative group",
+                  selectedTheme === t.id ? "border-white" : "border-transparent opacity-50 hover:opacity-100"
+                )}
+                title={t.name + " Theme"}
+              >
+                <div className={cn("w-2.5 h-2.5 rounded-full", t.color)} />
+                <div className="absolute left-full ml-4 px-2 py-1 bg-slate-900 border border-slate-800 text-white text-[7px] font-black uppercase tracking-widest rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150 whitespace-nowrap z-50">
+                  {t.name}
+                </div>
+              </button>
+            ))}
+          </div>
+
           <div className="bg-white/5 p-2 rounded-xl border border-white/10 flex flex-col items-center gap-1 group relative">
             <span className="text-[7px] font-black uppercase text-slate-500 tracking-widest">
               Support
@@ -1455,11 +1595,16 @@ export default function AdminPortal({
                   { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
+                  { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
                 ].map((item) => (
                   <button
                     key={item.id}
                     onClick={() => {
-                      setActiveTab(item.id as any);
+                      if (item.id === "STUDIO") {
+                        onOpenStudio?.();
+                      } else {
+                        setActiveTab(item.id as any);
+                      }
                       setShowMobileMenu(false);
                     }}
                     className={cn(
@@ -1512,6 +1657,7 @@ export default function AdminPortal({
           </div>
 
           <div className="flex items-center gap-3">
+            <NotificationCenter role="ADMIN" userId={auth.currentUser?.uid} onNavigateToTab={(tab) => setActiveTab(tab as any)} />
             <button
               onClick={() => setShowPurgeConfirm(true)}
               className="hidden md:flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-red-400 shadow-lg shadow-red-500/10"
@@ -3548,7 +3694,15 @@ export default function AdminPortal({
                                 {p.customerId || p.customerPhone || "Guest"}
                               </td>
                               <td className="px-8 py-5">
-                                <span className="px-3 py-1 bg-green-50 text-green-500 rounded-full text-[8px] font-black uppercase">
+                                <span className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                                  ["SUCCESS", "success", "PAID", "paid"].includes(p.status) 
+                                    ? "bg-green-50 text-green-600 border-green-100" 
+                                    : ["CANCELLED", "cancelled"].includes(p.status) 
+                                      ? "bg-slate-100 text-slate-500 border-slate-200" 
+                                      : ["FAILED", "failed"].includes(p.status)
+                                        ? "bg-red-50 text-red-600 border-red-100"
+                                        : "bg-amber-50 text-amber-600 border-amber-100"
+                                }`}>
                                   {p.status}
                                 </span>
                               </td>
@@ -4344,6 +4498,66 @@ export default function AdminPortal({
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === "PACKAGES" && (
+        <motion.div
+           initial={{ opacity: 0, x: 20 }}
+           animate={{ opacity: 1, x: 0 }}
+           className="p-8 space-y-10"
+        >
+           <div className="flex items-center justify-between">
+              <div>
+                 <h1 className="text-3xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Package Configurator</h1>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Adjust core network plan parameters</p>
+              </div>
+              <div className="flex gap-4">
+                 <button className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Export Pricing</button>
+                 <button className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all">Save All Changes</button>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-3 gap-8">
+              {[
+                { id: 'BASIC', name: 'Elite Starter', price: '₹999', desc: '3 Auto Displays • 1 Day Assigned' },
+                { id: 'STARTER', name: 'Brand Velocity', price: '₹1999', desc: '7 Auto Displays • 2 Days' },
+                { id: 'PRO', name: 'Dominion Pro', price: '₹4999', desc: 'Priority Network • 7 Days' }
+              ].map((p) => (
+                <div key={p.id} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden group">
+                   <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-3xl pointer-events-none group-hover:bg-amber-500/10 transition-all" />
+                   <div className="flex items-center gap-4 mb-8">
+                      <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-amber-500 shadow-xl shadow-slate-900/20">
+                         <Zap size={28} />
+                      </div>
+                      <div>
+                         <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tight">{p.name}</h3>
+                         <p className="text-xs font-black text-amber-500 tracking-widest mt-1">{p.price}</p>
+                      </div>
+                   </div>
+                   
+                   <div className="space-y-6">
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Display Parameters</label>
+                         <textarea 
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all"
+                            defaultValue={p.desc}
+                            rows={4}
+                         />
+                      </div>
+                      <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visibility state</span>
+                         <div className="w-12 h-6 bg-amber-500 rounded-full relative shadow-inner">
+                            <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-md" />
+                         </div>
+                      </div>
+                      <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all mt-4">
+                         Push to Network
+                      </button>
+                   </div>
+                </div>
+              ))}
+           </div>
+        </motion.div>
       )}
 
       {activeTab === "NOTICES" && (

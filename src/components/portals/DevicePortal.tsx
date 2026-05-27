@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap } from 'lucide-react';
+import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
 import { auth } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
+import { isSchoolTiming, filterAds } from '../smartAds/SmartAdEngine';
+import SmartPassengerQR from '../smartAds/SmartPassengerQR';
+import { AdaptiveRideContentEngine } from '../smartRide/AdaptiveRideContentEngine';
+import { BrightnessManager, BrightnessProfile } from '../smartRide/brightness/BrightnessManager';
 
 interface DevicePortalProps {
   onLogout: () => void;
@@ -24,6 +28,24 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('https://https://', 'https://');
   } else if (cleaned.startsWith('http://https://')) {
     cleaned = cleaned.replace('http://https://', 'https://');
+  }
+
+  // Rewrite legacy non-CORS commondatastorage.googleapis.com endpoints to CORS-compliant storage.googleapis.com
+  if (cleaned.includes('commondatastorage.googleapis.com')) {
+    cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
+  }
+
+  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
+  if (cleaned.toLowerCase().includes('mixkit')) {
+    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
+    } else {
+      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    }
   }
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
@@ -94,6 +116,79 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showComplianceNotice, setShowComplianceNotice] = useState(false);
   const [lastCheckTime, setLastCheckTime] = useState(Date.now());
+
+  // --- Smart Ad Filtering states & listeners ---
+  const [activeRidePref, setActiveRidePref] = useState<any>(null);
+  const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
+  const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
+
+  // --- Smart Brightness Mode logic ---
+  const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
+    BrightnessManager.calculateBrightness('AUTO', 75, null)
+  );
+
+  useEffect(() => {
+    const updateBrightness = () => {
+      const bMode = activeRidePref?.brightnessMode || 'AUTO';
+      const mLevel = activeRidePref?.manualBrightnessLevel ?? 75;
+      const profile = BrightnessManager.calculateBrightness(bMode, mLevel, activeRidePref);
+      setBrightnessProfile(profile);
+    };
+
+    updateBrightness();
+    const interval = setInterval(updateBrightness, 15000); // Poll clock & settings every 15 seconds
+    return () => clearInterval(interval);
+  }, [activeRidePref]);
+
+  useEffect(() => {
+    // Periodically update school timing flag
+    const interval = setInterval(() => {
+      const active = isSchoolTiming();
+      setIsSchoolActive(active);
+    }, 10000); // Check every 10 seconds for instant transition response
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync ride preferences when activeTerminal is provisioned or manual terminalId is set
+  useEffect(() => {
+    const tid = activeTerminal?.id || terminalId;
+    if (!tid) return;
+    
+    console.log("[SmartAds] Listening for ridePreferences on device", tid);
+    const unsubscribe = firebaseService.subscribeToRidePreference(tid, (pref) => {
+      if (pref) {
+        // Expiration check
+        const expiresAt = pref.expiresAt ? new Date(pref.expiresAt) : null;
+        if (!expiresAt || expiresAt > new Date()) {
+          setActiveRidePref(pref);
+          setStatusLogs(prev => [`SMART_ADS: Override Active (${pref.driverOverrideMode || 'User Preferences'})`, ...prev]);
+        } else {
+          setActiveRidePref(null);
+          firebaseService.clearRidePreference(tid);
+        }
+      } else {
+        setActiveRidePref(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeTerminal?.id, terminalId]);
+
+  // Combine raw ads with the filtering rules in real-time
+  useEffect(() => {
+    const currentMode = activeRidePref?.driverOverrideMode || 'NORMAL';
+    const compiledPlaylist = AdaptiveRideContentEngine.generatePlaylist(
+      rawPlaylist,
+      currentMode as any,
+      isSchoolActive,
+      activeRidePref?.blockedCategories || []
+    );
+    setPlaylist(compiledPlaylist);
+    
+    if (rawPlaylist.length > 0) {
+      console.log(`[SmartAds] Filtered playlist from ${rawPlaylist.length} to ${compiledPlaylist.length} items (SchoolActive: ${isSchoolActive}, Mode: ${currentMode})`);
+    }
+  }, [rawPlaylist, isSchoolActive, activeRidePref]);
 
   // Check if campaign is active and within scheduled time/day
   const isRunTimeCompliant = (campaign: AdCampaign) => {
@@ -214,11 +309,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       const validAds = allAds.filter(ad => {
         if (!ad.url || typeof ad.url !== 'string') return false;
-        if (ad.url === 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') return false;
+        if (ad.url === 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' || ad.url === 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') return false;
         const safe = getSafeUrl(ad.url);
         return !!safe;
       });
-      setPlaylist(validAds);
+      setRawPlaylist(validAds);
       setLoading(false);
       
       if (validAds.length > 0) {
@@ -1133,37 +1228,121 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               <div className="absolute inset-0 scanline z-20 pointer-events-none opacity-[0.03]" />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/20 z-10 pointer-events-none" />
 
-              {isVideoMedia(currentAd) ? (
-                <video 
-                  key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
-                  ref={videoRef}
-                  autoPlay 
-                  muted 
-                  loop={playlist.length === 1}
-                  playsInline
-                  className="w-full h-full object-cover"
-                  src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || ""}
-                  onEnded={handleAdComplete}
-                  onError={(e) => {
-                    const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
-                    console.error("[Terminal] Video playback error:", urlToLog);
-                    handleAdComplete();
-                  }}
-                />
-              ) : (
-                <img 
-                  key={`img_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
-                  src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="} 
-                  alt={currentAd?.title || "Ad"} 
-                  className="w-full h-full object-cover" 
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    const urlAttempted = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
-                    console.error("[Terminal] Image load error. Ad ID:", currentAd?.id, ". Attempted URL:", urlAttempted);
-                    handleAdComplete();
-                  }}
-                />
+              {/* Scan to customize overlay - emotional, family-friendly, premium smart mobility design */}
+              <SmartPassengerQR deviceId={activeTerminal?.id || terminalId || "ACTIVE"} />
+
+              {/* Dynamic Mode Notification Banners */}
+              {(isSchoolActive || activeRidePref || brightnessProfile) && (
+                <div className="absolute top-12 left-12 z-50 flex flex-col gap-2 pointer-events-none text-left">
+                  {/* School Safe mode timing banner */}
+                  {isSchoolActive && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-sky-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-sky-400 font-sans"
+                    >
+                      <School size={14} className="animate-bounce" />
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">School Zone Timing Active</p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Children Safe Mode Automatically Triggered</p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Active manual overrides banner */}
+                  {activeRidePref && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-green-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-emerald-400 font-sans"
+                    >
+                      <Shield size={14} />
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
+                          {activeRidePref.driverOverrideMode ? `${activeRidePref.driverOverrideMode.replace('_', ' ')} OVERRIDE ACTIVE` : 'PASSENGER PREFERENCES ACTIVE'}
+                        </p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Ad feeds filtered dynamically for this ride</p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Smart Auto Brightness HUD banner */}
+                  {brightnessProfile && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-slate-950/85 backdrop-blur-md text-white rounded-2xl flex items-center gap-2 shadow-lg border border-white/10 font-sans"
+                    >
+                      <Sun size={14} className={cn("text-amber-400", brightnessProfile.level < 40 ? "animate-pulse" : "")} />
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
+                          Auto-Brightness: <span className="text-amber-400 font-black">{brightnessProfile.level}%</span>
+                        </p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-400 leading-none mt-0.5 flex items-center gap-1.5 font-mono">
+                          <span>{brightnessProfile.label}</span>
+                          <span className="w-1 h-1 rounded-full bg-slate-600" />
+                          <span>LDR: {brightnessProfile.simulatedLux} LUX</span>
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
               )}
+
+              <div 
+                className={cn(
+                  "w-full h-full relative transition-[filter]"
+                )}
+                style={{
+                  filter: `brightness(${brightnessProfile ? brightnessProfile.level / 100 : 0.75}) ${
+                    brightnessProfile?.reducedContrast ? 'contrast(0.75)' : ''
+                  } ${
+                    brightnessProfile?.reducedGlow ? 'saturate(0.5) contrast(0.9)' : ''
+                  }`,
+                  transition: 'filter 1.5s ease'
+                }}
+              >
+                {isVideoMedia(currentAd) ? (
+                  <video 
+                    key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
+                    ref={videoRef}
+                    autoPlay 
+                    muted 
+                    loop={playlist.length === 1}
+                    playsInline
+                    className="w-full h-full object-cover"
+                    src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || ""}
+                    onEnded={handleAdComplete}
+                    onError={(e) => {
+                      const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
+                      console.error("[Terminal] Video playback error:", urlToLog);
+                      if (videoRef.current && videoRef.current.src !== 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') {
+                        console.warn("[Terminal] Attempting fallback to ForBiggerBlazes.mp4...");
+                        videoRef.current.src = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                        videoRef.current.play().catch(pErr => {
+                          console.error("[Terminal] Fallback also failed or was blocked by gesture requirement:", pErr);
+                          handleAdComplete();
+                        });
+                      } else {
+                        handleAdComplete();
+                      }
+                    }}
+                  />
+                ) : (
+                  <img 
+                    key={`img_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
+                    src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="} 
+                    alt={currentAd?.title || "Ad"} 
+                    className="w-full h-full object-cover" 
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const urlAttempted = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
+                      console.error("[Terminal] Image load error. Ad ID:", currentAd?.id, ". Attempted URL:", urlAttempted);
+                      handleAdComplete();
+                    }}
+                  />
+                )}
+              </div>
               
               {/* Ad Progress Bar */}
               <div className="absolute bottom-0 left-0 w-full h-2 z-50 bg-black/20">

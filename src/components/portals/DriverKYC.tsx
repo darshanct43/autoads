@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { CloudUpload, User, FileText, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { uploadToS3 } from '@/services/awsService';
+import { storageService } from '@/services/storageService';
 import { firebaseService } from '@/services/firebaseService';
 import { cn } from '@/lib/utils';
 import { DriverProfile, DriverDocument } from '@/types';
@@ -13,25 +13,35 @@ interface DriverKYCProps {
 
 export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Partial<DriverDocument>>({});
   const [upiId, setUpiId] = useState('');
 
   const handleUpload = async (docKey: keyof DriverDocument, file: File) => {
     setLoading(true);
+    setError(null);
     try {
-      const fileName = `drivers/${driverId}/${docKey}-${Date.now()}`;
-      const url = await uploadToS3(file, fileName, file.type);
+      const extension = file.name.split('.').pop() || 'jpg';
+      const customName = `${docKey}-${Date.now()}.${extension}`;
+      const url = await storageService.uploadFile(
+        file,
+        undefined,
+        customName,
+        `drivers/${driverId}`
+      );
       setDocuments(prev => ({ ...prev, [docKey]: url }));
-    } catch (e) {
-      alert("Failed to upload document");
+    } catch (e: any) {
+      console.error(e);
+      setError("Failed to upload " + docKey + ": " + (e.message || ""));
     } finally {
       setLoading(false);
     }
   };
 
   const handleSubmit = async () => {
+    setError(null);
     if (!documents.aadhaar || !documents.drivingLicense || !documents.selfie) {
-      alert("Please upload all required documents.");
+      setError("Please upload all three required documents (Aadhaar, Driving License, and Selfie).");
       return;
     }
     
@@ -46,8 +56,8 @@ export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
       };
       await firebaseService.updateDriverProfile(driverId, profile);
       onSuccess();
-    } catch (e) {
-      alert("Failed to save KYC details.");
+    } catch (e: any) {
+      setError("Failed to save KYC details: " + (e.message || "Please try again."));
     } finally {
       setLoading(false);
     }
@@ -72,6 +82,12 @@ export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
       
       <div className="space-y-4">
           <input placeholder="Enter UPI ID" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold" value={upiId} onChange={e => setUpiId(e.target.value)} />
+          {error && (
+            <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-2 text-rose-800 font-bold text-xs uppercase tracking-tight">
+              <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
           <button onClick={handleSubmit} disabled={loading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black">{loading ? 'Saving...' : 'Submit for Review'}</button>
       </div>
     </div>
