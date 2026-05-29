@@ -3,7 +3,7 @@ import { Layers, Plus, Trash2, Edit2, Wand2, Type, Image as ImageIcon, Check, Li
 import { studioConfigService, StudioConfigItem } from '../../../services/studioConfigService';
 import { cn } from '../../../lib/utils';
 import { auth, db } from '../../../lib/firebase';
-import { doc, getDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc, setDoc } from 'firebase/firestore';
 
 export const AdminStudioConfig: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'THEMES' | 'TEMPLATES' | 'AI_MODELS' | 'EDITING_TOOLS' | 'CATEGORIES' | 'INTEGRATIONS'>('THEMES');
@@ -50,9 +50,30 @@ export const AdminStudioConfig: React.FC = () => {
       }
     });
 
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
       if (event.data?.type === 'CANVA_OAUTH_SUCCESS') {
         console.log('[CANVA OAUTH] Received success message from popup');
+        const user = auth.currentUser;
+        if (user && event.data.tokenData) {
+          try {
+            console.log('[CANVA OAUTH] Saving token details securely from client side...');
+            const data = event.data.tokenData;
+            await setDoc(doc(db, 'canvaTokens', user.uid), {
+              uid: user.uid,
+              access_token: data.access_token,
+              refresh_token: data.refresh_token || '',
+              expires_in: data.expires_in,
+              expires_at: Date.now() + (data.expires_in * 1000),
+              scope: data.scope,
+              token_type: data.token_type || 'Bearer',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+            console.log('[CANVA OAUTH] Token successfully stored from client.');
+          } catch (storageErr: any) {
+            console.error('[CANVA OAUTH] Client failed to write token:', storageErr);
+          }
+        }
         fetchCanvaStatus();
       } else if (event.data?.type === 'CANVA_OAUTH_FAILED') {
         console.error('[CANVA OAUTH] Received failure message:', event.data.error);
