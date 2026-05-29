@@ -5,6 +5,7 @@ import { auth } from '@/lib/firebase';
 
 interface StudioContextType {
   state: EditorState;
+  userRole?: string;
   isUpgradeModalOpen: boolean;
   setAspectRatio: (ratio: AspectRatio) => void;
   setSafeZone: (enabled: boolean) => void;
@@ -125,6 +126,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode; userRole?: st
   return (
     <StudioContext.Provider value={{
       state,
+      userRole,
       isUpgradeModalOpen,
       setAspectRatio,
       setSafeZone,

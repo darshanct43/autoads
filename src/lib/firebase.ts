@@ -8,8 +8,21 @@ import {
   signInWithPopup,
   Auth
 } from 'firebase/auth';
-import { initializeFirestore, memoryLocalCache, doc, getDocFromServer, Firestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  doc, 
+  getDocFromServer, 
+  getFirestore,
+  Firestore, 
+  setLogLevel,
+  enableNetwork,
+  disableNetwork
+} from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
+
+setLogLevel('error'); // Suppress verbose warning logs
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
@@ -19,27 +32,24 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
 };
 
-console.log("Firebase ENV Check:", firebaseConfig);
-
-Object.entries(firebaseConfig).forEach(([key, value]) => {
-  if (!value) {
-    console.error("Missing Firebase ENV:", key);
-  }
-});
-
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 (window as any)._firebaseApp = app;
 
 const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || '(default)');
 
-// Use memoryLocalCache for Firestore to avoid persistence issues in iframes
-export const db: Firestore = initializeFirestore(app, {
-  localCache: memoryLocalCache(),
-  experimentalForceLongPolling: true,
-}, firestoreDbId === '(default)' ? undefined : firestoreDbId);
+let dbInstance: Firestore;
+try {
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  }, firestoreDbId === '(default)' ? undefined : firestoreDbId);
+} catch (e) {
+  dbInstance = getFirestore(app, firestoreDbId === '(default)' ? undefined : firestoreDbId);
+}
+
+export const db: Firestore = dbInstance;
+console.log("[Firebase] Firestore initialized. Database ID:", firestoreDbId);
 
 // Explicitly initialize Auth with local persistence and popup resolver
-// This helps resolve "Pending promise was never set" assertion errors in v11 SDK
 let authInstance: Auth;
 try {
   authInstance = initializeAuth(app, {
@@ -47,7 +57,6 @@ try {
     popupRedirectResolver: browserPopupRedirectResolver,
   });
 } catch (e) {
-  // If already initialized, use getAuth
   authInstance = getAuth(app);
 }
 
@@ -55,9 +64,9 @@ export const auth = authInstance;
 export const storage: FirebaseStorage = getStorage(app);
 
 // Connection verification test with higher resilience
-async function testConnection() {
-  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
+async function testConnection(retries = 3) {
   try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
     console.log("[Firebase] Probing Cloud Firestore...");
     await Promise.race([
       getDocFromServer(doc(db, 'test', 'connectivity')),
@@ -65,22 +74,38 @@ async function testConnection() {
     ]);
     console.log("[Firebase] Cloud Link Established.");
   } catch (error: any) {
-    if (error.message === 'timeout') {
-      console.warn("[Firebase] Backend latency detected.");
+    if (error.message === 'timeout' && retries > 0) {
+      console.warn(`[Firebase] Backend latency detected. Retrying... (${retries} attempts left)`);
+      setTimeout(() => {
+        testConnection(retries - 1);
+      }, 1000);
     } else {
-      console.log("[Firebase] System initialized (Network standby).");
+      console.log("[Firebase] System initialized (Network standby or offline mode).");
     }
   }
 }
 testConnection();
 
+let loginInProgress = false;
+
 export const googleLogin = async () => {
+  if (loginInProgress) {
+    throw new Error("An authentication check is already in progress. Please complete the sign-in in the popup window.");
+  }
+  
+  loginInProgress = true;
   const provider = new GoogleAuthProvider();
-  // Ensure we are using the popup resolver correctly
+  
   try {
     return await signInWithPopup(auth, provider);
   } catch (error: any) {
     console.error("[Firebase Auth Error]", error);
+    if (error.code === 'auth/popup-closed-by-user') {
+      throw new Error("The sign-in window was closed before completion. Please try again when ready.");
+    }
+    if (error.code === 'auth/cancelled-popup-request') {
+      throw new Error("The sign-in process was cancelled. Please try again.");
+    }
     if (error.code === 'auth/network-request-failed') {
       throw new Error("User sign-in did not complete due to a network error. Please ensure you are not blocking popups or third-party cookies, and that your domain is authorized in Firebase Console.");
     }
@@ -88,9 +113,11 @@ export const googleLogin = async () => {
        throw new Error("Google Sign-in is not enabled in your Firebase Console. Please enable it in Authentication > Sign-in method.");
     }
     if (error.code === 'auth/unauthorized-domain') {
-       throw new Error("This domain is not authorized for Google Login. Please add the current preview URL to the authorized domains in your Firebase Console and ensure that your email has a verified AutoAds account.");
+       throw new Error("This domain is not authorized for Google Login. Please add the current preview URL to the authorized domains in your Firebase Console.");
     }
     throw error;
+  } finally {
+    loginInProgress = false;
   }
 };
 

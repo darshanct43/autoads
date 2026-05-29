@@ -8,6 +8,7 @@ import { CanvasArea } from './CanvasArea';
 import { PropertiesPanel } from './PropertiesPanel';
 import { PreviewBar } from './PreviewBar';
 import { StudioProvider, useStudio } from './StudioContext';
+import { StudioDynamicProvider, useDynamicStudio } from './StudioDynamicContext';
 import { SubscriptionManager } from '../../subscription/SubscriptionManager';
 
 const UpgradeModalOverlay = () => {
@@ -49,42 +50,44 @@ export const CanvaStudio: React.FC<{ onClose: () => void; userRole?: string }> =
   };
 
   return (
-    <StudioProvider userRole={userRole}>
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[1000] bg-slate-950 text-slate-100 flex flex-col overflow-hidden h-screen w-screen selection:bg-amber-500/30 font-sans shadow-2xl"
-      >
-        <TopBar onClose={onClose} />
-        
-        <div className="flex-1 flex overflow-hidden relative">
-          <Sidebar active={activeNav} onSelect={handleNavSelect} />
+    <StudioDynamicProvider>
+      <StudioProvider userRole={userRole}>
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[1000] bg-slate-950 text-slate-100 flex flex-col overflow-hidden h-screen w-screen selection:bg-amber-500/30 font-sans shadow-2xl"
+        >
+          <TopBar onClose={onClose} />
+          
+          <div className="flex-1 flex overflow-hidden relative">
+            <Sidebar active={activeNav} onSelect={handleNavSelect} />
 
-          <AnimatePresence>
-            {isPanelOpen && (
-              <motion.div
-                initial={{ x: -320, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -320, opacity: 0 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="relative z-20"
-              >
-                <AssetPanel activeCategory={activeNav} onClose={() => setIsPanelOpen(false)} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+            <AnimatePresence>
+              {isPanelOpen && (
+                <motion.div
+                  initial={{ x: -320, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: -320, opacity: 0 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                  className="relative z-20"
+                >
+                  <AssetPanel activeCategory={activeNav} onClose={() => setIsPanelOpen(false)} />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-          <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-            <div className="flex-1 flex overflow-hidden">
-              <CanvasArea />
-              <PropertiesPanel />
-            </div>
-            <PreviewBar />
-          </main>
-        </div>
-        <UpgradeModalOverlay />
-      </motion.div>
-    </StudioProvider>
+            <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+              <div className="flex-1 flex overflow-hidden">
+                <CanvasArea />
+                <PropertiesPanel />
+              </div>
+              <PreviewBar />
+            </main>
+          </div>
+          <UpgradeModalOverlay />
+        </motion.div>
+      </StudioProvider>
+    </StudioDynamicProvider>
   );
 };

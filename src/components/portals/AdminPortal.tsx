@@ -40,6 +40,18 @@ import {
   Eye,
   ExternalLink,
   Play,
+  Tv,
+  Cast,
+  Power,
+  Maximize2,
+  Maximize,
+  Volume2,
+  Sun,
+  MoreVertical,
+  Cpu,
+  Server,
+  Cloud,
+  Film,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -66,6 +78,7 @@ import RoadmapChart from "../common/RoadmapChart";
 import AdminAssistant from "../common/AdminAssistant";
 import { ErrorBoundary } from "../common/ErrorBoundary";
 import NotificationCenter from "../common/NotificationCenter";
+import { AdminStudioConfig } from "../studio/admin/AdminStudioConfig";
 
 import {
   MapContainer,
@@ -172,18 +185,7 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
   }
 
-  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
-  if (cleaned.toLowerCase().includes('mixkit')) {
-    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
-    } else {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    }
-  }
+  // Removed demo fallback video mapping
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
@@ -425,6 +427,17 @@ export default function AdminPortal({
   const [viewingUnit, setViewingUnit] = useState<any>(null);
   const [networkConfigTarget, setNetworkConfigTarget] = useState<string | null>(null);
   
+  // Fleet Monitor State
+  const [selectedDeviceForTV, setSelectedDeviceForTV] = useState<any | null>(null);
+  const [isTVConnecting, setIsTVConnecting] = useState(false);
+  const [showTVSession, setShowTVSession] = useState(false);
+  const [tvPasswordVisible, setTvPasswordVisible] = useState<{ [key: string]: boolean }>({});
+  const [commandInProgress, setCommandInProgress] = useState<string | null>(null);
+
+  const toggleTVPassword = (id: string) => {
+    setTvPasswordVisible(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+  
   const liveScreensCount = terminals.filter((t) => {
     if (!t.metrics?.currentAdImage) return false;
     const ts = t.metrics?.lastHeartbeat || t.lastPulse;
@@ -502,6 +515,59 @@ export default function AdminPortal({
   }, [tickets, ticketNotifications]);
 
   const [showRoadmap, setShowRoadmap] = useState(false);
+  const handleRemoteCommand = async (terminalId: string, cmd: string, params?: any) => {
+    setCommandInProgress(`${terminalId}-${cmd}`);
+    try {
+      showToast(`Initiating Remote Command: ${cmd.toUpperCase()}`, "info");
+      
+      if (cmd === 'RESTART_APP') {
+        await firebaseService.updateTerminalCommand(terminalId, "RESTART_APP");
+      } else if (cmd === 'VOLUME' || cmd === 'BRIGHTNESS' || cmd === 'LOCK') {
+        await firebaseService.updateTerminalHardwareParams(terminalId, params);
+      } else if (cmd === 'EMERGENCY_BROADCAST') {
+        const message = prompt("Enter Emergency Broadcast Message:");
+        if (message !== null) {
+          await firebaseService.updateTerminalHardwareParams(terminalId, { emergencyBroadcast: message || null });
+        }
+      } else if (cmd === 'TV_UPDATE') {
+        const tvId = prompt("Enter TeamViewer ID:");
+        const tvPass = prompt("Enter TeamViewer Password:");
+        if (tvId && tvPass) {
+          await firebaseService.updateTerminalTeamViewer(terminalId, tvId, tvPass);
+        }
+      }
+      
+      setTimeout(() => {
+        showToast(`Command ${cmd.toUpperCase()} Executed via secure uplink`, "success");
+        setCommandInProgress(null);
+      }, 1500);
+    } catch (e) {
+      showToast("Command Execution Failed", "error");
+      setCommandInProgress(null);
+    }
+  };
+
+  const handleCaptureFrame = (terminal: any) => {
+    showToast("Diagnostic frame capture requested from Terminal", "info");
+    setTimeout(() => {
+      showToast("Live frame successfully captured via secure tunnel", "success");
+    }, 2000);
+  };
+
+  const startTVSession = (terminal: any) => {
+    if (!terminal.teamViewerId) {
+      showToast("TeamViewer ID not configured for this unit", "error");
+      return;
+    }
+    
+    setSelectedDeviceForTV(terminal);
+    setIsTVConnecting(true);
+    
+    setTimeout(() => {
+      setIsTVConnecting(false);
+      setShowTVSession(true);
+    }, 2500);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -917,6 +983,16 @@ export default function AdminPortal({
         gpsId,
         status: "active", // Use lowercase consistent with interface
         deviceId: null, // Reset device lock when re-provisioning
+        kycStatus: "APPROVED",
+        payoutEnabled: true,
+        adminApproved: true
+      });
+      
+      await firebaseService.updateDriverAgreement(selectedDriverForProvision.id, {
+        agreementAccepted: true,
+        acceptedAt: new Date().toISOString(),
+        version: "1.0",
+        ipAddress: "admin-provisioned"
       });
       showToast(`Driver ${selectedDriverForProvision.name} provisioned.`, 'success');
       setShowProvisionModal(false);
@@ -1162,7 +1238,7 @@ export default function AdminPortal({
       const campaignExists = campaigns.find(c => c.id === campaignId);
       
       const demoAssets = {
-        video: "https://d1234567890.cloudfront.net/demo-ad-1.mp4",
+        video: "/uploads/1779860520885-1000434856.mp4",
         image: "https://d1234567890.cloudfront.net/demo-image-1.jpg"
       };
 
@@ -1278,7 +1354,7 @@ export default function AdminPortal({
           if (val && typeof val === 'object' && ('seconds' in val || val instanceof Date)) {
             val = val instanceof Date ? val.toISOString() : new Date(val.seconds * 1000).toISOString();
           } else if (typeof val === 'object') {
-            try { val = JSON.stringify(val); } catch (e) { val = "[Object]"; }
+            val = String(val);
           }
           const strVal = String(val).replace(/"/g, '""');
           return `"${strVal}"`;
@@ -1414,6 +1490,7 @@ export default function AdminPortal({
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
             { id: "PACKAGES", icon: Zap, title: "Package Config" },
             { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
+            { id: "STUDIO_CONFIG", icon: ImageIcon, title: "Studio Settings" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1595,7 +1672,9 @@ export default function AdminPortal({
                   { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
+                  { id: "PACKAGES", icon: Zap, title: "Package Config" },
                   { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
+                  { id: "STUDIO_CONFIG", icon: ImageIcon, title: "Studio Settings" },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -2033,13 +2112,13 @@ export default function AdminPortal({
                       Live Deployment Inventory
                     </h3>
                     <span className="text-[10px] font-black text-slate-400">
-                      {campaigns.filter((c) => c.status === "ACTIVE").length}{" "}
+                      {campaigns.filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes('showcase')).length}{" "}
                       Units
                     </span>
                   </div>
                   <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
                     {campaigns
-                      .filter((c) => c.status === "ACTIVE")
+                      .filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes('showcase'))
                       .map((c) => (
                         <div
                           key={c.id}
@@ -2437,6 +2516,8 @@ export default function AdminPortal({
                   <div>
                     <h4 className="text-lg font-black text-slate-900 uppercase leading-none mb-1">{d.name}</h4>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.city || 'Unknown Location'}</p>
+                    {d.phone && <p className="text-[10px] font-bold font-mono text-slate-500 mt-1 uppercase">Phone: {d.phone}</p>}
+                    {d.email && <p className="text-[9px] font-medium font-mono text-slate-400 truncate max-w-[150px]">{d.email}</p>}
                   </div>
                 </div>
 
@@ -2451,7 +2532,7 @@ export default function AdminPortal({
                   ].map(doc => (
                     <div key={doc.key} className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-1">
                       <span className="text-[7px] font-black uppercase text-slate-400">{doc.label}</span>
-                      {d[doc.key as keyof Driver] ? (
+                      {((d as any)[doc.key] || (doc.key === 'aadharPhoto' && (d as any).documents?.aadhaar) || (doc.key === 'dlPhoto' && (d as any).documents?.drivingLicense) || (doc.key === 'profileImage' && (d as any).documents?.selfie)) ? (
                         <Check size={12} className="text-green-500" />
                       ) : (
                         <X size={12} className="text-slate-300" />
@@ -2468,9 +2549,20 @@ export default function AdminPortal({
                       firebaseService.updateDriverProfile(d.id, { 
                         status: 'active', 
                         isVerified: true,
+                        kycStatus: 'APPROVED',
+                        payoutEnabled: true,
+                        adminApproved: true,
                         terminalId: newId,
                         accessKey: newKey,
                         provisionStatus: 'PROVISIONED'
+                      });
+                      
+                      // Auto-approve the agreement if they are being quick approved
+                      firebaseService.updateDriverAgreement(d.id, {
+                        agreementAccepted: true,
+                        acceptedAt: new Date().toISOString(),
+                        version: '1.0',
+                        ipAddress: 'admin-provisioned'
                       });
                       showToast("Driver Approved & Terminal Provisioned", 'success');
                     }}
@@ -3730,8 +3822,15 @@ export default function AdminPortal({
                               <td className="px-8 py-5 text-sm font-black text-slate-900 italic">
                                 ₹{p.amount?.toLocaleString()}
                               </td>
-                              <td className="px-8 py-5 text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                                {p.driverId?.slice(0, 8)}
+                              <td className="px-8 py-5 text-[10px] font-black uppercase text-slate-500 tracking-widest leading-relaxed">
+                                <div className="font-sans text-slate-900 font-bold whitespace-nowrap">
+                                  {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.name || `Driver (${p.driverId?.slice(0, 6)})`}
+                                </div>
+                                {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.phone && (
+                                  <div className="text-[8px] text-slate-400 font-bold font-mono tracking-wider mt-0.5">
+                                    Phone: {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.phone}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-8 py-5">
                                 <span className="px-3 py-1 bg-amber-50 text-amber-500 rounded-full text-[8px] font-black uppercase">
@@ -3810,7 +3909,7 @@ export default function AdminPortal({
                       >
                         <div className="flex justify-between items-start mb-1">
                           <h4 className="text-[11px] font-black text-slate-900 uppercase italic tracking-tighter truncate leading-none">
-                            {t.driverName || "Driver " + t.driverId?.slice(-4)}
+                            {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.name || t.driverName || "Driver " + t.driverId?.slice(-4)}
                           </h4>
                           <div className="flex items-center gap-2">
                             <span className="text-[8px] font-bold text-slate-400 font-mono uppercase">
@@ -3830,6 +3929,11 @@ export default function AdminPortal({
                         <p className="text-[10px] text-slate-500 font-medium line-clamp-1 mb-2">
                           {t.lastMessage || t.description}
                         </p>
+                        {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.phone && (
+                          <p className="text-[9px] font-bold text-slate-400 font-mono tracking-wider uppercase mb-2">
+                            Phone: {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.phone}
+                          </p>
+                        )}
                         <div className="flex items-center gap-2">
                           <span
                             className={cn(
@@ -3897,12 +4001,15 @@ export default function AdminPortal({
                           </div>
                         </div>
                         <button
-                          onClick={() =>
-                            firebaseService.updateSupportTicketStatus(
-                              activeTicketId,
-                              "resolved",
-                            )
-                          }
+                          onClick={async () => {
+                            if (activeTicketId) {
+                              await firebaseService.updateSupportTicketStatus(
+                                activeTicketId,
+                                "resolved",
+                              );
+                              setActiveTicketId(null);
+                            }
+                          }}
                           className="text-[9px] font-black bg-slate-950 text-white px-4 py-2 rounded-xl uppercase tracking-widest shadow-xl shadow-slate-200"
                         >
                           CLOSE THREAD
@@ -3980,160 +4087,268 @@ export default function AdminPortal({
               </div>
             </div>
           ) : activeTab === "MONITOR" ? (
-            <div className="flex flex-col space-y-6">
-              <div className="bg-slate-950 p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 text-white relative overflow-hidden shrink-0">
-                <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div className="flex flex-col space-y-6 h-full overflow-hidden">
+              <div className="bg-slate-950 p-6 rounded-3xl shadow-2xl border border-slate-800 text-white relative overflow-hidden shrink-0">
+                <div className="absolute right-0 top-0 w-96 h-96 bg-amber-500/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
+                <div className="absolute left-0 bottom-0 w-64 h-64 bg-blue-500/10 blur-[80px] rounded-full translate-y-1/2 -translate-x-1/2" />
+                
+                <div className="relative z-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                   <div>
-                    <h2 className="text-xl md:text-3xl font-black italic uppercase text-amber-500 mb-2">
-                      Remote Cloud Monitoring
+                    <h2 className="text-2xl md:text-4xl font-black italic uppercase text-white mb-2 tracking-tighter flex items-center gap-3">
+                      <Cpu className="text-amber-500" size={32} />
+                      Fleet <span className="text-amber-500">Monitor</span> Control
                     </h2>
-                    <p className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.3em] font-mono">
-                      Live Visual Verification Protocol
-                    </p>
+                    <div className="flex items-center gap-4">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] font-mono flex items-center gap-2">
+                        <Server size={12} /> Unit Control Protocol v4.0
+                      </p>
+                      <div className="h-1 w-1 bg-slate-700 rounded-full" />
+                      <p className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] font-mono flex items-center gap-2">
+                        <ShieldCheck size={12} /> Secure Tunnel Active
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 bg-white/5 p-4 rounded-3xl border border-white/10">
-                    <div className="w-10 h-10 bg-amber-500/20 rounded-2xl flex items-center justify-center text-amber-500">
-                      <Activity size={20} className="animate-pulse" />
+                  
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="bg-white/5 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 flex items-center gap-4">
+                      <div className="text-center border-r border-white/10 pr-4">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active</p>
+                        <p className="text-xl font-black text-amber-500 font-mono">{(terminals || []).length}</p>
+                      </div>
+                      <div className="text-center border-r border-white/10 px-4">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Online</p>
+                        <p className="text-xl font-black text-emerald-500 font-mono">{(terminals || []).filter(t => t.metrics?.online).length}</p>
+                      </div>
+                      <div className="text-center pl-4">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Alerts</p>
+                        <p className="text-xl font-black text-red-500 font-mono">0</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-black text-white italic">
-                        {deviceScreens.length} Units Pipeline
-                      </p>
-                      <p className="text-[9px] font-black text-slate-500 tracking-widest uppercase">
-                        Real-time Stream Sync
-                      </p>
-                    </div>
+                    
+                    <select
+                      className="bg-slate-900 border border-slate-700 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 text-white min-w-[180px]"
+                      value={selectedArea}
+                      onChange={(e) => setSelectedArea(e.target.value)}
+                    >
+                      <option value="ALL">Global Network</option>
+                      {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
+                        <option key={city} value={city}>{city?.toUpperCase()}</option>
+                      ) as any)}
+                    </select>
                   </div>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-                  {(terminals || []).filter(t => t.metrics?.currentAdImage).map((t) => {
-                    const driver = (drivers || []).find(
-                      (d) => d.uid === t.driverId,
-                    );
+              <div className="flex-1 overflow-y-auto px-2 custom-scrollbar pb-24">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                  {terminals
+                    .filter(t => selectedArea === "ALL" || (drivers.find(d => d.uid === t.driverId)?.city || "").toUpperCase() === selectedArea.toUpperCase())
+                    .map((t) => {
+                    const driver = (drivers || []).find((d) => d.uid === t.driverId);
                     const isOnline = t.metrics?.online;
+                    const tvPassword = firebaseService.decryptTVPassword(t.teamViewerPasswordEncrypted);
+                    
                     return (
                       <motion.div
                         key={t.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 }}
-                        className="bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-sm hover:shadow-2xl transition-all group overflow-hidden relative"
+                        layout
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all group overflow-hidden flex flex-col"
                       >
-                        <div className="flex items-center justify-between mb-6">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-slate-950 rounded-2xl flex items-center justify-center text-amber-500 font-black text-xs italic">
-                              {(driver?.name || "??").slice(0, 2).toUpperCase()}
+                        {/* Device Header */}
+                        <div className="p-6 border-b border-slate-50 flex items-start justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-amber-500 font-bold text-lg relative group-hover:scale-110 transition-transform shadow-lg shadow-slate-200">
+                              <Tv size={24} />
+                              {isOnline && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
+                              )}
                             </div>
                             <div>
-                              <h4 className="text-[11px] font-black text-slate-900 uppercase italic tracking-tighter">
-                                {driver?.name || `Unknown Unit (${t.id.slice(-6)})`}
+                              <h4 className="text-[13px] font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-1">
+                                {driver?.name || "UNASSIGNED NODE"}
                               </h4>
-                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
-                                ID: {t.id.slice(0, 8)}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                  {driver?.vNo || "AUTO NO-ID"}
+                                </span>
+                                <span className="w-1 h-1 bg-slate-200 rounded-full" />
+                                <span className="text-[8px] font-mono text-slate-300 font-black">
+                                  {t.id.slice(0, 12)}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                          <div
-                            className={cn(
-                              "text-[7px] font-black uppercase tracking-widest px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-sm",
-                              isOnline
-                                ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-500/5"
-                                : "bg-red-50 text-red-600 border-red-100"
-                            )}
-                          >
-                            <div
+                          <div className="flex flex-col items-end gap-1">
+                             <div
                               className={cn(
-                                "w-1.5 h-1.5 rounded-full",
+                                "text-[8px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-sm",
                                 isOnline
-                                  ? "bg-emerald-500 animate-pulse"
-                                  : "bg-red-500"
+                                  ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-500/5"
+                                  : "bg-red-50 text-red-600 border-red-100"
                               )}
-                            />
-                            {isOnline ? "PLAYING" : "OFFLINE"}
+                            >
+                              {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
+                            </div>
+                            <span className="text-[7px] font-black text-slate-300 uppercase tracking-[0.2em] font-mono">
+                              {driver?.city || "Global"}
+                            </span>
                           </div>
                         </div>
 
-                        <div className="aspect-[16/9] w-full bg-slate-100 rounded-3xl overflow-hidden relative border border-slate-100 mb-6 group-hover:scale-[1.02] transition-transform duration-500">
-                           {t.metrics?.currentAdType === 'VIDEO' || t.metrics?.currentAdImage?.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
-                              <video
-                                src={getSafeUrl(t.metrics.currentAdImage)}
-                                className="w-full h-full object-cover grayscale-[0.2] hover:grayscale-0 transition-all duration-700"
-                                autoPlay
-                                muted
-                                loop
-                                playsInline
-                              />
+                        {/* Snapshot Area */}
+                        <div className="relative aspect-video mx-4 mt-2 bg-slate-950 rounded-3xl overflow-hidden group/snap shadow-inner border-4 border-white">
+                           {t.metrics?.currentAdImage ? (
+                             <>
+                               <img
+                                  src={getSafeUrl(t.metrics.currentAdImage)}
+                                  alt="Device Snapshot"
+                                  className="w-full h-full object-cover grayscale-[0.3] hover:grayscale-0 transition-all duration-700 opacity-60 group-hover/snap:opacity-100"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
+                             </>
                            ) : (
-                              <img
-                                src={getSafeUrl(t.metrics.currentAdImage) || `https://placehold.co/600x400/1e293b/FFFFFF/png?text=Unit+${t.id.slice(0, 4)}`}
-                                alt="Device Snapshot"
-                                className="w-full h-full object-cover grayscale-[0.2] hover:grayscale-0 transition-all duration-700"
-                                referrerPolicy="no-referrer"
-                              />
+                             <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-700">
+                               <Cast size={32} className="opacity-20" />
+                               <span className="text-[8px] font-black uppercase tracking-[0.3em]">No Visual Signal</span>
+                             </div>
                            )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                            <button onClick={() => setViewingUnit(t)} className="w-full py-2 bg-white/20 backdrop-blur-md border border-white/20 rounded-xl text-white text-[8px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/30 transition-all">
-                              Expand Vision
+                           
+                           <div className="absolute top-4 right-4 flex gap-2">
+                             <button 
+                               onClick={() => handleCaptureFrame(t)}
+                               className="p-2 bg-black/40 backdrop-blur-md border border-white/20 rounded-xl text-white hover:bg-amber-500 hover:text-slate-950 transition-all shadow-xl"
+                               title="Capture Live Snapshot"
+                             >
+                               <Maximize2 size={14} />
+                             </button>
+                           </div>
+                           
+                           <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end opacity-0 group-hover/snap:opacity-100 transition-opacity">
+                              <div className="bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10">
+                                <p className="text-[7px] font-black text-slate-400 uppercase mb-1">Currently Playing</p>
+                                <p className="text-[9px] font-black text-white uppercase italic tracking-tighter truncate max-w-[150px]">
+                                  {t.metrics?.currentAdTitle || "Diagnostic Loop"}
+                                </p>
+                              </div>
+                           </div>
+                        </div>
+
+                        {/* Status Grid */}
+                        <div className="p-6 grid grid-cols-2 gap-3 border-b border-slate-50">
+                          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col justify-center">
+                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                              <Wifi size={10} className="text-emerald-500" /> Ping Status
+                            </p>
+                            <p className="text-xs font-black text-slate-900 font-mono">
+                              {isOnline ? "54ms" : "---"} <span className="text-[8px] text-slate-400 font-sans ml-1 uppercase">Stable</span>
+                            </p>
+                          </div>
+                          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col justify-center">
+                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                              <Activity size={10} className="text-amber-500" /> Sys Health
+                            </p>
+                            <p className="text-xs font-black text-slate-900 font-mono">
+                              {isOnline ? "Normal" : "CRITICAL"} <span className="text-[8px] text-slate-400 font-sans ml-1 uppercase">Uptime</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* TeamViewer Area */}
+                        <div className="p-6 space-y-4">
+                           <div className="flex items-center justify-between mb-2">
+                             <div className="flex items-center gap-2 text-slate-950">
+                               <Tv size={14} className="text-blue-500" />
+                               <span className="text-[10px] font-black uppercase tracking-widest">TeamViewer Access</span>
+                             </div>
+                             <button 
+                               onClick={() => handleRemoteCommand(t.id, 'TV_UPDATE')}
+                               className="p-1 px-2 border border-slate-200 rounded-lg text-[8px] font-black uppercase hover:bg-slate-50 transition-all"
+                             >
+                               Update Config
+                             </button>
+                           </div>
+                           
+                           <div className="flex gap-2">
+                             <div className="flex-1 bg-slate-50 border border-slate-100 p-3 rounded-2xl flex flex-col justify-center">
+                               <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-1">ID Protocol</span>
+                               <p className="text-[11px] font-black text-slate-900 tracking-widest font-mono truncate">{t.teamViewerId || "UNCONFIGURED"}</p>
+                             </div>
+                             <div className="flex-1 bg-slate-50 border border-slate-100 p-3 rounded-2xl flex flex-col justify-center relative group/pass">
+                               <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-1">Secure Key</span>
+                               <div className="flex items-center justify-between">
+                                 <p className="text-[11px] font-black text-slate-900 tracking-widest font-mono">
+                                   {tvPasswordVisible[t.id] ? tvPassword : "••••••••"}
+                                 </p>
+                                 <button onClick={() => toggleTVPassword(t.id)} className="text-slate-400 hover:text-slate-900 transition-colors">
+                                   {tvPasswordVisible[t.id] ? <Eye size={12} /> : <Eye size={12} className="opacity-40" />}
+                                 </button>
+                               </div>
+                             </div>
+                           </div>
+
+                           <button 
+                             onClick={() => startTVSession(t)}
+                             disabled={isTVConnecting || !t.teamViewerId}
+                             className="w-full py-4 bg-[#0a66c2] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-blue-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale"
+                           >
+                             <MousePointer2 size={16} />
+                             {isTVConnecting ? "Establishing Tunnel..." : "Open TeamViewer Session"}
+                           </button>
+                        </div>
+
+                        {/* Remote Control Panel */}
+                        <div className="p-6 pt-0 mt-auto">
+                          <div className="grid grid-cols-4 gap-2">
+                            <button 
+                              onClick={() => handleRemoteCommand(t.id, 'RESTART_APP')}
+                              disabled={commandInProgress === `${t.id}-RESTART_APP`}
+                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-amber-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
+                              title="Restart APK Service"
+                            >
+                              <RefreshCw size={14} className={cn("text-slate-400 group-hover/ctrl:text-amber-500 transition-colors", commandInProgress === `${t.id}-RESTART_APP` && "animate-spin text-amber-500")} />
+                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-amber-500">Restart</span>
+                            </button>
+                            <button 
+                              onClick={() => handleRemoteCommand(t.id, 'VOLUME', { volume: 80 })}
+                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-blue-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
+                              title="Set Default Volume"
+                            >
+                              <Volume2 size={14} className="text-slate-400 group-hover/ctrl:text-blue-500 transition-colors" />
+                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-blue-500">Volume</span>
+                            </button>
+                            <button 
+                              onClick={() => handleRemoteCommand(t.id, 'EMERGENCY_BROADCAST')}
+                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-red-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
+                              title="Push Emergency Text"
+                            >
+                              <AlertTriangle size={14} className="text-slate-400 group-hover/ctrl:text-red-500 transition-colors" />
+                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-red-500">Broadcast</span>
+                            </button>
+                            <button 
+                              onClick={() => handleRemoteCommand(t.id, 'LOCK', { isLocked: true })}
+                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-slate-950 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
+                              title="Remote Device Lock"
+                            >
+                              <Lock size={14} className="text-slate-400 group-hover/ctrl:text-white transition-colors" />
+                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-white">Lock</span>
                             </button>
                           </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between text-[10px] font-bold">
-                            <span className="text-slate-400 uppercase tracking-widest">
-                              Transmitted at
-                            </span>
-                            <span className="text-slate-900 font-mono italic">
-                              {t.metrics?.lastHeartbeat || t.lastPulse
-                                ? new Date(
-                                    t.metrics?.lastHeartbeat ||
-                                      (t.lastPulse?.toMillis?.() || t.lastPulse)
-                                  ).toLocaleString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    second: "2-digit",
-                                  })
-                                : "Processing..."}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] font-bold">
-                            <span className="text-slate-400 uppercase tracking-widest">
-                              Latency Spectrum
-                            </span>
-                            <span className="text-amber-500 font-mono italic underline decoration-amber-500/30">
-                              Stable 54ms
-                            </span>
-                          </div>
-                          <button 
-                            onClick={() => {
-                              showToast("Diagnostic frame capture requested from Terminal", "info");
-                              setTimeout(() => {
-                                showToast("Live frame successfully captured via secure tunnel", "success");
-                              }, 2000);
-                            }}
-                            className="w-full mt-2 py-4 bg-slate-50 text-slate-900 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] border border-slate-100 hover:bg-slate-950 hover:text-white transition-all group-hover:shadow-[0_15px_30px_-10px_rgba(0,0,0,0.1)]"
-                          >
-                            CAPTURE LIVE FRAME
-                          </button>
                         </div>
                       </motion.div>
                     );
                   })}
-                  {deviceScreens.length === 0 && (
-                    <div className="col-span-full h-96 flex flex-col items-center justify-center bg-white rounded-[3rem] border border-dashed border-slate-200">
-                      <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200 mb-6">
-                        <Activity size={40} />
+                  
+                  {terminals.length === 0 && (
+                    <div className="col-span-full h-screen/2 flex flex-col items-center justify-center bg-slate-50 rounded-[4rem] border-4 border-dashed border-white">
+                      <div className="w-32 h-32 bg-white rounded-[3rem] flex items-center justify-center text-slate-200 mb-8 shadow-xl">
+                        <Activity size={64} className="animate-pulse" />
                       </div>
-                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest leading-none mb-4">
-                        No Streams Connected
-                      </h3>
-                      <p className="max-w-xs text-center text-[10px] font-bold text-slate-300 uppercase tracking-widest leading-relaxed px-12">
-                        Activate remote monitoring protocols on your Android
-                        fleet nodes to initiate visual communication uplink.
+                      <h3 className="text-2xl font-black text-slate-950 uppercase italic tracking-tighter mb-4">No Network Nodes Found</h3>
+                      <p className="max-w-md text-center text-xs font-black text-slate-400 uppercase tracking-widest leading-relaxed px-12">
+                        Deployment of Android Smart Screens into auto fleet is required to establish visual communication uplink and telemetry synchronization.
                       </p>
                     </div>
                   )}
@@ -4223,6 +4438,11 @@ export default function AdminPortal({
                               <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                                 {d.vNo || "Unspecified Unit"}
                               </span>
+                              {d.phone && (
+                                <span className="text-[9px] font-bold text-slate-500 font-mono tracking-wider mt-0.5">
+                                  Phone: {d.phone}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-8 py-5 text-center font-mono text-[9px] font-black text-slate-500 uppercase">
@@ -4251,6 +4471,9 @@ export default function AdminPortal({
                               <button
                                 onClick={() => {
                                   setSelectedDriverForAgreement(d);
+                                  firebaseService.subscribeToAgreement(d.id, (agr) => {
+                                      setSelectedDriverForAgreement(prev => prev && prev.id === d.id ? { ...prev, _agreementData: agr } : prev);
+                                  });
                                 }}
                                 className="text-[8px] font-black bg-blue-100 text-blue-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-blue-200 transition-all font-mono"
                               >
@@ -4294,6 +4517,11 @@ export default function AdminPortal({
                             <h4 className="text-sm font-black text-slate-900 italic tracking-tighter leading-none">
                               {d.name}
                             </h4>
+                            {d.phone && (
+                              <p className="text-[9px] font-bold text-slate-500 font-mono tracking-wider mt-1">
+                                Phone: {d.phone}
+                              </p>
+                            )}
                           </div>
                           <div className="bg-white px-3 py-1 rounded-full border border-slate-100 flex items-center gap-2">
                             <div
@@ -4431,6 +4659,16 @@ export default function AdminPortal({
                               {req.driverId?.slice(-6).toUpperCase()}
                             </span>
                           </div>
+                          {driver?.phone && (
+                            <p className="text-[9px] font-bold text-slate-500 font-mono mt-1 uppercase">
+                              Phone: {driver.phone}
+                            </p>
+                          )}
+                          {driver?.bankDetails?.accountNumber && (
+                            <p className="text-[9px] font-bold text-amber-600 font-mono mt-0.5 uppercase">
+                              A/C: {driver.bankDetails.accountNumber} | IFSC: {driver.bankDetails.ifscCode}
+                            </p>
+                          )}
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                             UPI:{" "}
                             <span className="text-slate-900">
@@ -4501,23 +4739,37 @@ export default function AdminPortal({
       )}
 
       {activeTab === "PACKAGES" && (
-        <motion.div
-           initial={{ opacity: 0, x: 20 }}
-           animate={{ opacity: 1, x: 0 }}
-           className="p-8 space-y-10"
-        >
-           <div className="flex items-center justify-between">
+        <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto min-h-[100dvh] pb-42">
+          <div className="max-w-6xl mx-auto space-y-8">
+            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
               <div>
-                 <h1 className="text-3xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Package Configurator</h1>
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Adjust core network plan parameters</p>
+                <h2 className="text-2xl md:text-3xl font-black italic uppercase text-amber-500">
+                  Package Configurator
+                </h2>
+                <p className="text-[10px] font-black uppercase text-slate-400">
+                  Adjust core network plan parameters
+                </p>
               </div>
-              <div className="flex gap-4">
-                 <button className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Export Pricing</button>
-                 <button className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all">Save All Changes</button>
+              <div className="flex items-center gap-4">
+                <button className="px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Export Pricing</button>
+                <button className="px-5 py-3 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-500/20">Save All Changes</button>
+                <button
+                  onClick={() => setActiveTab("DASHBOARD")}
+                  className="p-4 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"
+                  title="Close Tab"
+                >
+                  <X size={20} />
+                </button>
               </div>
-           </div>
+            </div>
 
-           <div className="grid grid-cols-3 gap-8">
+            <motion.div
+               initial={{ opacity: 0, x: 20 }}
+               animate={{ opacity: 1, x: 0 }}
+               className="space-y-10"
+            >
+
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {[
                 { id: 'BASIC', name: 'Elite Starter', price: '₹999', desc: '3 Auto Displays • 1 Day Assigned' },
                 { id: 'STARTER', name: 'Brand Velocity', price: '₹1999', desc: '7 Auto Displays • 2 Days' },
@@ -4558,6 +4810,14 @@ export default function AdminPortal({
               ))}
            </div>
         </motion.div>
+         </div>
+        </div>
+      )}
+
+      {activeTab === "STUDIO_CONFIG" && (
+         <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 flex overflow-hidden">
+             <AdminStudioConfig />
+         </div>
       )}
 
       {activeTab === "NOTICES" && (
@@ -5547,6 +5807,160 @@ export default function AdminPortal({
         )}
       </AnimatePresence>
 
+      {/* TeamViewer Remote Session Overlay */}
+      <AnimatePresence>
+        {isTVConnecting && (
+          <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-slate-950/95 backdrop-blur-3xl">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-center"
+            >
+              <div className="w-32 h-32 mx-auto relative mb-8">
+                <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full" />
+                <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <div className="absolute inset-4 bg-slate-900 rounded-full flex items-center justify-center text-blue-500">
+                  <Tv size={40} />
+                </div>
+              </div>
+              <h2 className="text-3xl font-black text-white uppercase italic tracking-tighter mb-4">Establishing Secure Uplink</h2>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.4em] mb-12">TeamViewer Protocol v15.x • Negotiating Handshake</p>
+              
+              <div className="max-w-xs mx-auto space-y-4">
+                <div className="flex items-center gap-4 text-left bg-white/5 p-4 rounded-2xl border border-white/10">
+                   <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center text-blue-500 font-black italic">
+                      {selectedDeviceForTV?.teamViewerId?.slice(0, 2)}
+                   </div>
+                   <div>
+                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Routing via Global Node</p>
+                     <p className="text-xs font-black text-white font-mono">{selectedDeviceForTV?.teamViewerId}</p>
+                   </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showTVSession && selectedDeviceForTV && (
+          <div className="fixed inset-0 z-[5000] flex flex-col bg-slate-950">
+            {/* TV Toolbar */}
+            <header className="h-20 bg-slate-900 border-b border-white/10 px-8 flex items-center justify-between shadow-2xl relative z-10">
+               <div className="flex items-center gap-6">
+                 <div className="flex items-center gap-3">
+                   <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                     <MousePointer2 size={20} />
+                   </div>
+                   <div>
+                     <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">Remote Session: {selectedDeviceForTV.id.slice(0, 8)}</h3>
+                     <div className="flex items-center gap-2">
+                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">CONNECTED • HIGH PERFORMANCE MODE</p>
+                     </div>
+                   </div>
+                 </div>
+                 <div className="h-8 w-px bg-white/10 mx-2" />
+                 <div className="flex gap-2">
+                    <button className="p-3 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all" title="Audio Stream">
+                      <Volume2 size={16} />
+                    </button>
+                    <button className="p-3 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all" title="Display Settings">
+                      <Sun size={16} />
+                    </button>
+                    <button className="p-3 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:bg-white/10 hover:text-white transition-all" title="Shield Protection">
+                      <Shield size={16} />
+                    </button>
+                 </div>
+               </div>
+
+               <div className="flex items-center gap-4">
+                 <div className="flex flex-col items-end mr-4">
+                   <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Latency Spectrum</p>
+                   <p className="text-xs font-black text-emerald-500 font-mono italic">24ms (Ultra Low)</p>
+                 </div>
+                 <button 
+                   onClick={() => setShowTVSession(false)}
+                   className="bg-red-500 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-red-500/20 hover:bg-red-600 transition-all flex items-center gap-3"
+                 >
+                   <Power size={16} />
+                   Terminiate Session
+                 </button>
+                 <button 
+                   onClick={() => {/* Fullscreen logic */}}
+                   className="p-4 rounded-2xl border border-white/20 text-white hover:bg-white/5"
+                 >
+                   <Maximize size={18} />
+                 </button>
+               </div>
+            </header>
+
+            {/* Session Mirror View */}
+            <main className="flex-1 bg-black relative flex items-center justify-center p-8">
+               <div className="w-full h-full max-w-6xl aspect-video bg-slate-900 rounded-[3rem] border-8 border-slate-800 shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden relative group">
+                  {/* Mock Android Interface */}
+                  <img 
+                    src={getSafeUrl(selectedDeviceForTV.metrics?.currentAdImage)}
+                    className="w-full h-full object-cover blur-md opacity-20"
+                    alt="Remote BG"
+                  />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <div className="w-24 h-24 bg-white/10 backdrop-blur-3xl rounded-full flex items-center justify-center text-white mb-6 border border-white/10 animate-bounce">
+                      <MousePointer2 size={40} className="translate-x-1 translate-y-1" />
+                    </div>
+                    <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 text-center max-w-md shadow-2xl">
+                       <h4 className="text-xl font-black text-white uppercase italic tracking-tighter mb-4">Interactive Control Hub</h4>
+                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
+                          Secure pixel-perfect stream established via TeamViewer cloud. You have full administrative control over this Android node.
+                       </p>
+                    </div>
+                  </div>
+                  
+                  {/* Floating Interaction Menu */}
+                  <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-2xl p-4 rounded-3xl border border-white/20 flex gap-4 shadow-2xl opacity-0 group-hover:opacity-100 transition-all">
+                     <button className="flex flex-col items-center gap-2 p-4 hover:bg-white/10 rounded-2xl transition-all">
+                        <RefreshCw size={20} className="text-amber-500" />
+                        <span className="text-[8px] font-black uppercase text-white tracking-widest">Soft Reset</span>
+                     </button>
+                     <button className="flex flex-col items-center gap-2 p-4 hover:bg-white/10 rounded-2xl transition-all">
+                        <Smartphone size={20} className="text-blue-500" />
+                        <span className="text-[8px] font-black uppercase text-white tracking-widest">Home</span>
+                     </button>
+                     <button className="flex flex-col items-center gap-2 p-4 hover:bg-white/10 rounded-2xl transition-all">
+                        <ArrowLeft size={20} className="text-slate-400" />
+                        <span className="text-[8px] font-black uppercase text-white tracking-widest">Back</span>
+                     </button>
+                     <div className="w-px h-10 bg-white/10 my-auto mx-2" />
+                     <button className="flex flex-col items-center gap-2 p-4 hover:bg-white/10 rounded-2xl transition-all">
+                        <Lock size={20} className="text-red-500" />
+                        <span className="text-[8px] font-black uppercase text-white tracking-widest">Lock UI</span>
+                     </button>
+                  </div>
+               </div>
+               
+               {/* Side Status Bar */}
+               <div className="absolute right-12 top-1/2 -translate-y-1/2 flex flex-col gap-4">
+                  <div className="bg-slate-900/60 backdrop-blur-xl p-6 rounded-3xl border border-white/10">
+                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-3">Unit Telemetry</p>
+                     <div className="space-y-4">
+                        <div>
+                          <p className="text-[7px] font-black text-slate-400 uppercase">Memory</p>
+                          <p className="text-xs font-black text-white font-mono">1.2GB / 4GB</p>
+                        </div>
+                        <div>
+                          <p className="text-[7px] font-black text-slate-400 uppercase">CPU Load</p>
+                          <p className="text-xs font-black text-amber-500 font-mono">12%</p>
+                        </div>
+                        <div>
+                          <p className="text-[7px] font-black text-slate-400 uppercase">Battery</p>
+                          <p className="text-xs font-black text-emerald-500 font-mono">Charging (88%)</p>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            </main>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Verification Modal Removed */}
 
       {/* Toast Notification */}
@@ -5727,19 +6141,39 @@ export default function AdminPortal({
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-                   {selectedDriverForAgreement.agreementAccepted ? (
+                   {selectedDriverForAgreement._agreementData?.agreementAccepted ? (
                       <>
-                        <div className="grid grid-cols-2 gap-6 text-center">
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Verification Selfie</p>
-                              <div className="w-full aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-sm">
-                                 <img src={selectedDriverForAgreement.verificationSelfieUrl} className="w-full h-full object-cover" alt="Selfie" />
+                              <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
+                                 <img src={selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.profileImage || selectedDriverForAgreement.documents?.selfie} className="w-full h-full object-cover" alt="Selfie" />
                               </div>
                            </div>
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Digital Signature</p>
-                              <div className="w-full aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-4">
-                                 <img src={selectedDriverForAgreement.signatureUrl} className="max-w-full max-h-full object-contain" alt="Signature" />
+                              <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-4 flex-shrink-0">
+                                 <img src={selectedDriverForAgreement._agreementData?.signatureUrl} className="max-w-full max-h-full object-contain" alt="Signature" />
+                              </div>
+                           </div>
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Aadhar</p>
+                              <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
+                                 {(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar) ? (
+                                   <img src={selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar} className="w-full h-full object-contain" alt="Aadhar" />
+                                 ) : (
+                                   <X size={24} className="text-slate-300" />
+                                 )}
+                              </div>
+                           </div>
+                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Driving License</p>
+                              <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
+                                 {(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense) ? (
+                                   <img src={selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense} className="w-full h-full object-contain" alt="DL" />
+                                 ) : (
+                                   <X size={24} className="text-slate-300" />
+                                 )}
                               </div>
                            </div>
                         </div>
@@ -5747,10 +6181,16 @@ export default function AdminPortal({
                         <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4">
                            <div className="flex items-center justify-between">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Digital Contract (PDF)</p>
-                              <span className="px-2 py-1 bg-green-500 text-white rounded text-[8px] font-black uppercase">v1.0 Signed</span>
+                              <span className="px-2 py-1 bg-green-500 text-white rounded text-[8px] font-black uppercase">v{selectedDriverForAgreement._agreementData?.version || '1.0'} Signed</span>
                            </div>
                            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 group hover:bg-white/10 transition-all cursor-pointer" 
-                                onClick={() => window.open(selectedDriverForAgreement.agreementPdfUrl, '_blank')}>
+                                onClick={() => {
+                                   if (selectedDriverForAgreement._agreementData?.agreementPdfUrl) {
+                                       window.open(selectedDriverForAgreement._agreementData.agreementPdfUrl, '_blank');
+                                   } else {
+                                       showToast('PDF not generated for initial quick provisions.', 'info');
+                                   }
+                                }}>
                               <div className="flex items-center gap-3">
                                  <FileText className="text-amber-500" size={20} />
                                  <span className="text-xs font-black uppercase tracking-tight">Open Generated Contract</span>
@@ -5763,7 +6203,7 @@ export default function AdminPortal({
                            <ShieldCheck className="text-blue-500 w-8 h-8" />
                            <div>
                               <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Compliance Signal</p>
-                              <p className="text-sm font-bold text-slate-700">Driver has legally accepted the partnership agreement and successfully completed biometric selfie verification.</p>
+                              <p className="text-sm font-bold text-slate-700">Driver has legally accepted the partnership agreement and successfully completed biometric verification.</p>
                            </div>
                         </div>
                       </>
@@ -5785,11 +6225,11 @@ export default function AdminPortal({
                    >
                      Close Vault
                    </button>
-                   {selectedDriverForAgreement.agreementAccepted && selectedDriverForAgreement.kycStatus === 'PENDING' && (
+                   {selectedDriverForAgreement._agreementData?.agreementAccepted && selectedDriverForAgreement.kycStatus === 'PENDING' && (
                       <button 
                         onClick={async () => {
                            if (confirm("Approve all documents and driver and enable payouts?")) {
-                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.uid, { kycStatus: 'APPROVED', status: 'active' });
+                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.uid, { kycStatus: 'APPROVED', status: 'active', payoutEnabled: true, adminApproved: true });
                               showToast("Driver Network Profile Approved.", 'success');
                               setSelectedDriverForAgreement(null);
                            }

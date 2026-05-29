@@ -68,18 +68,7 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
   }
 
-  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
-  if (cleaned.toLowerCase().includes('mixkit')) {
-    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
-    } else {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    }
-  }
+  // Removed demo fallback video mapping
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
@@ -910,7 +899,7 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
              </h2>
           </div>
           <div className="flex items-center gap-3">
-             <NotificationCenter role="SUPPORT" userId={user?.uid} onNavigateToTab={(tab) => setActiveTab(tab as any)} />
+             <NotificationCenter shouldSubscribe={false} role="SUPPORT" userId={user?.uid} onNavigateToTab={(tab) => setActiveTab(tab as any)} />
              <div className="text-right">
                 <p className="text-[10px] font-black text-white leading-none mb-1">{user?.displayName || 'Support Agent'}</p>
                 <p className="text-[8px] text-slate-600 uppercase tracking-widest font-black">Auth Level: Support</p>
@@ -1271,12 +1260,22 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
                               </div>
                               <div className="flex gap-2">
                                  <button 
-                                   onClick={() => firebaseService.updateSupportTicketStatus(activeTicketId, 'resolved')}
+                                   onClick={async () => {
+                                      if (activeTicketId) {
+                                        await firebaseService.updateSupportTicketStatus(activeTicketId, 'resolved');
+                                        setActiveTicketId(null);
+                                      }
+                                    }}
                                    className="hidden sm:block px-4 py-2 bg-green-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-green-500/10 hover:scale-105 active:scale-95 transition-all"
                                  >
                                    Close Query
                                  </button>
-                                 <button className="md:hidden p-2 text-amber-500" onClick={() => firebaseService.updateSupportTicketStatus(activeTicketId, 'resolved')}>
+                                 <button className="md:hidden p-2 text-amber-500" onClick={async () => {
+                                      if (activeTicketId) {
+                                        await firebaseService.updateSupportTicketStatus(activeTicketId, 'resolved');
+                                        setActiveTicketId(null);
+                                      }
+                                    }}>
                                     <CheckCircle size={18} />
                                  </button>
                               </div>

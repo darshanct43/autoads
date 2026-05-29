@@ -255,6 +255,33 @@
         "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] }
       },
       "required": ["driverId", "type", "downloadUrl", "uploadedAt"]
+    },
+    "canvaToken": {
+      "title": "Canva Token",
+      "description": "Stored Canva access tokens for user integration",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "access_token": { "type": "string" },
+        "refresh_token": { "type": "string" },
+        "expires_in": { "type": "number" },
+        "expires_at": { "type": "number" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["uid", "access_token", "expires_at"]
+    },
+    "canvaOauthState": {
+      "title": "Canva OAuth State",
+      "description": "Temporary states to guard and track Canva OAuth flow",
+      "type": "object",
+      "properties": {
+        "state": { "type": "string" },
+        "uid": { "type": "string" },
+        "code_verifier": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["state", "uid", "code_verifier"]
     }
   },
   "firestore": {
@@ -404,6 +431,14 @@
     "/payments/{paymentId}": {
       "schema": "campaignPayment",
       "description": "Global payment tracking"
+    },
+    "/canvaTokens/{uid}": {
+      "schema": "canvaToken",
+      "description": "User's connected Canva OAuth credentials"
+    },
+    "/canvaOauthStates/{stateId}": {
+      "schema": "canvaOauthState",
+      "description": "Pending OAuth verifications"
     }
   }
 }

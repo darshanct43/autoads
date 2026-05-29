@@ -17,9 +17,10 @@ interface NotificationCenterProps {
   userId?: string;
   role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string;
   onNavigateToTab?: (tabName: string) => void;
+  shouldSubscribe?: boolean;
 }
 
-export default function NotificationCenter({ userId, role, onNavigateToTab }: NotificationCenterProps) {
+export default function NotificationCenter({ userId, role, onNavigateToTab, shouldSubscribe = true }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [liveToast, setLiveToast] = useState<AppNotification | null>(null);
@@ -28,6 +29,7 @@ export default function NotificationCenter({ userId, role, onNavigateToTab }: No
 
   // Subscribe to real-time notifications
   useEffect(() => {
+    if (!shouldSubscribe) return;
     const unsubscribe = firebaseService.subscribeToNotifications(userId, role, (notifs) => {
       // Check for incoming brand new unread notifications since component mount
       if (notifs.length > 0) {
@@ -54,7 +56,7 @@ export default function NotificationCenter({ userId, role, onNavigateToTab }: No
     });
 
     return () => unsubscribe();
-  }, [userId, role]);
+  }, [userId, role, shouldSubscribe]);
 
   // Handle click outside to close dropdown
   useEffect(() => {

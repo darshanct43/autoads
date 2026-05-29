@@ -7,52 +7,7 @@ interface BootAnimationProps {
 
 export default function BootAnimation({ onComplete }: BootAnimationProps) {
   useEffect(() => {
-    // 2-Stroke "Tuk-Tuk" Sound Synthesis
-    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-    // Don't return early here, as it skips the 3000ms timeout!
-
-    let context: AudioContext | null = null;
-    let interval: any = null;
-
-    const startSound = () => {
-      try {
-        if (!AudioContextClass) return;
-        if (!context) context = new AudioContextClass();
-        if (context.state === 'suspended') context.resume();
-
-        interval = setInterval(() => {
-          if (!context) return;
-          const osc = context.createOscillator();
-          const gain = context.createGain();
-          
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(40 + Math.random() * 8, context.currentTime);
-          
-          gain.gain.setValueAtTime(0.04, context.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.08);
-          
-          osc.connect(gain);
-          gain.connect(context.destination);
-          
-          osc.start();
-          osc.stop(context.currentTime + 0.08);
-        }, 130);
-      } catch (e) {
-        console.error("Audio failed", e);
-      }
-    };
-
-    // User interaction required for audio
-    const handleInteraction = () => {
-      startSound();
-      window.removeEventListener('click', handleInteraction);
-      window.removeEventListener('touchstart', handleInteraction);
-    };
-    window.addEventListener('click', handleInteraction);
-    window.addEventListener('touchstart', handleInteraction);
-    
-    // Auto-attempt
-    startSound();
+    // Sound synth removed for stability
 
     const timer = setTimeout(() => {
       onComplete();
@@ -60,10 +15,6 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
 
     return () => {
       clearTimeout(timer);
-      if (interval) clearInterval(interval);
-      if (context) context.close();
-      window.removeEventListener('click', handleInteraction);
-      window.removeEventListener('touchstart', handleInteraction);
     };
   }, [onComplete]);
 

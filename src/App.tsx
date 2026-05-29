@@ -160,15 +160,8 @@ export default function App() {
     };
 
     window.addEventListener('online', handleOnline);
-    
-    // Periodic sync check (background worker simulation)
-    const interval = setInterval(() => {
-      handleOnline();
-    }, 60000); // Check every minute
-
     return () => {
       window.removeEventListener('online', handleOnline);
-      clearInterval(interval);
     };
   }, [isOfflineVerified]);
 

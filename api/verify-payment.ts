@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
-import { dbAdm, admin } from './_lib/firebase-admin';
+import { dbAdm, admin } from '../backend/_lib/firebase-admin';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Guarantee response headers are always JSON
@@ -15,24 +15,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
 
-    const isSimulated = razorpay_order_id && (razorpay_order_id.startsWith('order_SIM_') || razorpay_order_id.startsWith('order_SEC_'));
-
     let key_id = (process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
     let key_secret = (process.env.RAZORPAY_KEY_SECRET || "").trim().replace(/^["']|["']$/g, '');
 
-    if (!isSimulated) {
-      if (!key_id || key_id === "rzp_live_SnZDlb9YCezb2w" || key_id === "rzp_live_SuOCSm9m9qJLB0") {
-        key_id = "rzp_live_SuOCSm9m9qJLB0";
-        key_secret = "Vlp2EDEJpcte79HwQFVpDoWY";
-      }
+    if (!key_id || key_id === "rzp_live_SnZDlb9YCezb2w" || key_id === "rzp_live_SuOCSm9m9qJLB0") {
+      key_id = "rzp_live_SuOCSm9m9qJLB0";
+      key_secret = "Vlp2EDEJpcte79HwQFVpDoWY";
+    }
 
-      // 2. VERIFY LIVE KEYS
-      if (!key_id.startsWith('rzp_live_')) {
-        console.log('[RAZORPAY_VERIFY_AUTH] LIVE KEY CHECK');
-        return res.status(500).json({ success: false, error: 'CRITICAL: This application requires LIVE keys (rzp_live_).' });
-      }
+    // 2. VERIFY LIVE KEYS
+    if (!key_id.startsWith('rzp_live_')) {
+      console.log('[RAZORPAY_VERIFY_AUTH] LIVE KEY CHECK');
+      return res.status(500).json({ success: false, error: 'CRITICAL: This application requires LIVE keys (rzp_live_).' });
+    }
 
-      const generated_signature = crypto
+    const generated_signature = crypto
         .createHmac("sha256", key_secret)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
@@ -45,7 +42,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // CAPTURE PAYMENT
       const razorpay = new Razorpay({ key_id, key_secret });
       await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
-    }
 
     const { FieldValue } = admin.firestore;
 

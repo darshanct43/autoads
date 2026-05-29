@@ -1,6 +1,6 @@
 {
   "name": "Auto Ads Driver & Fleet",
-  "description": "Real-time driver earnings dashboard, fleet tracking, and automated ad campaign assignment system with simplified driver tasks and live location updates.",
+  "description": "Enterprise-level remote monitor control and device management system for Indian auto-rickshaw screens with professional TeamViewer integration, live visual verification, and interactive fleet command panels.",
   "requestFramePermissions": ["geolocation", "camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

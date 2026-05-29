@@ -13,16 +13,17 @@ interface TopBarProps {
 }
 
 export const TopBar: React.FC<TopBarProps> = ({ onClose }) => {
-  const { state, upgrade } = useStudio();
+  const { state, upgrade, userRole } = useStudio();
   const [isExporting, setIsExporting] = useState(false);
   const [showUpgradePlans, setShowUpgradePlans] = useState(false);
   const [showPurchasePopup, setShowPurchasePopup] = useState(false);
+  const isAdminRole = userRole === 'ADMIN' || userRole === 'STAFF' || userRole === 'SUPPORT';
   
   useEffect(() => {
-    if (state.plan === 'FREE') {
+    if (state.plan === 'FREE' && !isAdminRole) {
        setShowPurchasePopup(true);
     }
-  }, [state.plan]);
+  }, [state.plan, isAdminRole]);
 
   const currentPlan = PLANS[state.plan];
 
@@ -128,49 +129,60 @@ export const TopBar: React.FC<TopBarProps> = ({ onClose }) => {
 
           {/* Plan Indicator / Upgrade */}
           <div className="relative">
-            <button 
-              onClick={() => setShowUpgradePlans(!showUpgradePlans)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
-                state.plan === 'GOLD' ? "bg-amber-400/10 border-amber-400/20 text-amber-400" :
-                state.plan === 'SILVER' ? "bg-slate-400/10 border-slate-400/20 text-slate-200" :
-                state.plan === 'FREE' ? "bg-slate-800 border-slate-700 text-slate-400" :
-                "bg-blue-600/10 border-blue-600/20 text-blue-400"
-              )}
-            >
-              <Crown size={14} fill="currentColor" className={state.plan === 'BRASS' ? 'text-transparent stroke-blue-400' : ''} />
-              {currentPlan.badge}
-              <ChevronDown size={14} />
-            </button>
-
-            {/* Upgrade Dropdown */}
-            {showUpgradePlans && (
-              <div className="absolute top-full right-0 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                 <div className="p-4 border-b border-slate-700 flex justify-between items-center">
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Your Subscription</h3>
-                 </div>
-                 <div className="p-2 space-y-1">
-                   {(['FREE', 'BRASS', 'SILVER', 'GOLD'] as const).map((p) => (
-                     <button 
-                       key={p}
-                       onClick={() => {
-                         upgrade(p);
-                         setShowUpgradePlans(false);
-                       }}
-                       className={cn(
-                         "w-full text-left p-3 rounded-xl transition-all flex items-center justify-between group",
-                         state.plan === p ? "bg-blue-600 shadow-lg" : "hover:bg-slate-800"
-                       )}
-                     >
-                       <div>
-                          <p className={cn("text-xs font-bold", state.plan === p ? "text-white" : "text-slate-200")}>{PLANS[p].name}</p>
-                          <p className={cn("text-[10px]", state.plan === p ? "text-blue-100" : "text-slate-500")}>{PLANS[p].price}</p>
-                       </div>
-                       {state.plan === p && <Check size={16} className="text-white" />}
-                     </button>
-                   ))}
-                 </div>
+            {isAdminRole ? (
+              <div
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+              >
+                <Crown size={14} fill="currentColor" />
+                Team Access
               </div>
+            ) : (
+              <>
+                <button 
+                  onClick={() => setShowUpgradePlans(!showUpgradePlans)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
+                    state.plan === 'GOLD' ? "bg-amber-400/10 border-amber-400/20 text-amber-400" :
+                    state.plan === 'SILVER' ? "bg-slate-400/10 border-slate-400/20 text-slate-200" :
+                    state.plan === 'FREE' ? "bg-slate-800 border-slate-700 text-slate-400" :
+                    "bg-blue-600/10 border-blue-600/20 text-blue-400"
+                  )}
+                >
+                  <Crown size={14} fill="currentColor" className={state.plan === 'BRASS' ? 'text-transparent stroke-blue-400' : ''} />
+                  {currentPlan.badge}
+                  <ChevronDown size={14} />
+                </button>
+
+                {/* Upgrade Dropdown */}
+                {showUpgradePlans && (
+                  <div className="absolute top-full right-0 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Your Subscription</h3>
+                    </div>
+                    <div className="p-2 space-y-1">
+                      {(['FREE', 'BRASS', 'SILVER', 'GOLD'] as const).map((p) => (
+                        <button 
+                          key={p}
+                          onClick={() => {
+                            upgrade(p);
+                            setShowUpgradePlans(false);
+                          }}
+                          className={cn(
+                            "w-full text-left p-3 rounded-xl transition-all flex items-center justify-between group",
+                            state.plan === p ? "bg-blue-600 shadow-lg" : "hover:bg-slate-800"
+                          )}
+                        >
+                          <div>
+                              <p className={cn("text-xs font-bold", state.plan === p ? "text-white" : "text-slate-200")}>{PLANS[p].name}</p>
+                              <p className={cn("text-[10px]", state.plan === p ? "text-blue-100" : "text-slate-500")}>{PLANS[p].price}</p>
+                          </div>
+                          {state.plan === p && <Check size={16} className="text-white" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

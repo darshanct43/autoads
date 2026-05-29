@@ -1,6 +1,30 @@
 {
   "rewrites": [
     {
+      "source": "/api/canva/login",
+      "destination": "/api/canva/login"
+    },
+    {
+      "source": "/api/canva/login/",
+      "destination": "/api/canva/login"
+    },
+    {
+      "source": "/api/canva/login.",
+      "destination": "/api/canva/login"
+    },
+    {
+      "source": "/api/canva/callback",
+      "destination": "/api/canva/callback"
+    },
+    {
+      "source": "/api/canva/callback/",
+      "destination": "/api/canva/callback"
+    },
+    {
+      "source": "/api/canva/callback.",
+      "destination": "/api/canva/callback"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

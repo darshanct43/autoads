@@ -35,18 +35,7 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
   }
 
-  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
-  if (cleaned.toLowerCase().includes('mixkit')) {
-    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
-    } else {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    }
-  }
+  // Removed demo fallback video mapping
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
@@ -136,17 +125,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     };
 
     updateBrightness();
-    const interval = setInterval(updateBrightness, 15000); // Poll clock & settings every 15 seconds
-    return () => clearInterval(interval);
   }, [activeRidePref]);
 
   useEffect(() => {
-    // Periodically update school timing flag
-    const interval = setInterval(() => {
-      const active = isSchoolTiming();
-      setIsSchoolActive(active);
-    }, 10000); // Check every 10 seconds for instant transition response
-    return () => clearInterval(interval);
+    // Check school timing once
+    const active = isSchoolTiming();
+    setIsSchoolActive(active);
   }, []);
 
   // Sync ride preferences when activeTerminal is provisioned or manual terminalId is set
@@ -250,10 +234,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         "GPS: Scanning for satellites...",
         "ZON: Entering High-Yield Sector"
       ];
-      const interval = setInterval(() => {
-        setStatusLogs(prev => [logs[Math.floor(Math.random() * logs.length)], ...prev.slice(0, 5)]);
-      }, 3000);
-      return () => clearInterval(interval);
+      setStatusLogs(prev => [logs[Math.floor(Math.random() * logs.length)], ...prev.slice(0, 5)]);
     }
   }, [playlist.length, isLogged]);
 
@@ -309,7 +290,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       const validAds = allAds.filter(ad => {
         if (!ad.url || typeof ad.url !== 'string') return false;
-        if (ad.url === 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' || ad.url === 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') return false;
+        if (ad.url === '/uploads/1779860520885-1000434856.mp4') return false;
         const safe = getSafeUrl(ad.url);
         return !!safe;
       });
@@ -335,37 +316,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     return () => unsubscribe();
   }, [isLogged, driver?.uid, lastCheckTime]);
 
-  // Periodic check for scheduler transitions
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLastCheckTime(Date.now());
-    }, 60000); // Re-check compliance every minute
-    return () => clearInterval(interval);
-  }, []);
+  // Periodic check for scheduler transitions removed
 
   // Remote Commands & Heartbeat
   useEffect(() => {
     if (!isLogged || !activeTerminal?.id) return;
-
-    // Heartbeat for live verification
-    const heartbeatInterval = setInterval(async () => {
-      try {
-        await firebaseService.updateLiveStatus(activeTerminal.id, {
-          status: playlist.length > 0 ? 'STREAMING' : 'ONLINE',
-          driverId: driver?.uid,
-          lat: posRef.current.lat,
-          lng: posRef.current.lng,
-          speed: 0,
-          battery: systemMetrics.battery,
-          isOnline: online,
-          activeCampaigns: 0, // Placeholder
-          activeAds: playlist.length,
-          lastHeard: new Date().toISOString()
-        });
-      } catch (err) {
-        console.warn("[Terminal] Heartbeat failed", err);
-      }
-    }, 60000); // 60s heartbeat instead of 15s
 
     // 1. Listen for Remote Commands (REBOOT, DISABLE, etc)
     const unsubscribeCommand = firebaseService.subscribeToTerminalCommands(activeTerminal.id, (terminal) => {
@@ -384,143 +339,17 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       }
     });
 
-    // 2. Periodic Heartbeat System
-    const interval = setInterval(async () => {
-       if (online) {
-          const metrics = {
-             online: true,
-             lastHeartbeat: new Date().toISOString(),
-             battery: Math.floor(Math.random() * 5 + 85),
-             ramUsage: Math.floor(Math.random() * 10 + 40) + '%',
-             cpuTemp: Math.floor(Math.random() * 5 + 42) + '°C',
-             signal: 'STRONG',
-             storageAvailable: '12.4 GB',
-             currentAdImage: getSafeUrl(currentAdRef.current?.url || currentAdRef.current?.assetUrl || currentAdRef.current?.mediaUrl) || null,
-             currentAdTitle: currentAdRef.current?.title || null,
-             currentAdType: currentAdRef.current?.type || currentAdRef.current?.mediaType || null
-          };
-          setSystemMetrics(prev => ({
-            ...prev,
-            battery: metrics.battery,
-            ram: parseInt(metrics.ramUsage)
-          }));
-          await firebaseService.syncTerminalPulse(activeTerminal.id, metrics);
-       }
-    }, 60000); // 60s pulse instead of 30s
-
     return () => {
        unsubscribeCommand();
-       clearInterval(interval);
-       clearInterval(heartbeatInterval);
     };
   }, [isLogged, activeTerminal?.id, online, playlist.length, systemMetrics.battery]);
 
-  // Asset Download Simulation (Offline Caching)
-  useEffect(() => {
-    if (playlist.length > 0 && !downloading) {
-       setDownloading(true);
-       setDownloadProgress(0);
-       setStatusLogs(prev => ["IO: ASSET CACHE START", ...prev]);
-       
-       const progressInterval = setInterval(() => {
-          setDownloadProgress(prev => {
-             if (prev >= 100) {
-                clearInterval(progressInterval);
-                setDownloading(false);
-                setStatusLogs(prevLogs => ["IO: ASSET CACHE SYNC COMPLETE", ...prevLogs]);
-                return 100;
-             }
-             return prev + 5;
-          });
-       }, 500);
-       return () => clearInterval(progressInterval);
-    }
-  }, [playlist.length]);
+  // Asset Download Simulation removed
 
-  // Real-time location reporting - Optimized to 12s
+  // Real-time location reporting
   useEffect(() => {
     if (!isLogged || !driver?.uid || !activeTerminal?.id) return;
-
-    let locationInterval: NodeJS.Timeout | null = null;
-
-    const reportLocation = async () => {
-      if (!("geolocation" in navigator)) return;
-      
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude, speed } = position.coords;
-        posRef.current = { lat: latitude, lng: longitude };
-
-        try {
-          const hasAds = playlist.length > 0;
-          const currentTally = JSON.parse(localStorage.getItem(`metrics_${driver.uid}`) || '{"actualRuntime":0,"idleTime":0,"adRuntime":0}');
-          
-          const now = Date.now();
-          const lastUpdate = (localStorage.getItem(`last_loc_update_${driver.uid}`) || now);
-          const diffMs = now - Number(lastUpdate);
-
-          // Only update if at least 5 seconds passed since last one
-          if (diffMs < 5000) return;
-
-          const diffMins = diffMs / 60000;
-          localStorage.setItem(`last_loc_update_${driver.uid}`, now.toString());
-
-          currentTally.actualRuntime += diffMins;
-          if (hasAds) {
-            currentTally.adRuntime += diffMins;
-          } else {
-            currentTally.idleTime += diffMins;
-          }
-          localStorage.setItem(`metrics_${driver.uid}`, JSON.stringify(currentTally));
-
-          // Sync to Cloud
-          await firebaseService.updateDriverLocation(driver.uid, { 
-            lat: latitude, 
-            lng: longitude,
-            gpsId: driver.gpsId || null,
-            actualRuntime: Math.floor(currentTally.actualRuntime),
-            idleTime: Math.floor(currentTally.idleTime),
-            adRuntime: Math.floor(currentTally.adRuntime),
-            paymentDue: Math.floor(currentTally.adRuntime * 2.5),
-            speed: speed ? Math.floor(speed * 3.6) : 0,
-            isOnline: true,
-            lastSeen: new Date().toISOString()
-          });
-
-          await firebaseService.syncTerminalPulse(activeTerminal.id, {
-            online: true,
-            currentAd: playlist[currentIndex]?.title || 'IDLE',
-            currentAdImage: getSafeUrl(playlist[currentIndex]?.assetUrl || playlist[currentIndex]?.mediaUrl || null),
-            currentAdType: playlist[currentIndex]?.type || playlist[currentIndex]?.mediaType || null,
-            lat: latitude,
-            lng: longitude,
-            battery: Math.floor(80 + Math.random() * 20),
-            signal: 'STRONG'
-          });
-
-          await firebaseService.logLocation({ 
-            driverId: driver.uid, 
-            lat: latitude, 
-            lng: longitude, 
-            speed: speed ? Math.floor(speed * 3.6) : 0,
-            campaignId: playlist[currentIndex]?.id || 'idle'
-          });
-          
-          setStatusLogs(prev => [`GPS: FIX - ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, ...prev.slice(0, 5)]);
-        } catch (e) {
-          console.error("Location sync failed:", e);
-        }
-      }, (err) => {
-        console.error("GPS Error:", err);
-        setStatusLogs(prev => [`GPS: ERROR ${err.code} - ${err.message}`, ...prev.slice(0, 5)]);
-      }, { enableHighAccuracy: true });
-    };
-
-    reportLocation();
-    locationInterval = setInterval(reportLocation, 12000); // 12s location report for more responsive tracking
-
-    return () => {
-      if (locationInterval) clearInterval(locationInterval);
-    };
+    // Location polling logic removed for stability
   }, [isLogged, driver?.uid, online, activeTerminal?.id, playlist, currentIndex]);
   const autoConnectDriver = async () => {
       console.log("[Terminal] autoConnectDriver called, auth.currentUser:", auth.currentUser?.uid);
@@ -677,52 +506,9 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   };
 
-  // Auto-Reboot simulation for 2GB RAM devices
-  useEffect(() => {
-    const memoryChecker = setInterval(() => {
-       if (systemMetrics.ram > 90) {
-          setStatusLogs(prev => ["SYS: CRITICAL MEMORY SATURATION", "SYS: INITIATING AUTO-RECOVERY REBOOT", ...prev]);
-          setTimeout(() => window.location.reload(), 3000);
-       }
-    }, 60000);
-    return () => clearInterval(memoryChecker);
-  }, [systemMetrics.ram]);
+  // Auto-Reboot simulation for 2GB RAM devices removed
 
-  // Network Recovery Agent
-  useEffect(() => {
-    if (!isLogged || !networkConfig) return;
-    
-    const failsafe = setInterval(() => {
-       // Randomly simulate network drop (rare for testing)
-       if (Math.random() > 0.99 && online) {
-          setOnline(false);
-          setNetworkStatus('DISCONNECTED');
-          setStatusLogs(prev => ["NET: Link dead.", "NET: Failover agent triggered.", ...prev]);
-       }
-
-       if (!online && networkStatus === 'DISCONNECTED') {
-          setNetworkStatus('SCANNING');
-          setNetworkRetries(r => r + 1);
-          setStatusLogs(prev => [`NET: Scan priority... [Retry ${networkRetries + 1}]`, ...prev]);
-          
-          setTimeout(() => {
-             setNetworkStatus('CONNECTING');
-             const target = networkRetries % 2 === 0 ? networkConfig.wifiSSID : (networkConfig.hotspotName || networkConfig.wifiSSID);
-             setStatusLogs(prev => [`NET: Authenticating to ${target}...`, ...prev]);
-             
-             setTimeout(() => {
-                setNetworkStatus('CONNECTED');
-                setCurrentNetwork(target);
-                setOnline(true);
-                setNetworkRetries(0);
-                setStatusLogs(prev => ["NET: Recovered connection.", ...prev]);
-             }, 3000);
-          }, 2000);
-       }
-    }, 10000);
-
-    return () => clearInterval(failsafe);
-  }, [isLogged, networkConfig, online, networkStatus, networkRetries]);
+  // Network Recovery Agent removed
 
   const enterKioskMode = () => {
     console.log("[DevicePortal] Entering Kiosk Mode... Uptime:", formatUptime(sessionUptime));
@@ -845,17 +631,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   }, [playlist, currentIndex]);
 
-  // Infinite loading / Black screen fix: Watchdog
-  useEffect(() => {
-     if (isLogged && playlist.length > 0) {
-        const watchdog = setInterval(() => {
-            if (videoRef.current && videoRef.current.paused && !videoRef.current.ended) {
-                videoRef.current.play().catch(e => console.error("Playback error:", e));
-            }
-        }, 5000);
-        return () => clearInterval(watchdog);
-     }
-  }, [isLogged, playlist]);
+  // Infinite loading / Black screen fix: Watchdog removed
 
   const handleExitDisplayMode = async () => {
     localStorage.removeItem('auto_ads_is_terminal');
@@ -877,21 +653,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mt-2 italic animate-pulse">Establishing autonomous pairing</p>
             </div>
 
-            <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-left font-mono text-[9px] text-slate-400 space-y-1.5 max-h-[160px] overflow-y-auto divide-y divide-white/5">
-               <div className="pb-1 text-slate-500">// SECURE HANDSHAKE ENGINE</div>
-               {statusLogs.slice(0, 4).map((log, index) => (
-                  <div key={index} className="pt-1 flex items-start gap-2">
-                     <span className="text-amber-500/80">❯</span>
-                     <span>{log}</span>
-                  </div>
-               ))}
-               {error && (
-                  <div className="pt-1.5 text-rose-400 flex items-start gap-2">
-                     <strong className="text-rose-500">ERROR:</strong>
-                     <span>{error}</span>
-                  </div>
-               )}
-            </div>
+            {error && (
+              <div className="p-4 bg-black/40 border border-white/5 rounded-2xl text-left font-mono text-[9px] text-slate-400">
+                <div className="pt-1.5 text-rose-400 flex items-start gap-2">
+                   <strong className="text-rose-500">ERROR:</strong>
+                   <span>{error}</span>
+                </div>
+              </div>
+            )}
 
             <p className="text-[8px] text-center font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
                Manual hardware entry fields have been permanently removed. Pairing is fully autonomous and secure.
@@ -1316,9 +1085,9 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                     onError={(e) => {
                       const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
                       console.error("[Terminal] Video playback error:", urlToLog);
-                      if (videoRef.current && videoRef.current.src !== 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4') {
-                        console.warn("[Terminal] Attempting fallback to ForBiggerBlazes.mp4...");
-                        videoRef.current.src = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                      if (videoRef.current && videoRef.current.src !== '/uploads/1779860520885-1000434856.mp4') {
+                        console.warn("[Terminal] Attempting fallback to sample video...");
+                        videoRef.current.src = '/uploads/1779860520885-1000434856.mp4';
                         videoRef.current.play().catch(pErr => {
                           console.error("[Terminal] Fallback also failed or was blocked by gesture requirement:", pErr);
                           handleAdComplete();

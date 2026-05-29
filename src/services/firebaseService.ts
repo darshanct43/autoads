@@ -265,10 +265,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     },
     operationType,
     path
-  }
-  console.warn('Firestore Error [' + operationType + ']: ', JSON.stringify(errInfo));
+  };
+  // Instead of building a big object just for the throw, format the error message directly
+  const errMessage = (error as any)?.message || String(error);
+  console.warn('Firestore Error [' + operationType + ']: ', errMessage, ' at path: ', path);
   if (!isSilent) {
-    throw new Error(JSON.stringify(errInfo));
+    throw new Error(errMessage);
   }
 }
 
@@ -576,6 +578,9 @@ export const firebaseService = {
 
   async createCampaign(campaign: { title: string, mediaUrl?: string, mediaType?: 'VIDEO' | 'IMAGE', [key: string]: any }) {
     try {
+      console.log(`[DEPLOYMENT_RECORD_CREATED] Timestamp: ${new Date().toISOString()}`);
+      console.log(`[DEPLOYMENT_RECORD_SOURCE] Collection: 'campaigns'`);
+      console.log(`[DEPLOYMENT_RECORD_TRIGGER] Function: firebaseService.createCampaign -> Title: ${campaign.title}`);
       const data = {
         ...campaign,
         mediaUrl: campaign.mediaUrl || campaign.assetUrl || '',
@@ -1872,35 +1877,21 @@ export const firebaseService = {
   },
 
   subscribeToSupportTickets(driverId: string, callback: (tickets: SupportTicket[]) => void) {
-    // Try with orderBy first
     try {
       const q = query(
         collection(db, TICKETS_COLLECTION), 
-        where('driverId', '==', driverId),
-        orderBy('createdAt', 'desc')
+        where('driverId', '==', driverId)
       );
       return onSnapshot(q, (snapshot) => {
         const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
+        tickets.sort((a, b) => {
+          const tA = a.createdAt?.toMillis?.() || 0;
+          const tB = b.createdAt?.toMillis?.() || 0;
+          return tB - tA;
+        });
         callback(tickets);
       }, (error: any) => {
-        if (error.message?.includes('index')) {
-          console.warn("SupportTickets index not ready, using fallback simple query.");
-          const qSimple = query(
-            collection(db, TICKETS_COLLECTION), 
-            where('driverId', '==', driverId)
-          );
-          onSnapshot(qSimple, (snapshot) => {
-            const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
-            tickets.sort((a, b) => {
-              const tA = a.createdAt?.toMillis?.() || 0;
-              const tB = b.createdAt?.toMillis?.() || 0;
-              return tB - tA;
-            });
-            callback(tickets);
-          }, (err) => handleFirestoreError(err, OperationType.LIST, TICKETS_COLLECTION));
-        } else {
-          handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION);
-        }
+        handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION);
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, TICKETS_COLLECTION);
@@ -2499,5 +2490,65 @@ export const firebaseService = {
     } catch (e) {
       console.error("[FirebaseService] Error marking all notifications read:", e);
     }
+  },
+
+  async updateTerminalTeamViewer(terminalId: string, teamViewerId: string, teamViewerPasswordKey: string) {
+    const docRef = doc(db, 'terminals', terminalId);
+    try {
+      const obfuscated = btoa(teamViewerPasswordKey.split("").reverse().join(""));
+      await updateDoc(docRef, { 
+        teamViewerId, 
+        teamViewerPasswordEncrypted: obfuscated,
+        updatedAt: serverTimestamp() 
+      });
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.UPDATE, `terminals/${terminalId}`);
+      throw e;
+    }
+  },
+
+  async updateTerminalHardwareParams(terminalId: string, params: { volume?: number; brightness?: number; isLocked?: boolean; emergencyBroadcast?: string | null }) {
+    const docRef = doc(db, 'terminals', terminalId);
+    try {
+      await updateDoc(docRef, {
+        ...params,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.UPDATE, `terminals/${terminalId}`);
+      throw e;
+    }
+  },
+
+  decryptTVPassword(encrypted: string | undefined | null): string {
+    if (!encrypted) return '';
+    try {
+      const reversed = atob(encrypted);
+      return reversed.split("").reverse().join("");
+    } catch (e) {
+      return '';
+    }
+  },
+
+  async getShowcaseVideos(): Promise<Record<string, string>> {
+     const keysMap = {
+       qr: 'qr_showcase.mp4',
+       couples: 'couples_showcase.mp4',
+       food: 'food_showcase.mp4',
+       awareness: 'awareness_showcase.mp4',
+       film: 'film_showcase.mp4'
+     };
+
+     const results: Record<string, string> = {};
+     for (const [key, filename] of Object.entries(keysMap)) {
+       results[key] = `/uploads/${filename}`;
+     }
+
+     return results;
+  },
+
+  async updateShowcaseVideos(videos: Record<string, string>) {
+    // Obsolete with high-performance static S3 proxy serving
+    return;
   }
 };

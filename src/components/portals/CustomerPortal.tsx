@@ -1,4 +1,3 @@
-import { disableDevWebsocketLogs } from '@/lib/websocketProtection';
 import React, { useState, useEffect, useMemo, useRef, useReducer } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Palette, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download, Star } from 'lucide-react';
@@ -13,6 +12,7 @@ import { compressImage } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
+import StaticImpactVideos from '../StaticImpactVideos';
 import { SubscriptionManager } from '../subscription/SubscriptionManager';
 import NotificationCenter from '../common/NotificationCenter';
 
@@ -40,18 +40,7 @@ const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
   }
 
-  // Map known blocked/broken Mixkit URLs to highly reliable public CORS-compliant Chromecast sample videos
-  if (cleaned.toLowerCase().includes('mixkit')) {
-    if (cleaned.includes('driving-in-a-busy-city-at-night') || cleaned.includes('40047')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('traffic-in-a-big-city-at-night') || cleaned.includes('4547')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    } else if (cleaned.includes('night-city-street-with-neon-lights') || cleaned.includes('40049')) {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4';
-    } else {
-      return 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-    }
-  }
+  // Removed demo fallback video mapping
 
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
@@ -959,9 +948,6 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
 
 
   useEffect(() => {
-    if (import.meta.env.PROD) {
-      disableDevWebsocketLogs();
-    }
     firebaseService.getPlans().then(setDbPlans).catch(console.error);
 
     // Pre-load Razorpay script
@@ -1170,7 +1156,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
           if (val && typeof val === 'object' && ('seconds' in val || val instanceof Date)) {
             val = val instanceof Date ? val.toISOString() : new Date(val.seconds * 1000).toISOString();
           } else if (typeof val === 'object') {
-            try { val = JSON.stringify(val); } catch (e) { val = "[Object]"; }
+            val = String(val);
           }
           const strVal = String(val).replace(/"/g, '""');
           return `"${strVal}"`;
@@ -1495,64 +1481,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
         )}
 
         {activeTab === 'IMPACT' && (
-          <div 
-            className="space-y-8 pb-20"
-          >
-            <div>
-              <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Network Impact</h2>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">See how our transit ads change the game</p>
-            </div>
-            
-          <div className="bg-white rounded-[3rem] overflow-hidden aspect-video relative group border-[12px] border-slate-50 shadow-2xl">
-            <div className="absolute inset-y-0 left-0 w-1/2 bg-slate-900 flex flex-col justify-center p-12 space-y-6 z-20">
-               <div className="space-y-2">
-                  <h3 className="text-4xl font-black italic text-white uppercase leading-tight tracking-tighter">Impact <br/><span className="text-amber-500">Visualization</span></h3>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Learn why transit ads win</p>
-               </div>
-               <p className="text-sm font-medium text-slate-300 leading-relaxed max-w-sm">
-                  Our network leverages high-mobility urban routes to put your brand in front of thousands of daily commuters where they can't look away.
-               </p>
-               <div className="flex gap-4">
-                  <div className="px-5 py-3 bg-white/5 rounded-xl border border-white/10">
-                     <p className="text-xl font-black text-white italic leading-none">2.4M</p>
-                     <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Monthly Reach</p>
-                  </div>
-                  <div className="px-5 py-3 bg-white/5 rounded-xl border border-white/10">
-                     <p className="text-xl font-black text-amber-500 italic leading-none">98%</p>
-                     <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Uptime Goal</p>
-                  </div>
-               </div>
-            </div>
-            
-            <div className="absolute inset-y-0 right-0 w-1/2 bg-slate-950 relative overflow-hidden group">
-              {/* VIDEO PLACEHOLDER */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center z-20 space-y-4">
-                <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 shadow-2xl animate-pulse group-hover:scale-110 transition-transform cursor-pointer">
-                  <PlayCircle size={40} />
-                </div>
-                <div className="text-center">
-                   <p className="text-white font-black italic uppercase text-lg leading-none">Presentation</p>
-                   <p className="text-amber-500/80 text-[8px] font-black uppercase tracking-widest mt-2">Tap to Play</p>
-                </div>
-              </div>
-              <img src="https://images.unsplash.com/photo-1542340916-951bb72c8f74?auto=format&fit=crop&q=80&w=2000" className="w-full h-full object-cover grayscale opacity-30" alt="Impact" />
-            </div>
-          </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
-               {[
-                 { title: 'Attention Span', value: '+45%', desc: 'Longer visual engagement compared to static billboards' },
-                 { title: 'Recall Rate', value: '8x', desc: 'Higher brand recognition in congested urban zones' },
-                 { title: 'CPM Efficiency', value: '-30%', desc: 'Lower cost per thousand impressions than digital search' }
-               ].map((stat, i) => (
-                 <div key={i} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
-                    <h4 className="text-3xl font-black italic text-slate-900 mb-2">{stat.value}</h4>
-                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-4">{stat.title}</p>
-                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">{stat.desc}</p>
-                 </div>
-               ))}
-            </div>
-          </div>
+          <StaticImpactVideos />
         )}
 
         {activeTab === 'TICKETS' && (

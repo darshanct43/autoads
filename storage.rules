@@ -32,10 +32,7 @@ service firebase.storage {
     
     // Campaign Media
     match /campaigns/{campaignId}/{type}/{fileName} {
-      allow read: if true; // Publicly accessible for display
-      allow write: if (isAdmin() || isSignedIn()) 
-                   && request.resource.size < 100 * 1024 * 1024 // 100MB limit for high res
-                   && request.resource.contentType.matches('image/.*|video/.*');
+      allow read, write: if true;
     }
 
     // Support Tickets

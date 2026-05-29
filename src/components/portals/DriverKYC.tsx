@@ -47,11 +47,15 @@ export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
     
     setLoading(true);
     try {
-      const profile: Partial<DriverProfile> = {
+      const profile: any = {
         kycStatus: 'UNDER_REVIEW',
         payoutEnabled: false,
         adminApproved: false,
         documents: documents as DriverDocument,
+        aadharPhoto: documents.aadhaar,
+        dlPhoto: documents.drivingLicense,
+        profileImage: documents.selfie,
+        selfiePhoto: documents.selfie,
         upiId: upiId
       };
       await firebaseService.updateDriverProfile(driverId, profile);

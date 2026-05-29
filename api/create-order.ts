@@ -25,19 +25,30 @@ export default async function handler(
     if (!finalAmount || isNaN(finalAmount) || finalAmount <= 0) {
       return res.status(400).json({
         success: false,
-        error: "Invalid amount"
+        error: "Invalid amount",
       });
     }
 
-    // SIMPLE DIRECT INIT
-    let key_id = (process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
-    let key_secret = (process.env.RAZORPAY_KEY_SECRET || "").trim().replace(/^["']|["']$/g, '');
+    // ENV VARIABLES
+    const key_id_raw = process.env.RAZORPAY_KEY_ID;
+    const key_secret_raw = process.env.RAZORPAY_KEY_SECRET;
 
-    if (!key_id || key_id === "rzp_live_SnZDlb9YCezb2w") {
-      key_id = "rzp_live_SuOCSm9m9qJLB0";
-      key_secret = "Vlp2EDEJpcte79HwQFVpDoWY";
+    console.log("RAZORPAY_KEY_ID exists:", !!key_id_raw);
+    console.log("RAZORPAY_KEY_ID safe preview:", key_id_raw?.substring(0, 3) + "..." + key_id_raw?.substring(key_id_raw.length - 3));
+    console.log("RAZORPAY_KEY_SECRET exists:", !!key_secret_raw);
+    console.log("RAZORPAY_KEY_SECRET length:", key_secret_raw?.length);
+
+    const key_id = key_id_raw?.trim()?.replace(/^["']|["']$/g, '');
+    const key_secret = key_secret_raw?.trim()?.replace(/^["']|["']$/g, '');
+
+    if (!key_id || !key_secret) {
+      return res.status(500).json({
+        success: false,
+        error: "Missing Razorpay credentials",
+      });
     }
 
+    // RAZORPAY INIT
     const razorpay = new Razorpay({
       key_id,
       key_secret,
@@ -45,14 +56,14 @@ export default async function handler(
 
     console.log({
       amount: Math.round(finalAmount * 100),
-      currency: "INR"
+      currency: "INR",
     });
 
-    // CREATE ORDER DIRECTLY - EXACT PAYLOAD
+    // CREATE ORDER
     const order = await razorpay.orders.create({
       amount: Math.round(finalAmount * 100),
       currency: "INR",
-      receipt: `receipt_${Date.now()}`
+      receipt: `receipt_${Date.now()}`,
     });
 
     console.log("ORDER CREATED:", order.id);
@@ -72,7 +83,7 @@ export default async function handler(
       success: false,
       message: error?.message || "Unknown error",
       description: error?.error?.description || "",
-      full: JSON.stringify(error, null, 2)
+      full: String(error),
     });
   }
 }

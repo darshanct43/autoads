@@ -265,12 +265,9 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
     if (user && status === 'ACTIVE') {
       reportLocation();
-      locationInterval = setInterval(reportLocation, 60000); // 60s instead of 12s
     }
 
-    return () => {
-      if (locationInterval) clearInterval(locationInterval);
-    };
+    return () => {};
   }, [user, status, driverCampaigns.length > 0 ? driverCampaigns[0].id : null]);
 
   useEffect(() => {
@@ -465,8 +462,15 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                      <button 
                         key={item.id}
                         onClick={() => {
-                          if (item.id === 'KYC') setShowKYC(true);
-                          else { setCompliancePage(item.id as CompliancePage); setShowCompliance(true); }
+                          if (item.id === 'KYC') {
+                            if (driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'APPROVED') {
+                              return;
+                            }
+                            setShowKYC(true);
+                          } else { 
+                            setCompliancePage(item.id as CompliancePage); 
+                            setShowCompliance(true); 
+                          }
                         }}
                         className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100 hover:bg-white hover:border-slate-200 transition-all group"
                      >
