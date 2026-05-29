@@ -64,10 +64,32 @@ if (!getApps().length) {
     }
   }
   
-  adminApp = initializeApp(appOptions);
+  try {
+    adminApp = initializeApp(appOptions);
+  } catch (initError: any) {
+    console.error("[FIREBASE] Critical App initialization failed:", initError);
+  }
 } else {
   adminApp = getApps()[0];
 }
 
-export const dbAdm = getFirestore(adminApp, firebaseDatabaseId);
+let dbAdm: any;
+try {
+  if (adminApp) {
+    dbAdm = getFirestore(adminApp, firebaseDatabaseId);
+  } else {
+    throw new Error("No active Firebase Admin App found.");
+  }
+} catch (dbError: any) {
+  console.error("[FIREBASE] Firestore instance generation failed:", dbError);
+  dbAdm = new Proxy({}, {
+    get(target, prop) {
+      return (...args: any[]) => {
+        throw new Error(`Firebase Admin SDK was not initialized correctly. Cannot access dbAdm.${String(prop)}. Reason: ${dbError.message}`);
+      };
+    }
+  });
+}
+
+export { dbAdm };
 export { admin };

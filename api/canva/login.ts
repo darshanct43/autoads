@@ -20,12 +20,18 @@ export default async function handler(req: any, res: any) {
     });
 
     // Create redirect_uri
-    const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host');
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const baseUrl = `${protocol}://${host}`;
     const redirect_uri = `${baseUrl}/api/canva/callback`;
 
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
+
+    if (!client_id) {
+      console.error('[CANVA OAUTH] Missing CANVA_CLIENT_ID on environment variables.');
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({ error: 'Config Error: CANVA_CLIENT_ID environment variable is missing or empty.' });
+    }
 
     const scopes = [
       'canva:design:content:read',

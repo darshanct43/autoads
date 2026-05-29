@@ -78,7 +78,7 @@ export default async function handler(req: any, res: any) {
     const { uid, code_verifier } = stateData;
 
     // Construct the exact redirect_uri used during authorize request
-    const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host');
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const baseUrl = `${protocol}://${host}`;
     const redirect_uri = `${baseUrl}/api/canva/callback`;
