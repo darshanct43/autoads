@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { dbAdm } from '../../backend/_lib/firebase-admin';
+import { dbAdm } from '../../backend/_lib/firebase-admin.js';
 import crypto from 'crypto';
 
 export default async function handler(req: any, res: any) {

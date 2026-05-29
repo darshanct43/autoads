@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
-import { dbAdm, admin } from '../backend/_lib/firebase-admin';
+import { dbAdm, admin } from '../backend/_lib/firebase-admin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Guarantee response headers are always JSON

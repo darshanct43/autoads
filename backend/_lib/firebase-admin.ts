@@ -1,11 +1,23 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import admin from 'firebase-admin';
+import fs from 'fs';
+import path from 'path';
 
 let adminApp;
 
-const firebaseProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
-const firebaseDatabaseId = process.env.FIRESTORE_DATABASE_ID || '(default)';
+let appletConfig: any = {};
+try {
+  const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    appletConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  }
+} catch (e) {
+  // ignore
+}
+
+const firebaseProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || appletConfig.projectId;
+const firebaseDatabaseId = appletConfig.firestoreDatabaseId || process.env.FIRESTORE_DATABASE_ID || '(default)';
 const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT;
 const appOptions: any = {
   projectId: firebaseProjectId
