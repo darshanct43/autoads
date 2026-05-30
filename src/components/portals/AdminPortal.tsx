@@ -1401,7 +1401,9 @@ export default function AdminPortal({
       (d.phone || "").includes(searchTerm) ||
       (d.vNo || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (d.gpsId || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (d.city || "").toLowerCase().includes(searchTerm.toLowerCase());
+      (d.city || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (d.uid || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (d.id || "").toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesArea = selectedArea === "ALL" || (d.city || "").toUpperCase() === selectedArea.toUpperCase();
     
@@ -1521,42 +1523,6 @@ export default function AdminPortal({
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-4 pb-4">
-          {/* Gold Premium Seal Badge */}
-          <div className="relative group flex flex-col items-center">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center animate-bounce shadow-md shadow-amber-500/5 cursor-help">
-              <span className="text-[12px]">👑</span>
-            </div>
-            <div className="absolute left-full ml-4 px-3 py-2 bg-slate-900 border border-slate-800 text-white text-[8px] font-black uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-50">
-              <span className="text-amber-400">👑 Premium Unlocked</span>
-            </div>
-          </div>
-
-          {/* Vertical Theme Selector Chain */}
-          <div className="flex flex-col items-center gap-1.5 p-1.5 bg-white/5 border border-white/10 rounded-2xl">
-            {[
-              { id: 'default', color: 'bg-amber-500', name: 'Amber' },
-              { id: 'tokyo', color: 'bg-fuchsia-500', name: 'Neon' },
-              { id: 'emerald', color: 'bg-emerald-500', name: 'Green' },
-              { id: 'ocean', color: 'bg-cyan-500', name: 'Cyan' },
-              { id: 'solar', color: 'bg-yellow-500', name: 'Solar' }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => selectTheme(t.id as any)}
-                className={cn(
-                  "w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all hover:scale-125 relative group",
-                  selectedTheme === t.id ? "border-white" : "border-transparent opacity-50 hover:opacity-100"
-                )}
-                title={t.name + " Theme"}
-              >
-                <div className={cn("w-2.5 h-2.5 rounded-full", t.color)} />
-                <div className="absolute left-full ml-4 px-2 py-1 bg-slate-900 border border-slate-800 text-white text-[7px] font-black uppercase tracking-widest rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150 whitespace-nowrap z-50">
-                  {t.name}
-                </div>
-              </button>
-            ))}
-          </div>
-
           <div className="bg-white/5 p-2 rounded-xl border border-white/10 flex flex-col items-center gap-1 group relative">
             <span className="text-[7px] font-black uppercase text-slate-500 tracking-widest">
               Support
@@ -4486,7 +4452,7 @@ export default function AdminPortal({
                                 }}
                                 className="text-[8px] font-black bg-slate-100 text-slate-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
                               >
-                                Credit
+                                Payment
                               </button>
                               <button
                                 onClick={() => {
@@ -6141,7 +6107,7 @@ export default function AdminPortal({
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-                   {selectedDriverForAgreement._agreementData?.agreementAccepted ? (
+                   {(selectedDriverForAgreement._agreementData?.agreementAccepted || selectedDriverForAgreement.kycStatus === 'PENDING' || selectedDriverForAgreement.kycStatus === 'APPROVED' || selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar) ? (
                       <>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
                            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
@@ -6225,7 +6191,7 @@ export default function AdminPortal({
                    >
                      Close Vault
                    </button>
-                   {selectedDriverForAgreement._agreementData?.agreementAccepted && selectedDriverForAgreement.kycStatus === 'PENDING' && (
+                   {((selectedDriverForAgreement._agreementData?.agreementAccepted || selectedDriverForAgreement.kycStatus === 'PENDING') && selectedDriverForAgreement.kycStatus !== 'APPROVED') && (
                       <button 
                         onClick={async () => {
                            if (confirm("Approve all documents and driver and enable payouts?")) {

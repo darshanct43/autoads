@@ -69,7 +69,7 @@ export default async function handler(req: any, res: any) {
       code_challenge_method: 'S256'
     });
 
-    const authUrl = `https://www.canva.com/api/oauth/v1/authorize?${params.toString()}`;
+    const authUrl = `https://www.canva.com/api/oauth/authorize?${params.toString()}`;
 
     // Redirect the user safely across local express and serverless contexts
     console.log(`[CANVA OAUTH] Initiated auth flow for uid=${uid} state=${state}`);
