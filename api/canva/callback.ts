@@ -20,6 +20,7 @@ export default async function handler(req: any, res: any) {
   const errorParam = req.query.error as string;
 
   console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
+  console.log('[CANVA OAUTH] Full query:', JSON.stringify(req.query));
   console.log('code=', req.query.code);
   console.log('state=', req.query.state);
 
@@ -80,6 +81,7 @@ export default async function handler(req: any, res: any) {
 
     // Look up cookie values first for stateless OAuth session verification
     const cookies = parseCookies(req.headers.cookie);
+    console.log('[CANVA OAUTH] Cookies in callback:', cookies);
     const cookieState = cookies['canva_oauth_state'];
     const cookieCodeVerifier = cookies['canva_code_verifier'];
     const cookieUid = cookies['canva_oauth_uid'];
@@ -135,6 +137,15 @@ export default async function handler(req: any, res: any) {
     
     console.log('[CANVA OAUTH] Callback initiated:', { host, baseUrl, redirect_uri, code: !!code, state });
 
+    // If we have a uid, check if they are already connected
+    if (isAdminAuthReady && uid && uid !== 'demo-user-uid') {
+        const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
+        if (tokenDoc.exists) {
+            console.log('[CANVA OAUTH] User already connected, redirecting to dashboard');
+            return res.send(`<html><body><script>window.location.href = '/';</script></body></html>`);
+        }
+    }
+    
     // Prepare credentials
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
     const client_secret = (process.env.CANVA_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
