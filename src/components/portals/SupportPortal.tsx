@@ -138,10 +138,9 @@ const getCampaignExpiration = (campaign: any) => {
 interface SupportPortalProps {
   onLogout: () => void;
   onRoleJump?: (role: UserRole) => void;
-  onOpenStudio?: () => void;
 }
 
-export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: SupportPortalProps) {
+export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalProps) {
   const [selectedTheme, setSelectedTheme] = useState<'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar'>(() => (localStorage.getItem('support_premium_theme') as any) || 'default');
   
   const selectTheme = (theme: 'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar') => {
@@ -750,17 +749,12 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
                   { id: 'LEGAL', icon: <Shield size={18} />, label: 'Rules & Terms' },
                   { id: 'PLANS', icon: <Zap size={18} />, label: 'Pricing Config' },
                   { id: 'NOTICES', icon: <Gift size={18} />, label: 'Global Offers' },
-                  { id: 'STUDIO', icon: <PlusCircle size={18} className="text-amber-400" />, label: 'Canva Studio' }
                 ].map((item) => (
                   <button
                     key={item.id}
                     onClick={() => {
                       setIsSlideMenuOpen(false);
-                      if (item.id === 'STUDIO') {
-                        onOpenStudio?.();
-                      } else {
-                        setActiveTab(item.id as any);
-                      }
+                      setActiveTab(item.id as any);
                     }}
                     className={cn(
                       "w-full flex items-center gap-4 px-4 py-3 rounded-xl text-left transition-all border border-transparent font-medium",
@@ -861,16 +855,11 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
             { id: 'LEGAL', icon: <Shield size={24} />, label: 'Rules' },
             { id: 'PLANS', icon: <Zap size={24} />, label: 'Pricing' },
             { id: 'NOTICES', icon: <Gift size={24} />, label: 'Offers' },
-            { id: 'STUDIO', icon: <PlusCircle size={24} className="text-amber-400" />, label: 'Studio' }
           ].map((item) => (
             <button 
               key={item.id}
               onClick={() => {
-                if (item.id === 'STUDIO') {
-                  onOpenStudio?.();
-                } else {
-                  setActiveTab(item.id as any);
-                }
+                setActiveTab(item.id as any);
               }}
               className={cn(
                 "p-4 rounded-2xl transition-all relative group flex flex-col items-center gap-1 md:gap-0",
@@ -1942,9 +1931,9 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
                   </div>
 
                   {/* Canva Studio Subscription Plans Panel */}
-                  <div className="space-y-6 pt-6 animate-in fade-in duration-350">
-                    <div className="flex items-center gap-3 border-b border-white/10 pb-3">
-                      <div className="w-8 h-8 rounded-lg bg-[#6366f1] flex items-center justify-center text-white font-black text-xs">P</div>
+                  <div className="space-y-6 pt-6 mt-12 border-t border-slate-100/10">
+                    <div className="flex items-center gap-3 pb-3">
+                      <div className="w-8 h-8 rounded-lg bg-[#6366f1] flex items-center justify-center text-white font-black text-xs shadow-lg shadow-indigo-500/20">S</div>
                       <h3 className="text-lg md:text-2xl font-black italic text-white uppercase leading-none">Canva Studio Subscription Tiers</h3>
                     </div>
 
@@ -1960,55 +1949,53 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: i * 0.05 }}
-                          className="bg-slate-900 p-6 md:p-10 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6 relative group text-slate-350"
+                          className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-xl border border-slate-100 space-y-6 relative group"
                         >
                           <div className="flex items-center gap-3 mb-2">
-                            <div className="w-8 h-8 bg-indigo-500/15 border border-indigo-500/30 rounded-xl flex items-center justify-center text-indigo-400 shadow-md">
+                            <div className="w-8 h-8 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 shadow-sm">
                               <Crown size={15} />
                             </div>
-                            <h4 className="text-lg md:text-2xl font-black text-white uppercase italic leading-none">{sp.name || sp.id}</h4>
-                            <span className="ml-auto text-[9px] font-black uppercase text-indigo-400 bg-indigo-950 px-2.5 py-1 rounded-full border border-indigo-900">Studio Tier</span>
+                            <h4 className="text-lg md:text-2xl font-black text-slate-900 uppercase italic leading-none">{sp.name || sp.id}</h4>
+                            <span className="ml-auto text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100">Studio Tier</span>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-white/5">
-                            {/* STUDIO PRICE */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100">
                             <div className="space-y-4">
                               <div className="space-y-1.5">
-                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Studio Plan Name</label>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Studio Plan Name</label>
                                 <input 
                                   type="text" 
                                   defaultValue={sp.name}
                                   id={`support-studio-name-${sp.id}`}
-                                  className="w-full bg-[#121824] border border-white/5 text-white rounded-xl px-4 py-2.5 text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
+                                  className="w-full bg-slate-50 border border-slate-100 text-slate-800 rounded-xl px-4 py-2.5 text-xs font-bold outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
                                 />
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Studio Plan Price Label (e.g. ₹99 or ₹99/month)</label>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Price Label (e.g. ₹99 or ₹99/m)</label>
                                 <input 
                                   type="text" 
                                   defaultValue={sp.price}
                                   id={`support-studio-price-${sp.id}`}
-                                  className="w-full bg-[#121824] border border-white/5 text-white rounded-xl px-4 py-2.5 text-xs font-black italic outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
+                                  className="w-full bg-slate-50 border border-slate-100 text-slate-800 rounded-xl px-4 py-2.5 text-xs font-black italic outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
                                 />
                               </div>
                             </div>
 
-                            {/* STUDIO DESCRIPTION */}
                             <div className="space-y-1.5">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Studio Plan Features (Comma-separated features list)</label>
+                              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Studio Plan Features (Comma-separated)</label>
                               <textarea 
                                 defaultValue={sp.description || (sp.features ? sp.features.join(', ') : '')}
                                 id={`support-studio-desc-${sp.id}`}
                                 rows={4}
-                                className="w-full bg-[#121824] border border-white/5 text-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
+                                className="w-full bg-slate-50 border border-slate-100 text-slate-700 rounded-xl px-4 py-2.5 text-xs font-medium outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
                                 placeholder="Feature 1, Feature 2, Feature 3..."
                               />
                             </div>
                           </div>
 
-                          <div className="pt-4 border-t border-white/5 flex items-center justify-between gap-4 flex-wrap">
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest italic">Sync ID: studio_plans/{sp.id}</p>
+                          <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4 flex-wrap">
+                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest italic">Sync ID: studio_plans/{sp.id}</p>
                             <button 
                               onClick={async () => {
                                 const nameVal = (document.getElementById(`support-studio-name-${sp.id}`) as HTMLInputElement)?.value;
@@ -2037,7 +2024,7 @@ export default function SupportPortal({ onLogout, onRoleJump, onOpenStudio }: Su
                                 }
                               }}
                               disabled={isUpdatingPlan === sp.id}
-                              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-lg"
+                              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-indigo-500/20"
                             >
                               {isUpdatingPlan === sp.id ? <Loader2 size={12} className="animate-spin text-white" /> : <ShieldCheck size={12} />}
                               <span>Save Studio Plan Tier</span>

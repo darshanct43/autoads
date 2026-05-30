@@ -11,8 +11,8 @@ import DriverPortal from './components/portals/DriverPortal';
 import CustomerPortal from './components/portals/CustomerPortal';
 import SupportPortal from './components/portals/SupportPortal';
 import DevicePortal from './components/portals/DevicePortal';
+import FranchisePortal from './components/portals/FranchisePortal';
 import PassengerPortal from './components/smartAds/PassengerPortal';
-import { CanvaStudio } from './components/studio/customer/CanvaStudio';
 import PaymentSuccess from './components/common/PaymentSuccess';
 import BootAnimation from './components/common/BootAnimation';
 import BrandIntroduction from './components/common/BrandIntroduction';
@@ -42,7 +42,7 @@ export default function App() {
     }
     return null;
   });
-  const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL' | 'STUDIO' | 'PAYMENT_SUCCESS'>(() => {
+  const [systemState, setSystemState] = useState<'BOOT' | 'INTRO' | 'AUTH' | 'PORTAL' | 'PAYMENT_SUCCESS'>(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.slice(1);
       if (hash === 'payment-success') return 'PAYMENT_SUCCESS';
@@ -51,11 +51,6 @@ export default function App() {
       // If we have a terminal session, skip the intros and go straight to Portal
       if (params.has('terminalId') || localStorage.getItem('auto_ads_is_terminal') === 'true') {
         return 'PORTAL';
-      }
-      
-      // Check for studio direct access
-      if (window.location.hash === '#studio') {
-        return 'STUDIO';
       }
 
       // Bypass long intros of Boot/Branding screen if already seen in current browser session
@@ -130,16 +125,6 @@ export default function App() {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
-
-  const handleOpenStudio = () => {
-    setSystemState('STUDIO');
-    window.location.hash = 'studio';
-  };
-
-  const handleCloseStudio = () => {
-    setSystemState('PORTAL');
-    if (role) window.location.hash = role.toLowerCase();
-  };
 
   useEffect(() => {
     if (isPassenger) return;
@@ -314,10 +299,11 @@ export default function App() {
                 className="relative"
               >
                 <ErrorBoundary componentName={`${role} Portal`}>
-                  {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
+                  {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
                   {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
-                  {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
-                  {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} onOpenStudio={handleOpenStudio} />}
+                  {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
+                  {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
+                  {role === 'FRANCHISE_OWNER' && <FranchisePortal onLogout={handleLogout} />}
                   {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
                 </ErrorBoundary>
                 
@@ -326,10 +312,6 @@ export default function App() {
               </motion.div>
             )}
 
-            {systemState === 'STUDIO' && (
-              <CanvaStudio onClose={handleCloseStudio} userRole={role || undefined} />
-            )}
-            
             {systemState === 'PAYMENT_SUCCESS' && (
               <PaymentSuccess />
             )}

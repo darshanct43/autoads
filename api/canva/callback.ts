@@ -265,10 +265,13 @@ export default async function handler(req: any, res: any) {
               type: 'CANVA_OAUTH_SUCCESS', 
               tokenData: ${JSON.stringify(data)} 
             }, '*');
-          }
-          setTimeout(function() {
             window.close();
-          }, 1500);
+          } else {
+            // Remove spinner and redirect in the same tab
+            const spinner = document.querySelector('.spinner');
+            if (spinner) spinner.style.display = 'none';
+            window.location.href = '/';
+          }
         </script>
       </body>
       </html>

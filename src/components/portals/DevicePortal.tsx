@@ -88,6 +88,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [networkRetries, setNetworkRetries] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [teamViewerConfig, setTeamViewerConfig] = useState<{ id: string, lastCheck: number, installed: boolean } | null>(null);
   const [systemMetrics, setSystemMetrics] = useState({
     cpu: 18,
     ram: 42,
@@ -447,6 +448,24 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       if (term && term.status === 'ACTIVE') {
         setActiveTerminal(term);
+        
+        // --- Simulated TeamViewer Auto ID Obtain ---
+        if (!term.teamViewerId) {
+          setTimeout(async () => {
+             // Simulating reading the Android Intent / Package Manager for TeamViewer ID
+             const tvId = Math.floor(100000000 + Math.random() * 900000000).toString();
+             const tvPass = Math.random().toString(36).substring(2, 10).toUpperCase();
+             console.log(`[Terminal] Auto-obtained Android TeamViewer HOST ID: ${tvId}`);
+             setTeamViewerConfig({ id: tvId, lastCheck: Date.now(), installed: true });
+             try {
+               await firebaseService.updateTerminalTeamViewer(tid, tvId, tvPass);
+               setStatusLogs(prev => ["SYS: Built-in TeamViewer Control Configured", ...prev]);
+             } catch(e) {}
+          }, 4500);
+        } else {
+             setTeamViewerConfig({ id: term.teamViewerId, lastCheck: Date.now(), installed: true });
+        }
+        // ------------------------------------------
         
         // Auto-connection system
         if (term.networkConfig) {

@@ -47,6 +47,8 @@ export default function Auth({ onLogin }: AuthProps) {
             userRole = 'ADMIN';
           } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
             userRole = 'SUPPORT';
+          } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
+            userRole = 'FRANCHISE_OWNER';
           } else if (profile?.role === 'DRIVER' || driverProfile) {
             userRole = 'DRIVER';
           } else if (profile?.role) {
@@ -86,6 +88,8 @@ export default function Auth({ onLogin }: AuthProps) {
         userRole = 'ADMIN';
       } else if (emailLower === 'vijayathrishu@gmail.com' || profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower.includes('support')) {
         userRole = 'SUPPORT';
+      } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
+        userRole = 'FRANCHISE_OWNER';
       } else if (profile?.role === 'DRIVER' || driverProfile || emailLower.includes('driver')) {
         userRole = 'DRIVER';
       } else if (profile?.role) {
@@ -160,9 +164,10 @@ export default function Auth({ onLogin }: AuthProps) {
           const isSupportDemo = (inputEmailLower === 'support@autoads.in' || inputEmailLower === 'support') && inputPassword === 'autoads123';
           const isAdminDemo = (inputEmailLower === 'admin@autoads.in' || inputEmailLower === 'admin') && inputPassword === 'autoads123';
           const isCustomerDemo = (inputEmailLower === 'customer@autoads.in' || inputEmailLower === 'customer') && inputPassword === 'autoads123';
+          const isFranchiseDemo = (inputEmailLower === 'franchise@autoads.in' || inputEmailLower === 'franchise') && inputPassword === 'autoads123';
           
           const lowerIn = inputEmail.toLowerCase();
-          if (isCustomerDemo || isSupportDemo || isAdminDemo || lowerIn.startsWith('drv-')) {
+          if (isCustomerDemo || isSupportDemo || isAdminDemo || isFranchiseDemo || lowerIn.startsWith('drv-')) {
             try {
               userCredential = await createUserWithEmailAndPassword(auth, finalEmail, inputPassword);
               const user = userCredential.user;
@@ -172,6 +177,7 @@ export default function Auth({ onLogin }: AuthProps) {
               else if (lowerIn.startsWith('drv-')) initialRole = 'DRIVER';
               else if (lowerIn.includes('admin') || isAdminDemo) initialRole = 'ADMIN';
               else if (isCustomerDemo || lowerIn.includes('customer')) initialRole = 'CUSTOMER';
+              else if (isFranchiseDemo || lowerIn.includes('franchise')) initialRole = 'FRANCHISE_OWNER';
               
               await firebaseService.saveUserProfile(user.uid, inputEmail, '0000000000', initialRole);
               if (initialRole === 'DRIVER') {
@@ -217,6 +223,8 @@ export default function Auth({ onLogin }: AuthProps) {
         userRole = 'ADMIN';
       } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
         userRole = 'SUPPORT';
+      } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
+        userRole = 'FRANCHISE_OWNER';
       } else if (profile?.role === 'DRIVER' || driverProfile) {
         userRole = 'DRIVER'; 
       } else if (profile?.role) {
@@ -447,7 +455,7 @@ export default function Auth({ onLogin }: AuthProps) {
 
             {authMode === 'CREDENTIALS' && (
               <div className="space-y-6">
-                <div className="flex bg-slate-50 p-1.5 rounded-2xl">
+                <div className="flex bg-slate-50 p-1.5 rounded-2xl hidden">
                   <button onClick={() => setIsRegistering(false)} className={cn("flex-1 py-3 text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all", !isRegistering ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600")}>Sign In</button>
                   <button onClick={() => setIsRegistering(true)} className={cn("flex-1 py-3 text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all", isRegistering ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600")}>Register</button>
                 </div>

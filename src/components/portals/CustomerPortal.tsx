@@ -14,6 +14,7 @@ import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
 import StaticImpactVideos from '../StaticImpactVideos';
 import { SubscriptionManager } from '../subscription/SubscriptionManager';
+import { CanvaStudio } from '../studio/customer/CanvaStudio';
 import NotificationCenter from '../common/NotificationCenter';
 
 declare const Razorpay: any;
@@ -119,10 +120,9 @@ interface Plan {
 
 interface CustomerPortalProps {
   onLogout: () => void;
-  onOpenStudio: () => void;
 }
 
-export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPortalProps) {
+export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const triggerToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     console.log(`[TOAST] [${type.toUpperCase()}] ${msg}`);
     if (typeof (window as any).showToast === 'function') {
@@ -318,7 +318,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
   const [paymentResult, setPaymentResult] = useState<{status: string, txId?: string, orderId?: string, amount?: number, campaignId?: string, error?: string} | null>(null);
   const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
   const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL' | 'IMPACT' | 'SUBSCRIPTIONS'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL' | 'IMPACT' | 'SUBSCRIPTIONS' | 'STUDIO'>('DASHBOARD');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -1371,33 +1371,28 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
               { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
               { id: 'HISTORY', label: 'History', icon: History },
               { id: 'TICKETS', label: 'Support', icon: MessageSquare },
-              { id: 'DESIGN_STUDIO', label: 'Studio', icon: Palette, special: true },
+              { id: 'STUDIO', label: 'Studio', icon: Palette },
               { id: 'DESIGN_HELP', label: 'Experts', icon: Sparkles },
               { id: 'SUBSCRIPTIONS', label: 'Plans', icon: Zap }
             ].map((tab) => (
               <button 
                 key={tab.id}
                 onClick={() => {
-                  if (tab.id === 'DESIGN_STUDIO') {
-                    onOpenStudio();
-                  } else {
-                    setActiveTab(tab.id as any);
-                  }
+                  setActiveTab(tab.id as any);
                 }} 
                 className={cn(
                   "h-full px-0 transition-all whitespace-nowrap text-[10px] font-black uppercase tracking-widest flex items-center gap-1", 
                   activeTab === tab.id ? "text-amber-600 border-b-2 border-amber-500" : "text-slate-400 hover:text-slate-900",
-                  tab.special && "text-blue-600 hover:text-blue-800"
+                  (tab as any).special && "text-blue-600 hover:text-blue-800"
                 )}
               >
-                {tab.id === 'DESIGN_STUDIO' && <Palette size={12} />}
                 {tab.label}
               </button>
             ))}
           </div>
           {user && (
             <div className="flex items-center gap-2 md:gap-4 ml-2 md:border-l md:border-slate-100 md:pl-6 shrink-0">
-               <NotificationCenter role="CUSTOMER" userId={user?.uid} onNavigateToTab={(tab) => { if (tab === 'STUDIO') { onOpenStudio(); } else { setActiveTab(tab as any); } }} />
+               <NotificationCenter role="CUSTOMER" userId={user?.uid} onNavigateToTab={(tab) => { setActiveTab(tab as any); }} />
                <div className="hidden sm:flex flex-col items-end mr-2 text-right">
                   <span className="text-[9px] font-black text-slate-900 uppercase tracking-tighter">{userProfile?.name || user.displayName || user.email?.split('@')[0] || 'Customer'}</span>
                   <div className="flex items-center gap-1">
@@ -1976,6 +1971,11 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
         {/* Removed OFFERS tab as requested - consolidated into DASHBOARD */}
 
         {activeTab === 'HISTORY' && renderHistoryTab()}
+        {activeTab === 'STUDIO' && (
+           <div className="space-y-8 bg-slate-50 min-h-[500px] p-2 md:p-6 lg:p-12 rounded-[2rem] border border-slate-200">
+              <CanvaStudio onClose={() => setActiveTab('DASHBOARD')} userRole="customer" />
+           </div>
+        )}
         {activeTab === 'SUBSCRIPTIONS' && renderSubscriptionTab()}
         
         {activeTab === 'CAMPAIGNS' && (
@@ -2840,6 +2840,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
         {[
           { id: 'DASHBOARD', icon: Activity, label: 'Home' },
           { id: 'CAMPAIGNS', icon: Monitor, label: 'Ads' },
+          { id: 'STUDIO', icon: Palette, label: 'Studio' },
           { id: 'TICKETS', icon: MessageSquare, label: 'Help' },
           { id: 'DESIGN_HELP', icon: Sparkles, label: 'Studio' }
         ].map((tab) => (
@@ -2895,8 +2896,8 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
                   { id: 'DASHBOARD', icon: Activity, label: 'Control' },
                   { id: 'IMPACT', icon: PlayCircle, label: 'Impact' },
                   { id: 'CAMPAIGNS', icon: Monitor, label: 'Campaigns' },
-                  { id: 'DESIGN_STUDIO', icon: Palette, label: 'Studio' },
                   { id: 'HISTORY', icon: Wallet, label: 'Billing' },
+                  { id: 'STUDIO', icon: Palette, label: 'Studio' },
                   { id: 'SUBSCRIPTIONS', icon: Zap, label: 'Plans' },
                   { id: 'TICKETS', icon: MessageSquare, label: 'Support' },
                   { id: 'DESIGN_HELP', icon: Sparkles, label: 'Experts' },
@@ -2905,11 +2906,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
                   <button
                     key={item.id}
                     onClick={() => {
-                      if (item.id === 'DESIGN_STUDIO') {
-                         onOpenStudio();
-                      } else {
-                         setActiveTab(item.id as any);
-                      }
+                      setActiveTab(item.id as any);
                       setShowMobileMenu(false);
                     }}
                     className={cn(
@@ -2917,7 +2914,6 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
                       activeTab === item.id 
                         ? "bg-slate-900 border-slate-900 text-amber-500 shadow-xl" 
                         : "bg-white border-slate-100 text-slate-400",
-                      item.id === 'DESIGN_STUDIO' && "border-blue-100 bg-blue-50/30 text-blue-600"
                     )}
                   >
                     <item.icon size={24} />

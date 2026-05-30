@@ -78,7 +78,6 @@ import RoadmapChart from "../common/RoadmapChart";
 import AdminAssistant from "../common/AdminAssistant";
 import { ErrorBoundary } from "../common/ErrorBoundary";
 import NotificationCenter from "../common/NotificationCenter";
-import { AdminStudioConfig } from "../studio/admin/AdminStudioConfig";
 
 import {
   MapContainer,
@@ -255,13 +254,11 @@ const getCampaignExpiration = (campaign: any) => {
 interface AdminPortalProps {
   onRoleJump?: (role: UserRole) => void;
   onLogout: () => void;
-  onOpenStudio?: () => void;
 }
 
 export default function AdminPortal({
   onRoleJump,
   onLogout,
-  onOpenStudio,
 }: AdminPortalProps) {
   const [selectedTheme, setSelectedTheme] = useState<'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar'>(() => (localStorage.getItem('admin_premium_theme') as any) || 'default');
   
@@ -424,6 +421,7 @@ export default function AdminPortal({
   const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
   const [editUploadProgress, setEditUploadProgress] = useState(0);
   const [terminals, setTerminals] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [viewingUnit, setViewingUnit] = useState<any>(null);
   const [networkConfigTarget, setNetworkConfigTarget] = useState<string | null>(null);
   
@@ -470,7 +468,7 @@ export default function AdminPortal({
   const [mapCenter, setMapCenter] = useState<[number, number]>([
     12.9716, 77.5946, // Default to Bengaluru if no units
   ]);
-  const [mapZoom, setMapZoom] = useState(12);
+  const [mapZoom, setMapZoom] = useState(14);
 
   // Auto-center map on active units once they are loaded
   useEffect(() => {
@@ -530,11 +528,10 @@ export default function AdminPortal({
           await firebaseService.updateTerminalHardwareParams(terminalId, { emergencyBroadcast: message || null });
         }
       } else if (cmd === 'TV_UPDATE') {
-        const tvId = prompt("Enter TeamViewer ID:");
-        const tvPass = prompt("Enter TeamViewer Password:");
-        if (tvId && tvPass) {
-          await firebaseService.updateTerminalTeamViewer(terminalId, tvId, tvPass);
-        }
+        showToast("Triggering automatic Android ID Request loop...", "info");
+        // The display unit itself reads Android package intent array and updates the firebase record directly.
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await firebaseService.updateTerminalTeamViewer(terminalId, "", ""); // Reset let device re-obtain
       }
       
       setTimeout(() => {
@@ -768,6 +765,7 @@ export default function AdminPortal({
       firebaseService.subscribeToDeviceScreens(setDeviceScreens);
     const unsubNotices = firebaseService.subscribeToPublicNotices(setNotices);
     const unsubTerminals = firebaseService.subscribeToTerminals(setTerminals);
+    const unsubUsers = firebaseService.subscribeToUsers(setUsers);
     const unsubLiveStatus = firebaseService.subscribeToLiveStatus(setLiveStatus);
     // Document listeners removed
 
@@ -788,6 +786,7 @@ export default function AdminPortal({
       unsubScreens();
       unsubNotices();
       unsubTerminals();
+      unsubUsers();
       unsubLiveStatus();
       // unsubDocs cleanup removed
     };
@@ -1395,7 +1394,32 @@ export default function AdminPortal({
     exportToCSV(data, fileName);
   };
 
-  const filteredDrivers = (drivers || []).filter((d) => {
+  // Ensure users with DRIVER role who missed driver profile creation still appear
+  const allMergedDrivers = React.useMemo(() => {
+    const merged = [...(drivers || [])];
+    if (users && users.length > 0) {
+      users.forEach(u => {
+        if (u.role === 'DRIVER' && !merged.find(d => d.uid === u.id || d.phone === u.phone)) {
+          merged.push({
+            id: u.id,
+            uid: u.id,
+            name: u.name || 'Unknown Driver',
+            phone: u.phone || u.id,
+            email: u.email || `${u.id}@autoads.in`,
+            status: 'pending_verification',
+            kycStatus: 'PENDING',
+            isVerified: false,
+            driverCode: (u.email || u.id).toUpperCase(),
+            city: 'Mayaan Network',
+            vNo: 'N/A'
+          } as any);
+        }
+      });
+    }
+    return merged;
+  }, [drivers, users]);
+
+  const filteredDrivers = allMergedDrivers.filter((d) => {
     const matchesSearch =
       (d.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (d.phone || "").includes(searchTerm) ||
@@ -1487,21 +1511,16 @@ export default function AdminPortal({
             { id: "MONITOR", icon: Smartphone, title: "Live Units", badge: liveScreensCount > 0 },
             { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
             { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
-            { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
+            { id: "DRIVERS", icon: Truck, title: "Drivers & Vehicles" },
+            { id: "USERS", icon: Users, title: "Staff & Users" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
             { id: "PACKAGES", icon: Zap, title: "Package Config" },
-            { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
-            { id: "STUDIO_CONFIG", icon: ImageIcon, title: "Studio Settings" },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
-                if (tab.id === "STUDIO") {
-                  onOpenStudio?.();
-                } else {
-                  setActiveTab(tab.id as any);
-                }
+                setActiveTab(tab.id as any);
               }}
               className={cn(
                 "p-3 rounded-2xl transition-all relative group",
@@ -1635,21 +1654,16 @@ export default function AdminPortal({
                   { id: "MONITOR", icon: Smartphone, title: "Live Units" },
                   { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
                   { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
-                  { id: "FLEET", icon: Truck, title: "Fleet Matrix" },
+                  { id: "DRIVERS", icon: Truck, title: "Drivers & Vehicles" },
+                  { id: "USERS", icon: Users, title: "Staff & Users" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
                   { id: "PACKAGES", icon: Zap, title: "Package Config" },
-                  { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
-                  { id: "STUDIO_CONFIG", icon: ImageIcon, title: "Studio Settings" },
                 ].map((item) => (
                   <button
                     key={item.id}
                     onClick={() => {
-                      if (item.id === "STUDIO") {
-                        onOpenStudio?.();
-                      } else {
-                        setActiveTab(item.id as any);
-                      }
+                      setActiveTab(item.id as any);
                       setShowMobileMenu(false);
                     }}
                     className={cn(
@@ -3163,16 +3177,14 @@ export default function AdminPortal({
                       </Marker>
                     ))}
 
-                    <MarkerClusterGroup>
+                    <MarkerClusterGroup maxClusterRadius={20} disableClusteringAtZoom={15}>
                     {/* Render Driver Markers */}
                     {driverLocations
                       .filter(
                         (loc) =>
                           typeof loc.lat === "number" &&
                           typeof loc.lng === "number" &&
-                          loc.lat !== 0 && loc.lng !== 0 &&
-                          // Strict live check: only show if updated in last 15 minutes
-                          (loc.timestamp ? (Date.now() - new Date(loc.timestamp).getTime() < 900000) : (loc.updatedAt ? (Date.now() - loc.updatedAt.toMillis() < 900000) : true)), // 15 mins
+                          loc.lat !== 0 && loc.lng !== 0,
                       )
                       .map((loc) => {
                         const compliance = getComplianceStatus(loc);
@@ -3711,855 +3723,175 @@ export default function AdminPortal({
                   </button>
                 </div>
               </div>
-              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                          Transaction ID
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                          Volume
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                          Entity
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                          Status
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {paymentSubTab === "INCOME"
-                        ? payments
-                            .slice((paymentsPage - 1) * itemsPerPage, paymentsPage * itemsPerPage)
-                            .map((p) => (
-                            <tr
-                              key={p.id}
-                              className="hover:bg-slate-50 transition-all border-b border-slate-50"
-                            >
-                              <td className="px-8 py-5 text-[10px] font-mono text-slate-400">
-                                {p.transactionId || p.id?.slice(0, 8)}
-                              </td>
-                              <td className="px-8 py-5 text-sm font-black text-slate-900 italic">
-                                ₹{p.amount?.toLocaleString()}
-                              </td>
-                              <td className="px-8 py-5 text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                                {p.customerId || p.customerPhone || "Guest"}
-                              </td>
-                              <td className="px-8 py-5">
-                                <span className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
-                                  ["SUCCESS", "success", "PAID", "paid"].includes(p.status) 
-                                    ? "bg-green-50 text-green-600 border-green-100" 
-                                    : ["CANCELLED", "cancelled"].includes(p.status) 
-                                      ? "bg-slate-100 text-slate-500 border-slate-200" 
-                                      : ["FAILED", "failed"].includes(p.status)
-                                        ? "bg-red-50 text-red-600 border-red-100"
-                                        : "bg-amber-50 text-amber-600 border-amber-100"
-                                }`}>
-                                  {p.status}
-                                </span>
-                              </td>
-                              <td className="px-8 py-5">
-                                <button
-                                  onClick={() => handleDeletePayment(p.id!)}
-                                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                                  title="Delete record"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        : driverPayments
-                              .slice((driverPaymentsPage - 1) * itemsPerPage, driverPaymentsPage * itemsPerPage)
-                              .map((p) => (
-                            <tr
-                              key={p.id}
-                              className="hover:bg-slate-50 transition-all border-b border-slate-50"
-                            >
-                              <td className="px-8 py-5 text-[10px] font-mono text-slate-400">
-                                {p.paymentId || p.id?.slice(0, 8)}
-                              </td>
-                              <td className="px-8 py-5 text-sm font-black text-slate-900 italic">
-                                ₹{p.amount?.toLocaleString()}
-                              </td>
-                              <td className="px-8 py-5 text-[10px] font-black uppercase text-slate-500 tracking-widest leading-relaxed">
-                                <div className="font-sans text-slate-900 font-bold whitespace-nowrap">
-                                  {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.name || `Driver (${p.driverId?.slice(0, 6)})`}
-                                </div>
-                                {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.phone && (
-                                  <div className="text-[8px] text-slate-400 font-bold font-mono tracking-wider mt-0.5">
-                                    Phone: {drivers.find((d) => d.uid === p.driverId || d.id === p.driverId)?.phone}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-8 py-5">
-                                <span className="px-3 py-1 bg-amber-50 text-amber-500 rounded-full text-[8px] font-black uppercase">
-                                  {p.status}
-                                </span>
-                              </td>
-                              <td className="px-8 py-5">
-                                <button
-                                  onClick={() =>
-                                    handleDeleteDriverPayment(p.id!)
-                                  }
-                                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                    </tbody>
-                  </table>
-                  {(paymentSubTab === "INCOME" ? payments.length : driverPayments.length) > itemsPerPage && (
-                    <div className="flex items-center justify-between p-6 border-t border-slate-50">
-                        <button 
-                          disabled={paymentSubTab === "INCOME" ? paymentsPage === 1 : driverPaymentsPage === 1}
-                          onClick={() => paymentSubTab === "INCOME" ? setPaymentsPage(p => p - 1) : setDriverPaymentsPage(p => p - 1)}
-                          className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
-                          >Previous</button>
-                        <span className="text-[10px] font-black text-slate-400 uppercase">Page {paymentSubTab === "INCOME" ? paymentsPage : driverPaymentsPage} of {Math.ceil((paymentSubTab === "INCOME" ? payments.length : driverPayments.length) / itemsPerPage)}</span>
-                        <button 
-                          disabled={paymentSubTab === "INCOME" ? paymentsPage === Math.ceil(payments.length / itemsPerPage) : driverPaymentsPage === Math.ceil(driverPayments.length / itemsPerPage)}
-                          onClick={() => paymentSubTab === "INCOME" ? setPaymentsPage(p => p + 1) : setDriverPaymentsPage(p => p + 1)}
-                          className="px-4 py-2 bg-slate-100 text-slate-900 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50"
-                          >Next</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : activeTab === "TICKETS" ? (
-            <div className="space-y-6 flex flex-col">
-              <div className="flex justify-between items-center bg-slate-900 p-4 md:p-6 rounded-2xl text-white">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-black uppercase italic text-amber-500">
-                    Fleet Operations Support
-                  </h2>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-2">
-                    Active Conversations (
-                    {tickets.filter((t) => t.status === "open").length})
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden min-h-[500px]">
-                {/* Ticket List */}
-                <div className={cn(
-                  "bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col",
-                  activeTicketId && "hidden lg:flex"
-                )}>
-                  <div className="p-6 border-b border-slate-50 flex justify-between items-center">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                      Active Threads
-                    </span>
-                    <div className="flex gap-2">
-                      <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                    </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
-                    {tickets.map((t) => (
-                      <div
-                        key={t.id}
-                        onClick={() => setActiveTicketId(t.id!)}
-                        className={cn(
-                          "w-full p-6 text-left hover:bg-slate-50 transition-all group relative cursor-pointer",
-                          activeTicketId === t.id && "bg-amber-50",
-                        )}
+              
+              <div className="bg-transparent">
+                  <div className="space-y-4">
+                    {filteredDrivers.map((d) => (
+                      <details
+                        key={d.uid}
+                        className="bg-white rounded-[2rem] border border-slate-100 group [&_summary::-webkit-details-marker]:hidden shadow-sm overflow-hidden"
                       >
-                        <div className="flex justify-between items-start mb-1">
-                          <h4 className="text-[11px] font-black text-slate-900 uppercase italic tracking-tighter truncate leading-none">
-                            {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.name || t.driverName || "Driver " + t.driverId?.slice(-4)}
-                          </h4>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[8px] font-bold text-slate-400 font-mono uppercase">
-                              {t.createdAt
-                                ? new Date(
-                                    t.createdAt.toMillis(),
-                                  ).toLocaleDateString()
-                                : ""}
-                            </span>
-                            {t.unreadCount && t.unreadCount > 0 ? (
-                              <span className="w-5 h-5 bg-orange-600 text-white rounded-full flex items-center justify-center text-[9px] font-black shadow-lg shadow-orange-500/20 animate-pulse">
-                                {t.unreadCount}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <p className="text-[10px] text-slate-500 font-medium line-clamp-1 mb-2">
-                          {t.lastMessage || t.description}
-                        </p>
-                        {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.phone && (
-                          <p className="text-[9px] font-bold text-slate-400 font-mono tracking-wider uppercase mb-2">
-                            Phone: {drivers.find((d) => d.uid === t.driverId || d.id === t.driverId)?.phone}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
-                              t.status === "open"
-                                ? "bg-amber-100 text-amber-600"
-                                : "bg-green-100 text-green-600",
-                            )}
-                          >
-                            {t.status}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSupportTicket(t.id!);
-                            }}
-                            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
-                            title="Delete Thread"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                        {activeTicketId === t.id && (
-                          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-amber-500 rounded-l-full" />
-                        )}
-                      </div>
-                    ))}
-                    {tickets.length === 0 && (
-                      <div className="p-12 text-center">
-                        <MessageSquare
-                          size={32}
-                          className="mx-auto text-slate-100 mb-4"
-                        />
-                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
-                          No support traffic
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Chat Window */}
-                <div className={cn(
-                  "lg:col-span-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm flex flex-col overflow-hidden relative",
-                  !activeTicketId && "hidden lg:flex"
-                )}>
-                  {activeTicketId ? (
-                    <>
-                      <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => setActiveTicketId(null)}
-                            className="p-2.5 bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors rounded-xl hover:bg-slate-200"
-                          >
-                            <ArrowLeft size={18} />
-                          </button>
-                          <div>
-                            <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">
-                              {tickets.find((t) => t.id === activeTicketId)
-                                ?.driverName || "Operator Chat"}
-                            </h3>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-0.5">
-                              Secure Hub Line
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            if (activeTicketId) {
-                              await firebaseService.updateSupportTicketStatus(
-                                activeTicketId,
-                                "resolved",
-                              );
-                              setActiveTicketId(null);
-                            }
-                          }}
-                          className="text-[9px] font-black bg-slate-950 text-white px-4 py-2 rounded-xl uppercase tracking-widest shadow-xl shadow-slate-200"
-                        >
-                          CLOSE THREAD
-                        </button>
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/30">
-                        {chatMessages.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={cn(
-                              "flex flex-col max-w-[80%]",
-                              msg.senderRole === "admin"
-                                ? "ml-auto items-end"
-                                : "mr-auto items-start",
-                            )}
-                          >
-                            <div
-                              className={cn(
-                                "p-4 rounded-2xl text-[13px] font-medium leading-relaxed shadow-sm",
-                                msg.senderRole === "admin"
-                                  ? "bg-slate-900 text-white rounded-tr-none"
-                                  : "bg-white text-slate-800 rounded-tl-none border border-slate-200",
-                              )}
-                            >
-                              {msg.text}
-                            </div>
-                            <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-widest">
-                              {msg.senderName} •{" "}
-                              {msg.timestamp
-                                ? new Date(
-                                    msg.timestamp.toMillis(),
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : "Sending..."}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="p-6 border-t border-slate-100 flex gap-3 bg-white">
-                        <input
-                          value={newMessage}
-                          onChange={(e) => setNewMessage(e.target.value)}
-                          onKeyDown={(e) =>
-                            e.key === "Enter" && handleSendMessage()
-                          }
-                          placeholder="Draft response..."
-                          className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl py-4 px-6 font-medium text-sm focus:border-amber-500 focus:outline-none transition-all"
-                        />
-                        <button
-                          onClick={handleSendMessage}
-                          disabled={!newMessage.trim()}
-                          className="w-12 h-12 bg-slate-950 text-amber-500 rounded-2xl flex items-center justify-center transition-all disabled:opacity-50 active:scale-95 shadow-xl shadow-slate-200"
-                        >
-                          <Send size={18} />
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-slate-200 grayscale opacity-50 p-12 text-center">
-                      <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center mb-6">
-                        <MessageSquare size={40} />
-                      </div>
-                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest italic leading-none">
-                        Command Center
-                      </h3>
-                      <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest mt-4 max-w-xs">
-                        Select an active thread from the hub directory to
-                        initiate communication protocols.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : activeTab === "MONITOR" ? (
-            <div className="flex flex-col space-y-6 h-full overflow-hidden">
-              <div className="bg-slate-950 p-6 rounded-3xl shadow-2xl border border-slate-800 text-white relative overflow-hidden shrink-0">
-                <div className="absolute right-0 top-0 w-96 h-96 bg-amber-500/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
-                <div className="absolute left-0 bottom-0 w-64 h-64 bg-blue-500/10 blur-[80px] rounded-full translate-y-1/2 -translate-x-1/2" />
-                
-                <div className="relative z-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
-                  <div>
-                    <h2 className="text-2xl md:text-4xl font-black italic uppercase text-white mb-2 tracking-tighter flex items-center gap-3">
-                      <Cpu className="text-amber-500" size={32} />
-                      Fleet <span className="text-amber-500">Monitor</span> Control
-                    </h2>
-                    <div className="flex items-center gap-4">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] font-mono flex items-center gap-2">
-                        <Server size={12} /> Unit Control Protocol v4.0
-                      </p>
-                      <div className="h-1 w-1 bg-slate-700 rounded-full" />
-                      <p className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] font-mono flex items-center gap-2">
-                        <ShieldCheck size={12} /> Secure Tunnel Active
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="bg-white/5 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10 flex items-center gap-4">
-                      <div className="text-center border-r border-white/10 pr-4">
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active</p>
-                        <p className="text-xl font-black text-amber-500 font-mono">{(terminals || []).length}</p>
-                      </div>
-                      <div className="text-center border-r border-white/10 px-4">
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Online</p>
-                        <p className="text-xl font-black text-emerald-500 font-mono">{(terminals || []).filter(t => t.metrics?.online).length}</p>
-                      </div>
-                      <div className="text-center pl-4">
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Alerts</p>
-                        <p className="text-xl font-black text-red-500 font-mono">0</p>
-                      </div>
-                    </div>
-                    
-                    <select
-                      className="bg-slate-900 border border-slate-700 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 text-white min-w-[180px]"
-                      value={selectedArea}
-                      onChange={(e) => setSelectedArea(e.target.value)}
-                    >
-                      <option value="ALL">Global Network</option>
-                      {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
-                        <option key={city} value={city}>{city?.toUpperCase()}</option>
-                      ) as any)}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-2 custom-scrollbar pb-24">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                  {terminals
-                    .filter(t => selectedArea === "ALL" || (drivers.find(d => d.uid === t.driverId)?.city || "").toUpperCase() === selectedArea.toUpperCase())
-                    .map((t) => {
-                    const driver = (drivers || []).find((d) => d.uid === t.driverId);
-                    const isOnline = t.metrics?.online;
-                    const tvPassword = firebaseService.decryptTVPassword(t.teamViewerPasswordEncrypted);
-                    
-                    return (
-                      <motion.div
-                        key={t.id}
-                        layout
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all group overflow-hidden flex flex-col"
-                      >
-                        {/* Device Header */}
-                        <div className="p-6 border-b border-slate-50 flex items-start justify-between">
+                        <summary className="p-6 md:p-8 cursor-pointer list-none flex flex-col md:flex-row justify-between items-start md:items-center outline-none gap-4">
                           <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-amber-500 font-bold text-lg relative group-hover:scale-110 transition-transform shadow-lg shadow-slate-200">
-                              <Tv size={24} />
-                              {isOnline && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
-                              )}
+                            <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-950 rounded-[1.5rem] overflow-hidden relative border border-slate-100 shadow-sm shrink-0">
+                                <img src={d.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${d.uid}`} alt="" className="w-full h-full object-cover" />
                             </div>
-                            <div>
-                              <h4 className="text-[13px] font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-1">
-                                {driver?.name || "UNASSIGNED NODE"}
-                              </h4>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                                  {driver?.vNo || "AUTO NO-ID"}
-                                </span>
-                                <span className="w-1 h-1 bg-slate-200 rounded-full" />
-                                <span className="text-[8px] font-mono text-slate-300 font-black">
-                                  {t.id.slice(0, 12)}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                             <div
-                              className={cn(
-                                "text-[8px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-sm",
-                                isOnline
-                                  ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-500/5"
-                                  : "bg-red-50 text-red-600 border-red-100"
-                              )}
-                            >
-                              {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
-                            </div>
-                            <span className="text-[7px] font-black text-slate-300 uppercase tracking-[0.2em] font-mono">
-                              {driver?.city || "Global"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Snapshot Area */}
-                        <div className="relative aspect-video mx-4 mt-2 bg-slate-950 rounded-3xl overflow-hidden group/snap shadow-inner border-4 border-white">
-                           {t.metrics?.currentAdImage ? (
-                             <>
-                               <img
-                                  src={getSafeUrl(t.metrics.currentAdImage)}
-                                  alt="Device Snapshot"
-                                  className="w-full h-full object-cover grayscale-[0.3] hover:grayscale-0 transition-all duration-700 opacity-60 group-hover/snap:opacity-100"
-                                  referrerPolicy="no-referrer"
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
-                             </>
-                           ) : (
-                             <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-700">
-                               <Cast size={32} className="opacity-20" />
-                               <span className="text-[8px] font-black uppercase tracking-[0.3em]">No Visual Signal</span>
-                             </div>
-                           )}
-                           
-                           <div className="absolute top-4 right-4 flex gap-2">
-                             <button 
-                               onClick={() => handleCaptureFrame(t)}
-                               className="p-2 bg-black/40 backdrop-blur-md border border-white/20 rounded-xl text-white hover:bg-amber-500 hover:text-slate-950 transition-all shadow-xl"
-                               title="Capture Live Snapshot"
-                             >
-                               <Maximize2 size={14} />
-                             </button>
-                           </div>
-                           
-                           <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end opacity-0 group-hover/snap:opacity-100 transition-opacity">
-                              <div className="bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10">
-                                <p className="text-[7px] font-black text-slate-400 uppercase mb-1">Currently Playing</p>
-                                <p className="text-[9px] font-black text-white uppercase italic tracking-tighter truncate max-w-[150px]">
-                                  {t.metrics?.currentAdTitle || "Diagnostic Loop"}
-                                </p>
-                              </div>
-                           </div>
-                        </div>
-
-                        {/* Status Grid */}
-                        <div className="p-6 grid grid-cols-2 gap-3 border-b border-slate-50">
-                          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col justify-center">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                              <Wifi size={10} className="text-emerald-500" /> Ping Status
-                            </p>
-                            <p className="text-xs font-black text-slate-900 font-mono">
-                              {isOnline ? "54ms" : "---"} <span className="text-[8px] text-slate-400 font-sans ml-1 uppercase">Stable</span>
-                            </p>
-                          </div>
-                          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col justify-center">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                              <Activity size={10} className="text-amber-500" /> Sys Health
-                            </p>
-                            <p className="text-xs font-black text-slate-900 font-mono">
-                              {isOnline ? "Normal" : "CRITICAL"} <span className="text-[8px] text-slate-400 font-sans ml-1 uppercase">Uptime</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* TeamViewer Area */}
-                        <div className="p-6 space-y-4">
-                           <div className="flex items-center justify-between mb-2">
-                             <div className="flex items-center gap-2 text-slate-950">
-                               <Tv size={14} className="text-blue-500" />
-                               <span className="text-[10px] font-black uppercase tracking-widest">TeamViewer Access</span>
-                             </div>
-                             <button 
-                               onClick={() => handleRemoteCommand(t.id, 'TV_UPDATE')}
-                               className="p-1 px-2 border border-slate-200 rounded-lg text-[8px] font-black uppercase hover:bg-slate-50 transition-all"
-                             >
-                               Update Config
-                             </button>
-                           </div>
-                           
-                           <div className="flex gap-2">
-                             <div className="flex-1 bg-slate-50 border border-slate-100 p-3 rounded-2xl flex flex-col justify-center">
-                               <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-1">ID Protocol</span>
-                               <p className="text-[11px] font-black text-slate-900 tracking-widest font-mono truncate">{t.teamViewerId || "UNCONFIGURED"}</p>
-                             </div>
-                             <div className="flex-1 bg-slate-50 border border-slate-100 p-3 rounded-2xl flex flex-col justify-center relative group/pass">
-                               <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider mb-1">Secure Key</span>
-                               <div className="flex items-center justify-between">
-                                 <p className="text-[11px] font-black text-slate-900 tracking-widest font-mono">
-                                   {tvPasswordVisible[t.id] ? tvPassword : "••••••••"}
-                                 </p>
-                                 <button onClick={() => toggleTVPassword(t.id)} className="text-slate-400 hover:text-slate-900 transition-colors">
-                                   {tvPasswordVisible[t.id] ? <Eye size={12} /> : <Eye size={12} className="opacity-40" />}
-                                 </button>
-                               </div>
-                             </div>
-                           </div>
-
-                           <button 
-                             onClick={() => startTVSession(t)}
-                             disabled={isTVConnecting || !t.teamViewerId}
-                             className="w-full py-4 bg-[#0a66c2] text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-blue-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale"
-                           >
-                             <MousePointer2 size={16} />
-                             {isTVConnecting ? "Establishing Tunnel..." : "Open TeamViewer Session"}
-                           </button>
-                        </div>
-
-                        {/* Remote Control Panel */}
-                        <div className="p-6 pt-0 mt-auto">
-                          <div className="grid grid-cols-4 gap-2">
-                            <button 
-                              onClick={() => handleRemoteCommand(t.id, 'RESTART_APP')}
-                              disabled={commandInProgress === `${t.id}-RESTART_APP`}
-                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-amber-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
-                              title="Restart APK Service"
-                            >
-                              <RefreshCw size={14} className={cn("text-slate-400 group-hover/ctrl:text-amber-500 transition-colors", commandInProgress === `${t.id}-RESTART_APP` && "animate-spin text-amber-500")} />
-                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-amber-500">Restart</span>
-                            </button>
-                            <button 
-                              onClick={() => handleRemoteCommand(t.id, 'VOLUME', { volume: 80 })}
-                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-blue-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
-                              title="Set Default Volume"
-                            >
-                              <Volume2 size={14} className="text-slate-400 group-hover/ctrl:text-blue-500 transition-colors" />
-                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-blue-500">Volume</span>
-                            </button>
-                            <button 
-                              onClick={() => handleRemoteCommand(t.id, 'EMERGENCY_BROADCAST')}
-                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-red-50 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
-                              title="Push Emergency Text"
-                            >
-                              <AlertTriangle size={14} className="text-slate-400 group-hover/ctrl:text-red-500 transition-colors" />
-                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-red-500">Broadcast</span>
-                            </button>
-                            <button 
-                              onClick={() => handleRemoteCommand(t.id, 'LOCK', { isLocked: true })}
-                              className="aspect-square flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-slate-950 rounded-2xl border border-slate-100 transition-all group/ctrl shadow-sm hover:shadow-lg active:scale-95"
-                              title="Remote Device Lock"
-                            >
-                              <Lock size={14} className="text-slate-400 group-hover/ctrl:text-white transition-colors" />
-                              <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400 group-hover/ctrl:text-white">Lock</span>
-                            </button>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                  
-                  {terminals.length === 0 && (
-                    <div className="col-span-full h-screen/2 flex flex-col items-center justify-center bg-slate-50 rounded-[4rem] border-4 border-dashed border-white">
-                      <div className="w-32 h-32 bg-white rounded-[3rem] flex items-center justify-center text-slate-200 mb-8 shadow-xl">
-                        <Activity size={64} className="animate-pulse" />
-                      </div>
-                      <h3 className="text-2xl font-black text-slate-950 uppercase italic tracking-tighter mb-4">No Network Nodes Found</h3>
-                      <p className="max-w-md text-center text-xs font-black text-slate-400 uppercase tracking-widest leading-relaxed px-12">
-                        Deployment of Android Smart Screens into auto fleet is required to establish visual communication uplink and telemetry synchronization.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : activeTab === "FLEET" ? (
-            <div className="space-y-6 pb-32">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
-                <div className="absolute right-0 top-0 w-64 h-64 bg-emerald-500/5 blur-3xl rounded-full" />
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-6 w-full">
-                  <div className="shrink-0">
-                    <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500">
-                      Fleet Operations
-                    </h2>
-                    <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest italic opacity-80">
-                      Network Personnel Cluster
-                    </p>
-                  </div>
-                  
-                  <div className="flex flex-1 gap-3 w-full">
-                    <div className="relative flex-1">
-                      <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input 
-                        type="text" 
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Search fleet..."
-                        className="w-full bg-white/5 border border-white/10 p-3 pl-10 rounded-xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all h-12"
-                      />
-                    </div>
-                    <select
-                      className="bg-white/5 border border-white/10 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-12 text-white"
-                      value={selectedArea}
-                      onChange={(e) => setSelectedArea(e.target.value)}
-                    >
-                      <option value="ALL" className="bg-slate-900 text-white">All Areas</option>
-                      {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
-                        <option key={city} value={city} className="bg-slate-900 text-white">{city?.toUpperCase()}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    onClick={(e) => handleExtractionClick(e, filteredDrivers, "Network_Fleet_Directory")}
-                    disabled={isExtracting}
-                    className="bg-amber-500 text-slate-950 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50 h-12 shrink-0"
-                  >
-                    {isExtracting ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-                    {isExtracting ? "Processing..." : "Extract"}
-                  </button>
-                </div>
-              </div>
-              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left sm:table">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-left">
-                          Operator Info
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">
-                          Network UUID
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">
-                          GPS Tracking ID
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">
-                          Status
-                        </th>
-                        <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {filteredDrivers.map((d) => (
-                        <tr
-                          key={d.uid}
-                          className="hover:bg-slate-50/50 transition-all group"
-                        >
-                          <td className="px-8 py-5">
                             <div className="flex flex-col">
-                              <span className="text-[11px] md:text-sm font-black text-slate-900 italic tracking-tighter leading-none">
+                              <h4 className="text-sm md:text-xl font-black text-slate-900 italic tracking-tighter leading-none">
                                 {d.name}
-                              </span>
-                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                                {d.vNo || "Unspecified Unit"}
-                              </span>
-                              {d.phone && (
-                                <span className="text-[9px] font-bold text-slate-500 font-mono tracking-wider mt-0.5">
-                                  Phone: {d.phone}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-8 py-5 text-center font-mono text-[9px] font-black text-slate-500 uppercase">
-                            {d.uid}
-                          </td>
-                          <td className="px-8 py-5 text-center font-mono text-[9px] font-black text-amber-600 uppercase">
-                            {d.gpsId || "UNLINKED"}
-                          </td>
-                          <td className="px-8 py-5 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <div
-                                className={cn(
-                                  "w-1.5 h-1.5 rounded-full",
-                                  d.status === "active"
-                                    ? "bg-green-500 animate-pulse"
-                                    : "bg-red-500",
-                                )}
-                              />
-                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 italic font-mono">
-                                {d.status || "OFFLINE"}
+                              </h4>
+                              <span className="text-[10px] md:text-xs font-bold text-slate-500 mt-1.5 uppercase tracking-[0.2em]">
+                                 {d.vNo || "Unspecified Unit"}
                               </span>
                             </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            <div className="flex gap-2 items-center justify-end">
+                          </div>
+                          <div className="flex items-center gap-4 w-full md:w-auto mt-2 md:mt-0 justify-between md:justify-end">
+                             <div className="flex items-center gap-2 bg-slate-50 p-2 md:p-3 rounded-2xl border border-slate-100">
+                               <div className={`w-2.5 h-2.5 rounded-full ${d.status === "active" ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" : "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"}`} />
+                               <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-700">{d.status}</span>
+                             </div>
+                             <ChevronRight className="w-5 h-5 text-slate-400 group-open:rotate-90 transition-transform" />
+                          </div>
+                        </summary>
+                        <div className="px-6 md:px-8 pb-6 md:pb-8 pt-0 space-y-4">
+                          <div className="w-full border-t border-slate-50 mb-4" />
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
+                               <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Phone Contact</p>
+                               <p className="text-xs font-mono font-black text-slate-700">{d.phone || "UNSPECIFIED"}</p>
+                            </div>
+                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
+                              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">GPS Tracking ID</p>
+                              <p className="text-xs font-mono font-black text-amber-600">{d.gpsId || "UNLINKED"}</p>
+                            </div>
+                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
+                              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Subscription / Tier</p>
+                              <p className="text-xs font-black text-slate-700 uppercase tracking-widest">{d.subscriptionTier || "FREE"}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-3 pt-4 border-t border-slate-50">
+                            <button
+                              onClick={() => {
+                                setSelectedDriverForEarning(d);
+                                setShowEarningModal(true);
+                              }}
+                              className="flex-1 md:flex-none px-6 py-4 bg-amber-500 text-slate-950 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:scale-105 transition-all text-center"
+                            >
+                              Make Payment
+                            </button>
+                            {d.status === 'pending_verification' && (
                               <button
                                 onClick={() => {
                                   setSelectedDriverForAgreement(d);
-                                  firebaseService.subscribeToAgreement(d.id, (agr) => {
-                                      setSelectedDriverForAgreement(prev => prev && prev.id === d.id ? { ...prev, _agreementData: agr } : prev);
-                                  });
                                 }}
-                                className="text-[8px] font-black bg-blue-100 text-blue-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-blue-200 transition-all font-mono"
+                                className="flex-1 md:flex-none px-6 py-4 bg-slate-900 text-amber-500 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-all text-center flex items-center justify-center gap-2"
                               >
-                                Review
+                                <Shield size={14} /> REVIEW DOCS
                               </button>
-                              <button
-                                onClick={() => {
-                                  setSelectedDriverForEarning(d);
-                                  setShowEarningModal(true);
-                                }}
-                                className="text-[8px] font-black bg-slate-100 text-slate-600 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
-                              >
-                                Payment
-                              </button>
+                            )}
+                            {d.status !== "active" && !d.accessKey && (
                               <button
                                 onClick={() => {
                                   setSelectedDriverForProvision(d);
                                   setShowProvisionModal(true);
                                 }}
-                                className="text-[8px] font-black bg-slate-900 text-amber-500 px-3 py-2 rounded-lg uppercase tracking-widest hover:bg-slate-800 transition-all shadow-sm flex items-center gap-1 font-mono"
+                                className="flex-1 md:flex-none px-6 py-4 bg-white border-2 border-slate-100 text-slate-500 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] hover:border-amber-500 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-2"
                               >
-                                <Smartphone size={10} />
-                                Provision
+                                <Smartphone size={14} /> Provision Device
                               </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  {/* Mobile Card Layout */}
-                  <div className="sm:hidden divide-y divide-slate-100 p-4 space-y-4">
-                    {filteredDrivers.map((d) => (
-                      <div
-                        key={d.uid}
-                        className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900 italic tracking-tighter leading-none">
-                              {d.name}
-                            </h4>
-                            {d.phone && (
-                              <p className="text-[9px] font-bold text-slate-500 font-mono tracking-wider mt-1">
-                                Phone: {d.phone}
-                              </p>
                             )}
                           </div>
-                          <div className="bg-white px-3 py-1 rounded-full border border-slate-100 flex items-center gap-2">
-                            <div
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                d.status === "active"
-                                  ? "bg-green-500"
-                                  : "bg-red-500",
-                              )}
-                            />
-                            <span className="text-[8px] font-black uppercase text-slate-600">
-                              {d.status}
-                            </span>
-                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 bg-white/50 p-4 rounded-2xl border border-slate-50">
-                          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
-                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                              Network UUID
-                            </p>
-                            <p className="text-[9px] font-black text-slate-500 font-mono truncate w-full text-center">
-                              {d.uid.slice(0, 8)}...
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
-                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                              GPS ID
-                            </p>
-                            <p className="text-[9px] font-black text-amber-600 font-mono italic">
-                              {d.gpsId || "N/A"}
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
-                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                              Tier
-                            </p>
-                            <p className="text-[9px] font-black text-amber-600">
-                              {d.subscriptionTier || "FREE"}
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50/50">
-                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                              Vehicle
-                            </p>
-                            <p className="text-[9px] font-black text-slate-900">
-                              {d.vNo || "PENDING"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setSelectedDriverForProvision(d);
-                              setShowProvisionModal(true);
-                            }}
-                            className="flex-1 py-4 bg-slate-950 text-amber-500 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-                          >
-                            <Smartphone size={12} /> Provision
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedDriverForEarning(d);
-                              setShowEarningModal(true);
-                            }}
-                            className="py-4 px-6 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest"
-                          >
-                            Credit
-                          </button>
-                        </div>
-                      </div>
+                      </details>
                     ))}
                   </div>
+              </div>
+            </div>
+          ) : activeTab === "USERS" ? (
+            <div className="space-y-6 pb-32">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
+                <div className="relative z-10 space-y-1 md:space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-amber-500/10 p-2 md:p-3 rounded-lg border border-amber-500/20">
+                      <Users size={16} className="text-amber-500 md:w-5 md:h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter">
+                        Staff & Users
+                      </h2>
+                      <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
+                        Manage roles (Assign Franchise / Support)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[800px]">
+                    <thead>
+                      <tr className="border-b-2 border-slate-900/10">
+                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">UID / Email</th>
+                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Name</th>
+                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Phone</th>
+                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Role</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {users.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-12 text-center text-slate-400 text-xs italic">
+                            No users found in database.
+                          </td>
+                        </tr>
+                      ) : (
+                        users.map((item) => (
+                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="py-4">
+                              <div className="flex items-center gap-2">
+                                <div>
+                                  <div className="text-xs font-bold text-slate-800 select-all">{item.email || 'N/A'}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono select-all">ID: {item.id}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-4">
+                              <span className="text-xs font-semibold text-slate-700">{item.name || 'Anonymous'}</span>
+                            </td>
+                            <td className="py-4">
+                              <span className="text-xs font-mono text-slate-600">{item.phone || 'N/A'}</span>
+                            </td>
+                            <td className="py-4">
+                              <select 
+                                value={item.role || 'USER'}
+                                onChange={async (e) => {
+                                  const newRole = e.target.value;
+                                  try {
+                                    setOpFeedback({ message: 'Updating role...', type: 'info' });
+                                    await firebaseService.updateUserRole(item.id, newRole);
+                                    setUsers(prev => prev.map(u => u.id === item.id ? { ...u, role: newRole } : u));
+                                    setOpFeedback({ message: 'Role assigned successfully', type: 'success' });
+                                  } catch (err) {
+                                    setOpFeedback({ message: 'Failed to assign role', type: 'error' });
+                                  }
+                                }}
+                                className="px-2 py-1 bg-slate-100 rounded border-0 text-[10px] font-black uppercase tracking-wider text-slate-700 outline-none focus:ring-2 focus:ring-amber-500"
+                              >
+                                <option value="USER">USER</option>
+                                <option value="DRIVER">DRIVER</option>
+                                <option value="CUSTOMER">CUSTOMER</option>
+                                <option value="FRANCHISE_OWNER">FRANCHISE_OWNER</option>
+                                <option value="SUPPORT">SUPPORT</option>
+                                <option value="ADMIN">ADMIN</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -4778,12 +4110,6 @@ export default function AdminPortal({
         </motion.div>
          </div>
         </div>
-      )}
-
-      {activeTab === "STUDIO_CONFIG" && (
-         <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 flex overflow-hidden">
-             <AdminStudioConfig />
-         </div>
       )}
 
       {activeTab === "NOTICES" && (
@@ -6113,20 +5439,20 @@ export default function AdminPortal({
                            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Verification Selfie</p>
                               <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
-                                 <img src={selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.profileImage || selectedDriverForAgreement.documents?.selfie} className="w-full h-full object-cover" alt="Selfie" />
+                                 <img src={getSafeUrl(selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.profileImage || selectedDriverForAgreement.documents?.selfie)} className="w-full h-full object-cover" alt="Selfie" />
                               </div>
                            </div>
                            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Digital Signature</p>
                               <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-4 flex-shrink-0">
-                                 <img src={selectedDriverForAgreement._agreementData?.signatureUrl} className="max-w-full max-h-full object-contain" alt="Signature" />
+                                 <img src={getSafeUrl(selectedDriverForAgreement._agreementData?.signatureUrl)} className="max-w-full max-h-full object-contain" alt="Signature" />
                               </div>
                            </div>
                            <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Aadhar</p>
                               <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
                                  {(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar) ? (
-                                   <img src={selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar} className="w-full h-full object-contain" alt="Aadhar" />
+                                   <img src={getSafeUrl(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar)} className="w-full h-full object-contain" alt="Aadhar" />
                                  ) : (
                                    <X size={24} className="text-slate-300" />
                                  )}
@@ -6136,7 +5462,7 @@ export default function AdminPortal({
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Driving License</p>
                               <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
                                  {(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense) ? (
-                                   <img src={selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense} className="w-full h-full object-contain" alt="DL" />
+                                   <img src={getSafeUrl(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense)} className="w-full h-full object-contain" alt="DL" />
                                  ) : (
                                    <X size={24} className="text-slate-300" />
                                  )}
@@ -6152,7 +5478,7 @@ export default function AdminPortal({
                            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 group hover:bg-white/10 transition-all cursor-pointer" 
                                 onClick={() => {
                                    if (selectedDriverForAgreement._agreementData?.agreementPdfUrl) {
-                                       window.open(selectedDriverForAgreement._agreementData.agreementPdfUrl, '_blank');
+                                       window.open(getSafeUrl(selectedDriverForAgreement._agreementData.agreementPdfUrl), '_blank');
                                    } else {
                                        showToast('PDF not generated for initial quick provisions.', 'info');
                                    }
@@ -6195,7 +5521,7 @@ export default function AdminPortal({
                       <button 
                         onClick={async () => {
                            if (confirm("Approve all documents and driver and enable payouts?")) {
-                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.uid, { kycStatus: 'APPROVED', status: 'active', payoutEnabled: true, adminApproved: true });
+                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.id, { kycStatus: 'APPROVED', status: 'active', payoutEnabled: true, adminApproved: true });
                               showToast("Driver Network Profile Approved.", 'success');
                               setSelectedDriverForAgreement(null);
                            }

@@ -1489,6 +1489,17 @@ export const firebaseService = {
     }
   },
 
+  async updateUserRole(userId: string, role: string) {
+     const userRef = doc(db, USERS_COLLECTION, userId);
+     try {
+       await updateDoc(userRef, { role, updatedAt: serverTimestamp() });
+       return true;
+     } catch (e) {
+       handleFirestoreError(e, OperationType.WRITE, `${USERS_COLLECTION}/${userId}`);
+       throw e;
+     }
+  },
+
   async updateUserProfile(userId: string, data: Partial<any>) {
     if (!userId) return;
     try {
@@ -2550,5 +2561,13 @@ export const firebaseService = {
   async updateShowcaseVideos(videos: Record<string, string>) {
     // Obsolete with high-performance static S3 proxy serving
     return;
+  },
+
+  subscribeToUsers(callback: (users: any[]) => void) {
+    const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    return onSnapshot(q, (snapshot) => {
+      const users = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(users);
+    });
   }
 };

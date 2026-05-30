@@ -66,6 +66,13 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
     aadhaar: '',
     license: ''
   });
+  
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [newTicket, setNewTicket] = useState({
+    subject: '',
+    message: '',
+    priority: 'HIGH'
+  });
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -111,28 +118,54 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
     // Listen to drivers scoped to this city/franchis
     const drQuery = query(collection(db, 'drivers'), where('cityId', '==', cityId));
     const unsubDrivers = onSnapshot(drQuery, (snap) => {
-      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let items: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (items.length === 0 && userProfile?.email === 'franchise@autoads.in') {
+        items = [
+          { id: 'mock-dr-1', driverId: 'mock-dr-1', name: 'Sanjay Gowda', phone: '9876543210', email: 'sanjay@example.com', kycStatus: 'APPROVED', status: 'ACTIVE', upiId: 'sanjay@ybl', cityId },
+          { id: 'mock-dr-2', driverId: 'mock-dr-2', name: 'Ramesh Babu', phone: '9876588210', email: 'ramesh@example.com', kycStatus: 'PENDING', status: 'PENDING', cityId },
+          { id: 'mock-dr-3', driverId: 'mock-dr-3', name: 'Arun Kumar', phone: '9988776655', email: 'arun@example.com', kycStatus: 'APPROVED', status: 'ACTIVE', upiId: 'arun@axl', cityId },
+        ];
+      }
       setDrivers(items);
     }, (err) => console.warn('[FRANCHISE] Listen drivers err:', err));
 
     // Listen to devices
     const devQuery = query(collection(db, 'devices'), where('cityId', '==', cityId));
     const unsubDevices = onSnapshot(devQuery, (snap) => {
-      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let items: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (items.length === 0 && userProfile?.email === 'franchise@autoads.in') {
+        items = [
+          { id: 'DEV-MYS-001', driverId: 'mock-dr-1', status: 'ONLINE', cityId, earnings: 450 },
+          { id: 'DEV-MYS-002', driverId: 'mock-dr-3', status: 'ONLINE', cityId, earnings: 320 },
+          { id: 'DEV-MYS-003', driverId: null, status: 'OFFLINE', cityId, earnings: 0 },
+        ];
+      }
       setDevices(items);
     });
 
     // Listen to campaigns targeted to this city
     const campQuery = query(collection(db, 'campaigns'), where('cityId', '==', cityId));
     const unsubCampaigns = onSnapshot(campQuery, (snap) => {
-      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let items: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (items.length === 0 && userProfile?.email === 'franchise@autoads.in') {
+        items = [
+          { id: 'CAMP-M-1', title: 'Mysore Dasara Festivities', status: 'LIVE', mediaType: 'IMAGE', mediaUrl: 'https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?w=800', safeContent: true, kidsSafe: true, categoryTags: ['tourism'] },
+          { id: 'CAMP-M-2', title: 'Local Bakery Ads', status: 'PENDING', mediaType: 'VIDEO', mediaUrl: 'https://cdn.pixabay.com/video/2019/02/08/21262-316499880_tiny.mp4', safeContent: true, kidsSafe: true, categoryTags: ['food'] }
+        ];
+      }
       setCampaigns(items);
     });
 
     // Listen to localized support tickets
     const ticketQuery = query(collection(db, 'supportTickets'), where('cityId', '==', cityId));
     const unsubTickets = onSnapshot(ticketQuery, (snap) => {
-      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let items: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (items.length === 0 && userProfile?.email === 'franchise@autoads.in') {
+        items = [
+          { id: 'TKT-M-01', subject: 'Device Screen Glitch', message: 'The screen is flickering on bumpy roads.', priority: 'HIGH', status: 'OPEN', createdAt: new Date().toISOString() },
+          { id: 'TKT-M-02', subject: 'Payout Delay', message: 'Last week payment not reflected in account.', priority: 'MEDIUM', status: 'IN_PROGRESS', createdAt: new Date(Date.now() - 86400000).toISOString() }
+        ];
+      }
       setTickets(items);
     });
 
@@ -218,6 +251,30 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
     }
   };
 
+  const handleRaiseTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTicket.subject || !newTicket.message) {
+      showToast('Need subject and issue description', 'error');
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'supportTickets'), {
+        subject: newTicket.subject,
+        message: newTicket.message,
+        priority: newTicket.priority,
+        status: 'OPEN',
+        cityId,
+        franchiseId,
+        createdAt: new Date().toISOString()
+      });
+      showToast('Ticket escalated to Global Headquarters successfully!');
+      setShowTicketModal(false);
+      setNewTicket({ subject: '', message: '', priority: 'HIGH' });
+    } catch (err: any) {
+      showToast('Failed to raise ticket', 'error');
+    }
+  };
+
   // Switch ticket status locally
   const updateTicketStatus = async (id: string, newStatus: 'OPEN' | 'IN_PROGRESS' | 'CLOSED') => {
     try {
@@ -266,34 +323,33 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
       </AnimatePresence>
 
       {/* Top Header Rail */}
-      <header className="border-b border-slate-900 bg-slate-900/40 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-lg shadow-amber-500/5">
-            <TrendingUp size={20} className="text-amber-500 animate-pulse" />
+      <header className="border-b border-indigo-900/40 bg-[#0A0B10]/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex items-center justify-between shadow-2xl">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/20 border border-indigo-500/30">
+            <img src="/mayaan_logo.svg" alt="Mayaan Logo" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = "/mayaan_logo.jpeg")} />
           </div>
           <div>
             <h1 className="text-lg font-black italic text-white uppercase tracking-tighter flex items-center gap-1.5 leading-none shadow-sm">
-              AutoAds <span className="text-amber-500 tracking-widest text-xs px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 not-italic">FRANCHISE</span>
+              Mayaan <span className="text-amber-400 tracking-widest text-xs px-2 py-0.5 rounded-md bg-amber-400/10 border border-amber-400/20 not-italic">FRANCHISE COMMAND</span>
             </h1>
-            <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase mt-1 flex items-center gap-1">
-              <MapPin size={10} className="text-amber-500" /> {getCityName(cityId)} REGION — Mapped to {getFranchiseName(franchiseId)}
+            <p className="text-[10px] font-black text-indigo-300 tracking-widest uppercase mt-1 flex items-center gap-1">
+              <MapPin size={10} className="text-amber-400" /> {getCityName(cityId)} REGION — Mapped to {getFranchiseName(franchiseId)}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex flex-col text-right">
-            <span className="text-xs font-bold text-white leading-none mb-0.5">{userProfile?.name || 'Local Franchise Partner'}</span>
-            <span className="text-[9px] font-semibold text-slate-500">{userProfile?.email}</span>
+        <div className="flex items-center gap-6">
+          <div className="hidden md:flex flex-col items-end border-r border-indigo-900/50 pr-6 mr-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Targeting Franchise</span>
+            <span className="text-xs font-bold text-white tracking-widest">{userProfile?.name?.toUpperCase() || 'FRANCHISE HOLDER'}</span>
           </div>
-          
           <button 
             type="button" 
             onClick={onLogout}
-            className="flex items-center gap-2 px-3.5 py-2 hover:bg-white/5 border border-slate-800 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-400 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-950 hover:bg-rose-950/40 hover:text-rose-400 text-indigo-300 rounded-xl transition-all border border-indigo-800/50 hover:border-rose-900/50 text-xs font-black uppercase tracking-widest"
           >
             <LogOut size={14} />
-            <span className="hidden sm:inline">Logout</span>
+            <span className="hidden sm:inline">Stand Down</span>
           </button>
         </div>
       </header>
@@ -767,9 +823,18 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
           {/* Local Support Issues management */}
           {activeTab === 'TICKETS' && (
             <div className="space-y-6">
-              <div>
-                <h3 className="text-base font-black italic text-white uppercase tracking-wider">Local Complaint Handling</h3>
-                <p className="text-[10px] font-bold text-slate-400">Issues reported by local drivers and customers inside {getCityName(cityId)} scope.</p>
+              <div className="flex justify-between items-end">
+                <div>
+                  <h3 className="text-base font-black italic text-white uppercase tracking-wider">Complaint Handling & Global Escalation</h3>
+                  <p className="text-[10px] font-bold text-indigo-300 tracking-wider">Issues reported inside {getCityName(cityId)} scope, or escalate to global support HQ.</p>
+                </div>
+                <button
+                  onClick={() => setShowTicketModal(true)}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-600/30 transition-all font-black uppercase text-xs tracking-wider"
+                >
+                  <AlertCircle size={14} />
+                  Escalate an Issue
+                </button>
               </div>
 
               <div className="bg-slate-900/40 border border-slate-900 rounded-3xl p-6 space-y-4">
@@ -873,6 +938,85 @@ export default function FranchisePortal({ onLogout }: FranchisePortalProps) {
 
         </main>
       </div>
+
+      {/* Ticket Upload Modal */}
+      <AnimatePresence>
+        {showTicketModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-indigo-950/80 border border-indigo-500/30 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            >
+              <div className="px-6 py-5 border-b border-indigo-900/50 flex justify-between items-center bg-indigo-900/20">
+                <h3 className="text-sm font-black text-white italic uppercase tracking-wider flex items-center gap-2">
+                  <AlertCircle size={16} className="text-indigo-400" />
+                  Escalate Issue to Global Support
+                </h3>
+                <button onClick={() => setShowTicketModal(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-900/50 text-slate-400 hover:text-white transition-all cursor-pointer">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto max-h-[70vh]">
+                <form id="franchise-ticket-form" onSubmit={handleRaiseTicket} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black tracking-widest text-indigo-300 uppercase">Issue Subject / Category</label>
+                    <input 
+                      type="text"
+                      className="w-full bg-slate-900/50 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-medium"
+                      placeholder="e.g., Payout Delay, Technical Glitch, Supply Request"
+                      value={newTicket.subject}
+                      onChange={e => setNewTicket({...newTicket, subject: e.target.value})}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black tracking-widest text-indigo-300 uppercase">Issue Priority</label>
+                    <select
+                      className="w-full bg-slate-900/50 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-medium appearance-none"
+                      value={newTicket.priority}
+                      onChange={e => setNewTicket({...newTicket, priority: e.target.value})}
+                    >
+                      <option value="LOW">Low - General Inquiry</option>
+                      <option value="MEDIUM">Medium - Performance Impacts</option>
+                      <option value="HIGH">High - Urgent / Critical Error</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black tracking-widest text-indigo-300 uppercase">Issue Description / Logs</label>
+                    <textarea 
+                      className="w-full bg-slate-900/50 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-medium resize-none"
+                      placeholder="Please fully detail your issue to help Global Support respond effectively..."
+                      rows={5}
+                      value={newTicket.message}
+                      onChange={e => setNewTicket({...newTicket, message: e.target.value})}
+                      required
+                    />
+                  </div>
+                </form>
+              </div>
+
+              <div className="px-6 py-5 border-t border-indigo-900/50 bg-slate-950 flex gap-3">
+                <button type="button" onClick={() => setShowTicketModal(false)} className="flex-1 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-900 rounded-xl transition-all cursor-pointer">
+                  Cancel
+                </button>
+                <button type="submit" form="franchise-ticket-form" className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-lg shadow-indigo-600/20 text-xs font-black uppercase tracking-widest transition-all cursor-pointer">
+                  Escalate Request
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
