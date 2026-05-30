@@ -2355,6 +2355,7 @@ export default function CustomerPortal({ onLogout, onOpenStudio }: CustomerPorta
                 <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.3em]">© 2026 AUTOADS NETWORK LIVE / MAYAAN GROUP</p>
                 <div className="flex gap-4 opacity-40 grayscale">
                    <img src="https://img.icons8.com/color/48/razorpay.png" className="h-4" alt="Razorpay" />
+                   <img src="/mayaan_logo.svg" className="h-4" alt="Mayaan Group" />
                 </div>
              </div>
           </div>

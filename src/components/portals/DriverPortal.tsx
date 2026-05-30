@@ -558,7 +558,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                          Sign Partnership Agreement
                        </button>
                     )}
-                    {driverProfile?.kycStatus !== 'APPROVED' && driverProfile?.kycStatus !== 'UNDER_REVIEW' && (
+                    {driverProfile?.kycStatus !== 'APPROVED' && driverProfile?.kycStatus !== 'PENDING' && driverProfile?.kycStatus !== 'UNDER_REVIEW' && (
                        <button 
                          onClick={() => setShowKYC(true)} 
                          className="px-4 py-2.5 bg-slate-900 border border-slate-800 text-amber-500 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
@@ -566,7 +566,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                          {driverProfile?.kycStatus === 'REJECTED' ? "Re-upload Documents" : "Upload KYC Documents"}
                        </button>
                     )}
-                    {driverProfile?.kycStatus === 'UNDER_REVIEW' && (
+                    {(driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'PENDING') && (
                        <span className="px-4 py-2.5 bg-slate-900/10 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest border border-slate-900/10">
                          Verification In Progress
                        </span>

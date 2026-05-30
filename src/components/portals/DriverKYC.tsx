@@ -48,7 +48,7 @@ export default function DriverKYC({ driverId, onSuccess }: DriverKYCProps) {
     setLoading(true);
     try {
       const profile: any = {
-        kycStatus: 'UNDER_REVIEW',
+        kycStatus: 'PENDING',
         payoutEnabled: false,
         adminApproved: false,
         documents: documents as DriverDocument,

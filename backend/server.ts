@@ -22,6 +22,7 @@ import demoSetupHandler from '../backend/demo/setup';
 import activateCampaignHandler from '../backend/debug/activate-campaign';
 import canvaLoginHandler from '../api/canva/login';
 import canvaCallbackHandler from '../api/canva/callback';
+import canvaDebugHandler from '../api/canva/debug';
 
 async function startServer() {
   const app = express();
@@ -254,6 +255,7 @@ async function startServer() {
       else if (apiPath === 'debug/activate-campaign') handler = activateCampaignHandler;
       else if (apiPath === 'canva/login') handler = canvaLoginHandler;
       else if (apiPath === 'canva/callback') handler = canvaCallbackHandler;
+      else if (apiPath === 'canva/debug') handler = canvaDebugHandler;
 
       if (handler) {
         await handler(req, res);

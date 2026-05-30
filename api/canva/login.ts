@@ -52,11 +52,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const scopes = [
-      'canva:design:content:read',
-      'canva:design:content:write',
-      'canva:asset:private:read',
-      'canva:asset:private:write',
-      'canva:profile:read'
+      'profile:read'
     ].join(' ');
 
     const params = new URLSearchParams({
@@ -73,6 +69,10 @@ export default async function handler(req: any, res: any) {
 
     // Redirect the user safely across local express and serverless contexts
     console.log(`[CANVA OAUTH] Initiated auth flow for uid=${uid} state=${state}`);
+    console.log(`[CANVA OAUTH] Authorization URL: ${authUrl}`);
+    console.log(`[CANVA OAUTH] Scope string: ${scopes}`);
+    console.log(`[CANVA OAUTH] Client ID: ${client_id}`);
+    console.log(`[CANVA OAUTH] Redirect URI: ${redirect_uri}`);
     
     if (typeof res.redirect === 'function') {
       res.redirect(authUrl);
