@@ -2466,7 +2466,11 @@ export const firebaseService = {
       });
 
       callback(filtered);
-    }, (error) => {
+    }, (error: any) => {
+      if (error.message && error.message.includes("Target ID already exists")) {
+        console.warn("[FirebaseService] Ignoring benign Target ID collision");
+        return;
+      }
       console.error("[FirebaseService] Notifications subscription error:", error);
     });
   },

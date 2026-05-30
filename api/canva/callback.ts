@@ -19,6 +19,10 @@ export default async function handler(req: any, res: any) {
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
 
+  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
+  console.log('code=', req.query.code);
+  console.log('state=', req.query.state);
+
   const renderError = (errMsg: string) => {
     res.setHeader('Content-Type', 'text/html');
     return res.status(400).send(`
@@ -97,6 +101,7 @@ export default async function handler(req: any, res: any) {
         const stateDoc = await stateDocRef.get();
         if (stateDoc.exists) {
           const stateData = stateDoc.data();
+          console.log('[CANVA OAUTH] State lookup result: Found', stateData);
           if (stateData) {
             uid = stateData.uid || uid;
             code_verifier = stateData.code_verifier || code_verifier;
@@ -110,6 +115,14 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!stateVerified || !code_verifier) {
+      // Check if user is already connected
+      if (isAdminAuthReady && uid) {
+          const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
+          if (tokenDoc.exists) {
+              console.log('[CANVA OAUTH] User already connected, redirecting to dashboard');
+              return res.send(`<html><body><script>window.location.href = '/';</script></body></html>`);
+          }
+      }
       return renderError('OAuth state is invalid, has expired, or database/session is unreachable.');
     }
 
@@ -118,11 +131,9 @@ export default async function handler(req: any, res: any) {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const baseUrl = `${protocol}://${host}`;
     const redirect_uri = `${baseUrl}/api/canva/callback`;
-
-    // Clean up used state from Firestore gracefully
-    if (isAdminAuthReady && stateDocRef) {
-      await stateDocRef.delete().catch(() => {});
-    }
+    console.log('[CANVA OAUTH] Redirect target:', redirect_uri);
+    
+    console.log('[CANVA OAUTH] Callback initiated:', { host, baseUrl, redirect_uri, code: !!code, state });
 
     // Prepare credentials
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
@@ -164,6 +175,12 @@ export default async function handler(req: any, res: any) {
     }
 
     const data = await response.json();
+    console.log('[CANVA OAUTH] Token exchange successful');
+
+    // Clean up used state from Firestore gracefully
+    if (isAdminAuthReady && stateDocRef) {
+      await stateDocRef.delete().catch(() => {});
+    }
 
     // Store in Firestore gracefully if Admin SDK is authenticated (using Admin SDK as fallback)
     if (isAdminAuthReady) {
@@ -265,7 +282,8 @@ export default async function handler(req: any, res: any) {
               type: 'CANVA_OAUTH_SUCCESS', 
               tokenData: ${JSON.stringify(data)} 
             }, '*');
-            window.close();
+            // Safely close the window
+            window.open('', '_self').close();
           } else {
             // Remove spinner and redirect in the same tab
             const spinner = document.querySelector('.spinner');
