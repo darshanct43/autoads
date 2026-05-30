@@ -54,6 +54,7 @@ export default async function handler(req: any, res: any) {
     const scopes = [
       'profile:read'
     ].join(' ');
+    console.log('CANVA_SCOPE=', scopes);
 
     const params = new URLSearchParams({
       response_type: 'code',
