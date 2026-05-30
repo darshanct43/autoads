@@ -61,16 +61,20 @@ export default async function handler(req: any, res: any) {
       client_id: client_id,
       redirect_uri: redirect_uri,
       scope: scopes,
-      state: state,
       code_challenge: code_challenge,
       code_challenge_method: 'S256'
     });
+    params.set('state', state);
 
     const authUrl = `https://www.canva.com/api/oauth/authorize?${params.toString()}`;
 
     // Redirect the user safely across local express and serverless contexts
     console.log(`[CANVA OAUTH] Initiated auth flow for uid=${uid} state=${state}`);
     console.log(`[CANVA OAUTH] Authorization URL: ${authUrl}`);
+    console.log('--- URLSearchParams state verification ---');
+    console.log('State in params:', params.get('state'));
+    console.log('Params toString():', params.toString());
+    console.log('------------------------------------------');
     console.log(`[CANVA OAUTH] Scope string: ${scopes}`);
     console.log(`[CANVA OAUTH] Client ID: ${client_id}`);
     console.log(`[CANVA OAUTH] Redirect URI: ${redirect_uri}`);

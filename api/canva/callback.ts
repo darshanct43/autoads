@@ -19,6 +19,11 @@ export default async function handler(req: any, res: any) {
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
 
+  console.log('FULL QUERY:', req.query);
+  console.log('FULL URL:', req.url);
+  console.log('code=', req.query.code);
+  console.log('state=', req.query.state);
+
   console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
   console.log('[CANVA OAUTH] Full query:', JSON.stringify(req.query));
   console.log('code=', req.query.code);
