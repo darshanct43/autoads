@@ -17,6 +17,7 @@ export default async function handler(req: any, res: any) {
     const code_challenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 
     // Store auth state in Firestore reliably
+    console.log('[CANVA OAUTH] isAdminAuthReady:', isAdminAuthReady);
     if (isAdminAuthReady) {
         console.log('[CANVA OAUTH] Storing auth state in Firestore with doc ID:', state);
         try {
@@ -35,6 +36,8 @@ export default async function handler(req: any, res: any) {
             console.error('[CANVA OAUTH] Error storing auth state in Firestore:', e);
             console.error('[CANVA WRITE ERROR]', e);
         }
+    } else {
+        console.warn('[CANVA OAUTH] Firestore write skipped: isAdminAuthReady is false');
     }
 
     // Always set cookie headers for fallback
