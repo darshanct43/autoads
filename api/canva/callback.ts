@@ -126,13 +126,12 @@ export default async function handler(req: any, res: any) {
     }
 
     // Construct the exact redirect_uri used during authorize request
-    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const baseUrl = `${protocol}://${host}`;
-    const redirect_uri = `${baseUrl}/api/canva/callback`;
+    const redirect_uri =
+      process.env.CANVA_REDIRECT_URI ||
+      "https://autoads-nine.vercel.app/api/canva/callback";
     console.log('[CANVA OAUTH] Redirect target:', redirect_uri);
     
-    console.log('[CANVA OAUTH] Callback initiated:', { host, baseUrl, redirect_uri, code: !!code, state });
+    console.log('[CANVA OAUTH] Callback initiated:', { redirect_uri, code: !!code, state });
 
     // If we have a uid, check if they are already connected
     if (isAdminAuthReady && uid && uid !== 'demo-user-uid') {
@@ -214,7 +213,8 @@ export default async function handler(req: any, res: any) {
     }
 
     // Clear authentication state cookies
-    const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000');
+    const url = new URL(redirect_uri);
+    const isLocal = url.hostname.includes('localhost') || url.hostname.includes('127.0.0.1') || url.port === '3000';
     const secureFlag = isLocal ? '' : 'Secure; ';
     const sameSite = isLocal ? 'Lax' : 'None';
     res.setHeader('Set-Cookie', [

@@ -40,9 +40,9 @@ export default async function handler(req: any, res: any) {
     ]);
 
     // Create redirect_uri
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const baseUrl = `${protocol}://${host}`;
-    const redirect_uri = `${baseUrl}/api/canva/callback`;
+    const redirect_uri =
+      process.env.CANVA_REDIRECT_URI ||
+      "https://autoads-nine.vercel.app/api/canva/callback";
 
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
 
