@@ -64,28 +64,6 @@ export const auth = authInstance;
 export const storage: FirebaseStorage = getStorage(app);
 
 // Connection verification test with higher resilience
-async function testConnection(retries = 3) {
-  try {
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
-    console.log("[Firebase] Probing Cloud Firestore...");
-    await Promise.race([
-      getDocFromServer(doc(db, 'test', 'connectivity')),
-      timeout
-    ]);
-    console.log("[Firebase] Cloud Link Established.");
-  } catch (error: any) {
-    if (error.message === 'timeout' && retries > 0) {
-      console.warn(`[Firebase] Backend latency detected. Retrying... (${retries} attempts left)`);
-      setTimeout(() => {
-        testConnection(retries - 1);
-      }, 1000);
-    } else {
-      console.log("[Firebase] System initialized (Network standby or offline mode).");
-    }
-  }
-}
-testConnection();
-
 let loginInProgress = false;
 
 export const googleLogin = async () => {
