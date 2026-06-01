@@ -89,7 +89,6 @@ export default async function handler(req: any, res: any) {
         if (doc.exists) {
           code_verifier = doc.data()?.code_verifier || '';
           console.log('[CANVA OAUTH] Found code_verifier in Firestore');
-          await dbAdm.collection('canvaPendingAuth').doc(state).delete();
         } else {
           console.log('[CANVA OAUTH] Document does not exist for state:', state);
         }
@@ -193,6 +192,11 @@ export default async function handler(req: any, res: any) {
 
     const data = await response.json();
     console.log('[CANVA OAUTH] Token exchange successful');
+
+    // Clean up firestore state
+    if (isAdminAuthReady) {
+        await dbAdm.collection('canvaPendingAuth').doc(state).delete();
+    }
 
     // Store in Firestore gracefully if Admin SDK is authenticated
     if (isAdminAuthReady) {
