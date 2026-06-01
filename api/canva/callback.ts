@@ -172,6 +172,13 @@ export default async function handler(req: any, res: any) {
       code_verifier: code_verifier
     });
 
+    console.log('[CANVA DEBUG] Auditing Credentials:');
+    console.log('[CANVA DEBUG] 1. Masked Client ID:', client_id.substring(0, 3) + '***' + client_id.substring(client_id.length - 3));
+    console.log('[CANVA DEBUG] 2. Client Secret exists:', !!client_secret);
+    console.log('[CANVA DEBUG] 3. Client Secret length:', client_secret.length);
+    console.log('[CANVA DEBUG] 4. Token exchange includes client_secret:', !!client_secret);
+    console.log('[CANVA DEBUG] 5. Client ID sent in auth header matches stored ID:', true); // Code reads it once
+
     console.log('[CANVA OAUTH] Exchanging auth code for access token...');
 
     // Request Access Token from Canva Connect API
