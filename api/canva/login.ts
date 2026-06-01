@@ -4,7 +4,12 @@ import crypto from 'crypto';
 
 export default async function handler(req: any, res: any) {
   try {
-    const uid = (req.query.uid as string) || "demo-user-uid";
+    const uid = (req.query.uid as string);
+    if (!uid) {
+        console.error('[CANVA OAUTH] Missing uid query parameter.');
+        return res.status(400).json({ error: 'Missing uid query parameter.' });
+    }
+
 
     // Generate random secure state and code verifier
     const state = crypto.randomBytes(24).toString('hex');

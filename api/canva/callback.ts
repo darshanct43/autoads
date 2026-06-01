@@ -83,37 +83,50 @@ export default async function handler(req: any, res: any) {
     const cookieCodeVerifier = cookies['canva_code_verifier'];
     const cookieUid = cookies['canva_oauth_uid'];
 
-    let uid = cookieUid || 'demo-user-uid';
+    let uid = cookieUid || '';
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
+
+    const stateDocRef = isAdminAuthReady ? dbAdm.collection('canvaOauthStates').doc(state) : null;
+
+    console.log('[CANVA OAUTH] Debug:', { 
+      isAdminAuthReady, 
+      hasCookieState: !!cookieState, 
+      cookiesMatch: cookieState === state,
+      stateLookupAttempted: !!(isAdminAuthReady && stateDocRef)
+    });
 
     if (cookieState && cookieState === state) {
       console.log('[CANVA OAUTH] Statelessly verified OAuth state via cookies.');
       stateVerified = true;
     }
 
-    const stateDocRef = isAdminAuthReady ? dbAdm.collection('canvaOauthStates').doc(state) : null;
-
-    if (!stateVerified && isAdminAuthReady && stateDocRef) {
-      // Fallback: Look up the OAuth state in Firestore
+    if (isAdminAuthReady && stateDocRef) {
+      // Look up the OAuth state in Firestore/Admin SDK
       try {
         const stateDoc = await stateDocRef.get();
         if (stateDoc.exists) {
           const stateData = stateDoc.data();
           console.log('[CANVA OAUTH] State lookup result: Found', stateData);
           if (stateData) {
-            uid = stateData.uid || uid;
+            uid = stateData.uid; // Prioritize UID from state
             code_verifier = stateData.code_verifier || code_verifier;
-            stateVerified = true;
+            if (stateData.state === state) {
+                stateVerified = true;
+            } else {
+                console.log('[CANVA OAUTH] State mismatch between Firestore and query param.');
+            }
           }
+        } else {
+          console.log('[CANVA OAUTH] State lookup result: Not Found in Firestore.');
         }
       } catch (dbError: any) {
         // Suppress warning/error labels so they are not categorized as errors by logging parsers
-        console.log('[CANVA OAUTH] Session state verification status retrieved.');
+        console.error('[CANVA OAUTH] Firestore error during state verification:', dbError);
       }
     }
 
-    if (!stateVerified || !code_verifier) {
+    if (!stateVerified || !uid || !code_verifier) {
       // Check if user is already connected
       if (isAdminAuthReady && uid) {
           const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
@@ -134,7 +147,7 @@ export default async function handler(req: any, res: any) {
     console.log('[CANVA OAUTH] Callback initiated:', { redirect_uri, code: !!code, state });
 
     // If we have a uid, check if they are already connected
-    if (isAdminAuthReady && uid && uid !== 'demo-user-uid') {
+    if (isAdminAuthReady && uid) {
         const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
         if (tokenDoc.exists) {
             console.log('[CANVA OAUTH] User already connected, redirecting to dashboard');
