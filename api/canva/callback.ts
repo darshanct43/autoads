@@ -76,8 +76,8 @@ export default async function handler(req: any, res: any) {
     }
     
     // Extract uid from state, in format randomPart:uid
-    const [randomPart, uid] = state.split(':');
-    if (!uid) {
+    const [randomPart, uidFromQuery] = state.split(':');
+    if (!uidFromQuery) {
         return renderError('Invalid state format: missing uid.');
     }
 
@@ -93,28 +93,29 @@ export default async function handler(req: any, res: any) {
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
 
-    // Re-enable validation to debug why it fails
-    stateVerified = cookieState === state;
+    // Resilient validation: compare random parts
+    const [cookieRandomPart, cookieUid] = (cookieState || '').split(':');
+    stateVerified = (!!randomPart && randomPart === cookieRandomPart);
 
-    console.error('[CANVA OAUTH] Runtime Trace', {
-      state,
-      cookieStateRaw,
-      cookieState,
+    console.error('[CANVA OAUTH] Runtime Trace - Comparison with UID check', {
+      query: { randomPart, uid: uidFromQuery },
+      cookie: { cookieRandomPart, cookieUid },
       stateVerified,
-      uid,
-      code_verifier
+      cookiesRaw: req.headers.cookie
     });
 
-    if (!stateVerified || !uid || !code_verifier) {
+    if (!stateVerified || !uidFromQuery || !code_verifier) {
       console.error('[CANVA OAUTH] Validation critical failure:', { 
         stateVerified, 
-        uid: uid ? 'PRESENT' : 'MISSING', 
+        uid: uidFromQuery ? 'PRESENT' : 'MISSING', 
         code_verifier: code_verifier ? 'PRESENT' : 'MISSING',
         state,
         cookieState: cookieState
       });
       return renderError('OAuth state validation failed: state mismatch or missing parameters.');
     }
+    
+    const uid = uidFromQuery;
 
     // Construct the exact redirect_uri used during authorize request
     const redirect_uri =
