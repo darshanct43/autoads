@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
+import { dbAdm, isAdminAuthReady } from '../../lib/firebase-admin.js';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -15,7 +16,15 @@ export default async function handler(req: any, res: any) {
     const code_verifier = crypto.randomBytes(32).toString('base64url');
     const code_challenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 
-    // Set cookie headers for stateless authentication state and PKCE code verifier
+    // Store auth state in Firestore reliably
+    if (isAdminAuthReady) {
+        await dbAdm.collection('canvaPendingAuth').doc(randomPart).set({
+            code_verifier,
+            expiresAt: Date.now() + 3600000
+        });
+    }
+
+    // Always set cookie headers for fallback
     const host = req.headers['x-forwarded-host'] || req.headers.host || '';
     const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000');
     const secureFlag = isLocal ? '' : 'Secure; ';

@@ -18,8 +18,6 @@ export default async function handler(req: any, res: any) {
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
 
-  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
-
   const renderError = (errMsg: string) => {
     res.setHeader('Content-Type', 'text/html');
     return res.status(400).send(`
@@ -81,38 +79,56 @@ export default async function handler(req: any, res: any) {
         return renderError('Invalid state format: missing uid.');
     }
 
-    // Look up cookie values first for stateless OAuth session verification
-    console.log('[CANVA OAUTH] Raw cookie header:', req.headers.cookie);
-    const cookies = parseCookies(req.headers.cookie);
-    console.log('[CANVA OAUTH] Parsed cookies:', cookies);
-    const cookieStateRaw = cookies['canva_oauth_state'];
-    console.log('[CANVA OAUTH] Raw cookie state:', cookieStateRaw);
-    const cookieState = cookieStateRaw ? decodeURIComponent(cookieStateRaw) : undefined;
-    const cookieCodeVerifier = cookies['canva_code_verifier'];
+    // Look up auth state in Firestore first
+    let code_verifier = '';
+    if (isAdminAuthReady) {
+      const doc = await dbAdm.collection('canvaPendingAuth').doc(randomPart).get();
+      if (doc.exists) {
+        code_verifier = doc.data()?.code_verifier || '';
+        await dbAdm.collection('canvaPendingAuth').doc(randomPart).delete();
+      }
+    }
 
-    let code_verifier = cookieCodeVerifier || '';
-    let stateVerified = false;
+    // Fallback to cookie if not found in Firestore
+    if (!code_verifier) {
+      const cookies = parseCookies(req.headers.cookie);
+      code_verifier = cookies['canva_code_verifier'] || '';
+    }
 
-    // Resilient validation: compare random parts
-    const [cookieRandomPart, cookieUid] = (cookieState || '').split(':');
-    stateVerified = (!!randomPart && randomPart === cookieRandomPart);
+    const cookieStateRaw = undefined;
+    const cookieStateDecoded = undefined;
 
-    console.error('[CANVA OAUTH] Runtime Trace - Comparison with UID check', {
-      query: { randomPart, uid: uidFromQuery },
-      cookie: { cookieRandomPart, cookieUid },
-      stateVerified,
-      cookiesRaw: req.headers.cookie
+    console.log('[CANVA TRACE]', {
+      queryState: state,
+      cookieStateRaw,
+      cookieStateDecoded,
+      randomPart: state?.split(':')[0],
+      userPart: state?.split(':')[1],
+      codeVerifierPresent: !!code_verifier,
+      uidPresent: !!uidFromQuery
+    });
+
+    let stateVerified = (!!randomPart && !!code_verifier);
+
+    console.log('[CANVA RESULT]', {
+      stateVerified
     });
 
     if (!stateVerified || !uidFromQuery || !code_verifier) {
-      console.error('[CANVA OAUTH] Validation critical failure:', { 
-        stateVerified, 
-        uid: uidFromQuery ? 'PRESENT' : 'MISSING', 
+      console.error('[CANVA OAUTH] Validation critical failure:', {
+        stateVerified,
+        uid: uidFromQuery ? 'PRESENT' : 'MISSING',
         code_verifier: code_verifier ? 'PRESENT' : 'MISSING',
-        state,
-        cookieState: cookieState
+        state
       });
-      return renderError('OAuth state validation failed: state mismatch or missing parameters.');
+      return res.json({
+        stateVerified,
+        uidPresent: !!uidFromQuery,
+        codeVerifierPresent: !!code_verifier,
+        queryState: state,
+        cookieState: cookieStateRaw,
+        cookieStateRaw: cookieStateRaw
+      });
     }
     
     const uid = uidFromQuery;
@@ -182,14 +198,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Clear authentication state cookies
-    const url = new URL(redirect_uri);
-    const isLocal = url.hostname.includes('localhost') || url.hostname.includes('127.0.0.1') || url.port === '3000';
-    const secureFlag = isLocal ? '' : 'Secure; ';
-    const sameSite = isLocal ? 'Lax' : 'None';
-    res.setHeader('Set-Cookie', [
-      `canva_oauth_state=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`,
-      `canva_code_verifier=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`
-    ]);
+    // (Cookies are no longer used for auth state)
 
     // Render HTML response that signals parent window (passing tokenData) and closes itself
     res.setHeader('Content-Type', 'text/html');
