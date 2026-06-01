@@ -18,8 +18,9 @@ export default async function handler(req: any, res: any) {
   const state = req.query.state as string;
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
+  const queryUid = req.query.uid as string; // Read UID from query param
 
-  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
+  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam, queryUid: !!queryUid });
 
   const renderError = (errMsg: string) => {
     res.setHeader('Content-Type', 'text/html');
@@ -83,7 +84,7 @@ export default async function handler(req: any, res: any) {
     const cookieCodeVerifier = cookies['canva_code_verifier'];
     const cookieUid = cookies['canva_oauth_uid'];
 
-    let uid = cookieUid || '';
+    let uid = queryUid || cookieUid || '';
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
 
@@ -127,6 +128,15 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!stateVerified || !uid || !code_verifier) {
+      console.error('[CANVA OAUTH] Validation critical failure:', { 
+        stateVerified, 
+        uid: uid ? 'PRESENT' : 'MISSING', 
+        code_verifier: code_verifier ? 'PRESENT' : 'MISSING',
+        state,
+        cookieState: cookieState,
+        cookieUid: cookieUid,
+        isAdminAuthReady
+      });
       // Check if user is already connected
       if (isAdminAuthReady && uid) {
           const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();

@@ -49,6 +49,9 @@ export default async function handler(req: any, res: any) {
       process.env.CANVA_REDIRECT_URI ||
       "https://autoads-nine.vercel.app/api/canva/callback";
 
+    // Pass uid as a query param to guarantee it's present
+    const redirectUrlWithUid = `${redirect_uri}?uid=${uid}`;
+
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
 
     if (!client_id) {
@@ -64,7 +67,7 @@ export default async function handler(req: any, res: any) {
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: client_id,
-      redirect_uri: redirect_uri,
+      redirect_uri: redirectUrlWithUid,  // Use the redirect URL with UID
       scope: scopes,
       code_challenge: code_challenge,
       code_challenge_method: 'S256'
