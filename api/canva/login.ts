@@ -18,7 +18,7 @@ export default async function handler(req: any, res: any) {
 
     // Store auth state in Firestore reliably
     if (isAdminAuthReady) {
-        await dbAdm.collection('canvaPendingAuth').doc(randomPart).set({
+        await dbAdm.collection('canvaPendingAuth').doc(state).set({
             code_verifier,
             expiresAt: Date.now() + 3600000
         });

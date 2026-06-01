@@ -82,10 +82,10 @@ export default async function handler(req: any, res: any) {
     // Look up auth state in Firestore first
     let code_verifier = '';
     if (isAdminAuthReady) {
-      const doc = await dbAdm.collection('canvaPendingAuth').doc(randomPart).get();
+      const doc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
       if (doc.exists) {
         code_verifier = doc.data()?.code_verifier || '';
-        await dbAdm.collection('canvaPendingAuth').doc(randomPart).delete();
+        await dbAdm.collection('canvaPendingAuth').doc(state).delete();
       }
     }
 
@@ -121,14 +121,7 @@ export default async function handler(req: any, res: any) {
         code_verifier: code_verifier ? 'PRESENT' : 'MISSING',
         state
       });
-      return res.json({
-        stateVerified,
-        uidPresent: !!uidFromQuery,
-        codeVerifierPresent: !!code_verifier,
-        queryState: state,
-        cookieState: cookieStateRaw,
-        cookieStateRaw: cookieStateRaw
-      });
+      return renderError('OAuth state validation failed: state mismatch or missing parameters.');
     }
     
     const uid = uidFromQuery;
