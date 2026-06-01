@@ -85,24 +85,25 @@ export default async function handler(req: any, res: any) {
     console.log('[CANVA OAUTH] Raw cookie header:', req.headers.cookie);
     const cookies = parseCookies(req.headers.cookie);
     console.log('[CANVA OAUTH] Parsed cookies:', cookies);
-    const cookieState = cookies['canva_oauth_state'] ? decodeURIComponent(cookies['canva_oauth_state']) : undefined;
+    const cookieStateRaw = cookies['canva_oauth_state'];
+    console.log('[CANVA OAUTH] Raw cookie state:', cookieStateRaw);
+    const cookieState = cookieStateRaw ? decodeURIComponent(cookieStateRaw) : undefined;
     const cookieCodeVerifier = cookies['canva_code_verifier'];
 
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
 
-    console.log('[CANVA OAUTH] Validation Debug:', { 
-      hasCookieState: !!cookieState, 
-      queryState: state,
-      cookieState: cookieState,
-      cookiesMatch: cookieState === state,
-      hasCodeVerifier: !!code_verifier
-    });
+    // Re-enable validation to debug why it fails
+    stateVerified = cookieState === state;
 
-    if (cookieState && cookieState === state) {
-      console.log('[CANVA OAUTH] Statelessly verified OAuth state via cookies.');
-      stateVerified = true;
-    }
+    console.error('[CANVA OAUTH] Runtime Trace', {
+      state,
+      cookieStateRaw,
+      cookieState,
+      stateVerified,
+      uid,
+      code_verifier
+    });
 
     if (!stateVerified || !uid || !code_verifier) {
       console.error('[CANVA OAUTH] Validation critical failure:', { 
