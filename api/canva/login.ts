@@ -9,8 +9,9 @@ export default async function handler(req: any, res: any) {
         return res.status(400).json({ error: 'Missing uid query parameter.' });
     }
 
-    // Generate random secure state and code verifier for PKCE
-    const state = crypto.randomBytes(24).toString('hex');
+    // Generate random secure state and code verifier for PKCE, including uid in state
+    const randomPart = crypto.randomBytes(24).toString('hex');
+    const state = `${randomPart}:${uid}`;
     const code_verifier = crypto.randomBytes(32).toString('base64url');
     const code_challenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 
@@ -29,9 +30,6 @@ export default async function handler(req: any, res: any) {
       process.env.CANVA_REDIRECT_URI ||
       "https://autoads-nine.vercel.app/api/canva/callback";
 
-    // Pass uid as a query param to guarantee it's present
-    const redirectUrlWithUid = `${redirect_uri}?uid=${uid}`;
-
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
 
     if (!client_id) {
@@ -47,7 +45,7 @@ export default async function handler(req: any, res: any) {
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: client_id,
-      redirect_uri: redirectUrlWithUid,  // Use the redirect URL with UID
+      redirect_uri: redirect_uri,
       scope: scopes,
       state: state, // Needed to facilitate callback state validation
       code_challenge: code_challenge,

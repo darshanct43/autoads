@@ -17,9 +17,8 @@ export default async function handler(req: any, res: any) {
   const state = req.query.state as string;
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
-  const queryUid = req.query.uid as string; // Read UID from query param
 
-  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam, queryUid: !!queryUid });
+  console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
 
   const renderError = (errMsg: string) => {
     res.setHeader('Content-Type', 'text/html');
@@ -75,6 +74,12 @@ export default async function handler(req: any, res: any) {
     if (!state || !code) {
       return renderError('Missing authorization code or state.');
     }
+    
+    // Extract uid from state, in format randomPart:uid
+    const [randomPart, uid] = state.split(':');
+    if (!uid) {
+        return renderError('Invalid state format: missing uid.');
+    }
 
     // Look up cookie values first for stateless OAuth session verification
     const cookies = parseCookies(req.headers.cookie);
@@ -82,7 +87,6 @@ export default async function handler(req: any, res: any) {
     const cookieState = cookies['canva_oauth_state'];
     const cookieCodeVerifier = cookies['canva_code_verifier'];
 
-    let uid = queryUid || '';
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
 
