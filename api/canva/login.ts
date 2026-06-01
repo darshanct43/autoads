@@ -18,10 +18,23 @@ export default async function handler(req: any, res: any) {
 
     // Store auth state in Firestore reliably
     if (isAdminAuthReady) {
-        await dbAdm.collection('canvaPendingAuth').doc(state).set({
-            code_verifier,
-            expiresAt: Date.now() + 3600000
-        });
+        console.log('[CANVA OAUTH] Storing auth state in Firestore with doc ID:', state);
+        try {
+            await dbAdm.collection('canvaPendingAuth').doc(state).set({
+                code_verifier,
+                expiresAt: Date.now() + 3600000
+            });
+            console.log('[CANVA OAUTH] Successfully stored auth state in Firestore');
+
+            const verifyDoc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
+            console.error('[CANVA WRITE VERIFY]', {
+                state,
+                exists: verifyDoc.exists
+            });
+        } catch (e) {
+            console.error('[CANVA OAUTH] Error storing auth state in Firestore:', e);
+            console.error('[CANVA WRITE ERROR]', e);
+        }
     }
 
     // Always set cookie headers for fallback

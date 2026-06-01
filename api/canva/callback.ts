@@ -81,17 +81,30 @@ export default async function handler(req: any, res: any) {
 
     // Look up auth state in Firestore first
     let code_verifier = '';
+    console.log('[CANVA OAUTH] Checking Firestore for state:', state, 'isAdminAuthReady:', isAdminAuthReady);
     if (isAdminAuthReady) {
-      const doc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
-      if (doc.exists) {
-        code_verifier = doc.data()?.code_verifier || '';
-        await dbAdm.collection('canvaPendingAuth').doc(state).delete();
+      try {
+        const doc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
+        console.log('[CANVA OAUTH] Firestore doc exists:', doc.exists);
+        if (doc.exists) {
+          code_verifier = doc.data()?.code_verifier || '';
+          console.log('[CANVA OAUTH] Found code_verifier in Firestore');
+          await dbAdm.collection('canvaPendingAuth').doc(state).delete();
+        } else {
+          console.log('[CANVA OAUTH] Document does not exist for state:', state);
+        }
+      } catch (e) {
+        console.error('[CANVA OAUTH] Error reading Firestore:', e);
       }
     }
 
     // Fallback to cookie if not found in Firestore
     if (!code_verifier) {
       const cookies = parseCookies(req.headers.cookie);
+      console.log('[CANVA OAUTH] Debugging cookies:', {
+        allCookies: Object.keys(cookies),
+        codeVerifierPresentInCookies: !!cookies['canva_code_verifier']
+      });
       code_verifier = cookies['canva_code_verifier'] || '';
     }
 
@@ -112,6 +125,17 @@ export default async function handler(req: any, res: any) {
 
     console.log('[CANVA RESULT]', {
       stateVerified
+    });
+
+    console.error('[CANVA TRACE]', {
+      queryState: state,
+      cookieState: 'NOT_IMPLEMENTED',
+      randomPart: state?.split(':')[0],
+      userPart: state?.split(':')[1],
+      stateVerified,
+      uid: uidFromQuery,
+      code_verifier,
+      pendingAuthFound: !!code_verifier
     });
 
     if (!stateVerified || !uidFromQuery || !code_verifier) {
