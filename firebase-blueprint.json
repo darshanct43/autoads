@@ -282,9 +282,73 @@
         "createdAt": { "type": "string" }
       },
       "required": ["state", "uid", "code_verifier"]
+    },
+    "franchises": {
+      "title": "Franchise",
+      "description": "City franchise metadata and statistics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cityId": { "type": "string" },
+        "cityName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PENDING", "DISABLED"] },
+        "totalDevices": { "type": "number" },
+        "totalDrivers": { "type": "number" },
+        "revenueModel": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "object" }
+      },
+      "required": ["id", "cityId", "cityName", "ownerName", "ownerEmail", "status", "createdAt"]
+    },
+    "cities": {
+      "title": "City",
+      "description": "Operational cities in the network",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "updatedAt": { "type": "object" }
+      },
+      "required": ["id", "name"]
+    },
+    "invitations": {
+      "title": "Invitation",
+      "description": "Onboarding invitations for franchise owners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "franchiseId": { "type": "string" },
+        "cityId": { "type": "string" },
+        "cityName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "CLAIMED", "EXPIRED"] },
+        "revenueModel": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "claimedAt": { "type": "string" },
+        "claimedByUid": { "type": "string" },
+        "phoneUsed": { "type": "string" }
+      },
+      "required": ["id", "franchiseId", "cityId", "cityName", "ownerName", "ownerEmail", "status", "createdAt"]
     }
   },
   "firestore": {
+    "/invitations/{invitationId}": {
+      "schema": "invitations",
+      "description": "Franchise owner onboarding invitations"
+    },
+    "/franchises/{franchiseId}": {
+      "schema": "franchises",
+      "description": "City operating franchises"
+    },
+    "/cities/{cityId}": {
+      "schema": "cities",
+      "description": "Approved operating cities"
+    },
     "/deviceScreens/{driverId}": {
       "schema": "deviceScreen",
       "description": "Real-time device screen snapshots"

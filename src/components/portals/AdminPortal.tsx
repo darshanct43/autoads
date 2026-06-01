@@ -79,6 +79,25 @@ import AdminAssistant from "../common/AdminAssistant";
 import { ErrorBoundary } from "../common/ErrorBoundary";
 import NotificationCenter from "../common/NotificationCenter";
 
+import { DashboardTab } from "./tabs/DashboardTab";
+import { AdminStudioConfig } from "../studio/admin/AdminStudioConfig";
+import { RevenueManagementTab } from "./tabs/RevenueManagementTab";
+import { PricingApprovalsTab } from "./tabs/PricingApprovalsTab";
+import { PackagesTab } from "./tabs/PackagesTab";
+import { FranchisesTab } from "./tabs/FranchisesTab";
+import { TerminalHubTab } from "./tabs/TerminalHubTab";
+import { CampaignsTab } from "./tabs/CampaignsTab";
+import { ReviewsTab } from "./tabs/ReviewsTab";
+import { CanvaAssetLibrary } from "../campaigns/CanvaAssetLibrary";
+import { NoticesTab } from "./tabs/NoticesTab";
+import { MapTab } from "./tabs/MapTab";
+import { DriversTab } from "./tabs/DriversTab";
+import { MonitorTab } from "./tabs/MonitorTab";
+import { WithdrawalsTab } from "./tabs/WithdrawalsTab";
+import { PaymentsTab } from "./tabs/PaymentsTab";
+import { TicketsTab } from "./tabs/TicketsTab";
+import { UsersTab } from "./tabs/UsersTab";
+
 import {
   MapContainer,
   TileLayer,
@@ -168,11 +187,13 @@ function InvalidateMap() {
   return null;
 }
 
-const getSafeUrl = (url: string | undefined | null) => {
+export const getSafeUrl = (url: string | undefined | null) => {
   if (!url) return undefined;
   if (typeof url !== 'string') return undefined;
 
   let cleaned = url.trim();
+  console.log('RAW URL', cleaned);
+  
   if (cleaned.startsWith('https://https://')) {
     cleaned = cleaned.replace('https://https://', 'https://');
   } else if (cleaned.startsWith('http://https://')) {
@@ -193,8 +214,11 @@ const getSafeUrl = (url: string | undefined | null) => {
 
   try {
     const decoded = decodeURI(cleaned);
-    return encodeURI(decoded);
+    const finalUrl = encodeURI(decoded);
+    console.log('FINAL URL', finalUrl);
+    return finalUrl;
   } catch (e) {
+    console.log('FINAL URL', cleaned);
     return cleaned;
   }
 };
@@ -261,6 +285,22 @@ export default function AdminPortal({
   onLogout,
 }: AdminPortalProps) {
   const [selectedTheme, setSelectedTheme] = useState<'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar'>(() => (localStorage.getItem('admin_premium_theme') as any) || 'default');
+  
+  const [activeTab, setActiveTab] = useState("DASHBOARD");
+  const [renderError, setRenderError] = useState<string | null>(null);
+
+  console.log('AdminPortal RENDER: activeTab', activeTab);
+  
+  useEffect(() => {
+    console.log('AdminPortal activeTab effect', activeTab);
+    const errorHandler = (event: ErrorEvent) => {
+      setRenderError(`Error: ${event.message} at ${event.filename}:${event.lineno}`);
+    };
+    window.addEventListener('error', errorHandler);
+    return () => window.removeEventListener('error', errorHandler);
+  }, [activeTab]);
+  
+  if (renderError) return <div className="p-10 text-red-500 font-bold">{renderError}</div>;
   
   const selectTheme = (theme: 'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar') => {
     setSelectedTheme(theme);
@@ -332,7 +372,6 @@ export default function AdminPortal({
     }
   })();
 
-  const [activeTab, setActiveTab] = useState("DASHBOARD");
   const [notices, setNotices] = useState<any[]>([]);
   const [newNotice, setNewNotice] = useState({
     offer: "",
@@ -416,6 +455,8 @@ export default function AdminPortal({
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const [opFeedback, setOpFeedback] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   const [campaignMediaFile, setCampaignMediaFile] = useState<File | null>(null);
+  const [selectedCanvaAsset, setSelectedCanvaAsset] = useState<any>(null);
+  const [mediaSource, setMediaSource] = useState<'UPLOAD' | 'CANVA'>('UPLOAD');
   const [campaignMediaType, setCampaignMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
   const [campaignUploadProgress, setCampaignUploadProgress] = useState(0);
   const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
@@ -605,26 +646,32 @@ export default function AdminPortal({
       let finalMediaUrl = "";
       let finalMediaType = campaignMediaType;
 
-      if (campaignMediaFile) {
-        setOpFeedback({ message: "Uploading to AWS S3 / CloudFront...", type: 'info' });
-        console.log("[AdminPortal] Initializing AWS upload for:", campaignMediaFile.name);
-        
-        finalMediaUrl = await storageService.uploadFile(
-          campaignMediaFile,
-          (progressInfo) => {
-            setCampaignUploadProgress(progressInfo.progress);
-            if (progressInfo.status === 'ERROR') {
-              console.error("[AdminPortal] AWS Upload Failed:", progressInfo.error);
+      if (mediaSource === 'UPLOAD') {
+        if (campaignMediaFile) {
+          setOpFeedback({ message: "Uploading to AWS S3 / CloudFront...", type: 'info' });
+          console.log("[AdminPortal] Initializing AWS upload for:", campaignMediaFile.name);
+          
+          finalMediaUrl = await storageService.uploadFile(
+            campaignMediaFile,
+            (progressInfo) => {
+              setCampaignUploadProgress(progressInfo.progress);
+              if (progressInfo.status === 'ERROR') {
+                console.error("[AdminPortal] AWS Upload Failed:", progressInfo.error);
+              }
             }
-          }
-        );
-        
-        console.log("[AdminPortal] AWS Upload Success. URL:", finalMediaUrl);
-        setOpFeedback({ message: "AWS Cloud Link Secured.", type: 'success' });
+          );
+          
+          console.log("[AdminPortal] AWS Upload Success. URL:", finalMediaUrl);
+          setOpFeedback({ message: "AWS Cloud Link Secured.", type: 'success' });
+          finalMediaType = campaignMediaFile.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+        }
+      } else if (mediaSource === 'CANVA' && selectedCanvaAsset) {
+        finalMediaUrl = selectedCanvaAsset.s3Url;
+        finalMediaType = selectedCanvaAsset.fileType === 'video' ? 'VIDEO' : 'IMAGE';
       }
 
       if (!finalMediaUrl) {
-        showToast("Please upload a file for the campaign.", 'error');
+        showToast("Please upload a file or select a Canva asset for the campaign.", 'error');
         setIsSubmitting(false);
         return;
       }
@@ -636,6 +683,8 @@ export default function AdminPortal({
         assetUrl: finalMediaUrl,
         mediaUrl: finalMediaUrl,
         mediaType: finalMediaType,
+        mediaSource: mediaSource,
+        mediaAssetId: selectedCanvaAsset?.id || null,
         budget: parseFloat(formData.get("budget") as string),
         targetLat: parseFloat(formData.get("targetLat") as string) || 12.9716,
         targetLng: parseFloat(formData.get("targetLng") as string) || 77.5946,
@@ -825,6 +874,16 @@ export default function AdminPortal({
       showToast("Purged.", 'success');
     } catch (e) {
       showToast("Delete failed.", 'error');
+    }
+  };
+
+  const handleStatusChange = async (ticketId: string, status: 'open' | 'in_progress' | 'resolved') => {
+    try {
+      await firebaseService.updateSupportTicketStatus(ticketId, status);
+      showToast(`Status updated to ${status.toUpperCase().replace('_', ' ')}.`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to update status shadow.", 'error');
     }
   };
 
@@ -1434,9 +1493,273 @@ export default function AdminPortal({
     return matchesSearch && matchesArea;
   });
 
+  const renderTabContent = () => {
+    console.log('RENDER TAB', activeTab);
+    switch (activeTab) {
+      case "DASHBOARD":
+        return (
+          <DashboardTab
+            dynamicChartData={dynamicChartData}
+            isExtracting={isExtracting}
+            handleExtractionClick={handleExtractionClick}
+            campaigns={campaigns}
+            drivers={drivers}
+            totalSuccessfulRevenue={totalSuccessfulRevenue}
+            liveUnitsCount={liveUnitsCount}
+            liveStatus={liveStatus}
+            planProposals={planProposals}
+            tickets={tickets}
+            setSelectedDriverForEarning={setSelectedDriverForEarning}
+            setShowEarningModal={setShowEarningModal}
+            setSelectedDriverForProvision={setSelectedDriverForProvision}
+            setShowProvisionModal={setShowProvisionModal}
+            setMapCenter={setMapCenter}
+            setMapZoom={setMapZoom}
+            handleFetchDriverHistory={handleFetchDriverHistory}
+            setActiveTab={setActiveTab}
+            setSelectedDriverForDocs={setSelectedDriverForDocs}
+            setDriverDocuments={setDriverDocuments}
+            setShowDocModal={setShowDocModal}
+            selectedDriverForAgreement={selectedDriverForAgreement}
+            setSelectedDriverForAgreement={setSelectedDriverForAgreement}
+            firebaseService={firebaseService}
+            showToast={showToast}
+          />
+        );
+      case "REVENUE":
+        return <RevenueManagementTab />;
+      case "STUDIO":
+        return <AdminStudioConfig />;
+      case "CAMPAIGNS":
+        return (
+          <CampaignsTab
+            campaigns={campaigns}
+            selectedCampaign={selectedCampaign}
+            setSelectedCampaign={setSelectedCampaign}
+            drivers={drivers}
+            isExtracting={isExtracting}
+            handleExtractionClick={handleExtractionClick}
+            isEditingMedia={isEditingMedia}
+            setIsEditingMedia={setIsEditingMedia}
+            editMediaUrl={editMediaUrl}
+            setEditMediaUrl={setEditMediaUrl}
+            editMediaType={editMediaType}
+            setEditMediaType={setEditMediaType}
+            editMediaFile={editMediaFile}
+            setEditMediaFile={setEditMediaFile}
+            editUploadProgress={editUploadProgress}
+            handleUpdateMedia={handleUpdateMedia}
+            isUpdatingMedia={isUpdatingMedia}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            selectedArea={selectedArea}
+            setSelectedArea={setSelectedArea}
+            selectedDriverIds={selectedDriverIds}
+            setSelectedDriverIds={setSelectedDriverIds}
+            handleBulkAssign={handleBulkAssign}
+            isAssigning={isAssigning}
+            filteredDrivers={filteredDrivers}
+          />
+        );
+      case "REVIEWS":
+        return (
+          <ReviewsTab
+            drivers={drivers}
+            campaigns={campaigns}
+            firebaseService={firebaseService}
+            showToast={showToast}
+            handleRejectCampaign={handleRejectCampaign}
+            handleApproveCampaign={handleApproveCampaign}
+            handleDeleteCampaign={handleDeleteCampaign}
+          />
+        );
+      case "PRICING_APPROVALS":
+        return (
+          <PricingApprovalsTab
+            planProposals={planProposals}
+            showApprovalModal={showApprovalModal}
+            setShowApprovalModal={setShowApprovalModal}
+            setApprovingCampaignId={setApprovingCampaignId}
+            setApprovalForm={setApprovalForm}
+            approvalForm={approvalForm}
+            handleRejectPlan={handleRejectPlan}
+            handleApprovePlan={handleApprovePlan}
+            pricingSubTab={pricingSubTab}
+            setPricingSubTab={setPricingSubTab}
+            isSubmitting={isSubmitting}
+          />
+        );
+      case "TERMINAL_HUB":
+        return (
+          <TerminalHubTab
+            campaigns={campaigns}
+            drivers={drivers}
+            totalSuccessfulRevenue={totalSuccessfulRevenue}
+            liveUnitsCount={liveUnitsCount}
+            liveStatus={liveStatus}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            driverLocations={driverLocations}
+            terminals={terminals}
+            showToast={showToast}
+            setMapCenter={setMapCenter}
+            setMapZoom={setMapZoom}
+            handleFetchDriverHistory={handleFetchDriverHistory}
+            setSelectedDriverHistory={setSelectedDriverHistory}
+            setActiveTab={setActiveTab}
+            setNetworkConfigTarget={setNetworkConfigTarget}
+            firebaseService={firebaseService}
+          />
+        );
+      case "MAP":
+        return (
+          <MapTab
+            activeTab={activeTab}
+            mapCenter={mapCenter}
+            mapZoom={mapZoom}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            driverLocations={driverLocations}
+            showCoverage={showCoverage}
+            setShowCoverage={setShowCoverage}
+            showIssues={showIssues}
+            setShowIssues={setShowIssues}
+            campaigns={campaigns}
+            selectedDriverHistory={selectedDriverHistory}
+            setSelectedDriverHistory={setSelectedDriverHistory}
+            tickets={tickets}
+            drivers={drivers}
+            selectedLocation={selectedLocation}
+            setSelectedLocation={setSelectedLocation}
+            handleFetchDriverHistory={handleFetchDriverHistory}
+            ticketNotifications={ticketNotifications}
+            setTicketNotifications={setTicketNotifications}
+            setActiveTab={setActiveTab}
+            liveUnitsCount={liveUnitsCount}
+            setMapCenter={setMapCenter}
+            setMapZoom={setMapZoom}
+          />
+        );
+      case "PACKAGES":
+        return (
+          <PackagesTab
+            setActiveTab={setActiveTab}
+            isExtracting={isExtracting}
+            handleExtractionClick={handleExtractionClick}
+            showToast={showToast}
+          />
+        );
+      case "FRANCHISES":
+        return (
+          <FranchisesTab
+            setActiveTab={setActiveTab}
+            showToast={showToast}
+          />
+        );
+      case "NOTICES":
+        return (
+          <NoticesTab
+            setActiveTab={setActiveTab}
+            handleCreateNotice={handleCreateNotice}
+            newNotice={newNotice}
+            setNewNotice={setNewNotice}
+            handleFileUpload={handleFileUpload}
+            isUploading={isUploading}
+            notices={notices}
+            handleDeleteNotice={handleDeleteNotice}
+          />
+        );
+      case "DRIVERS":
+        return (
+          <DriversTab
+            setSelectedDriverForEarning={setSelectedDriverForEarning}
+            setShowEarningModal={setShowEarningModal}
+            setSelectedDriverForProvision={setSelectedDriverForProvision}
+            setShowProvisionModal={setShowProvisionModal}
+            setSelectedDriverForAgreement={setSelectedDriverForAgreement}
+            handleFetchDriverHistory={async (driverId) => {
+              await handleFetchDriverHistory(driverId);
+              setActiveTab("MAP");
+            }}
+          />
+        );
+      case "MONITOR":
+        return (
+          <MonitorTab
+            terminals={terminals}
+            liveStatus={liveStatus}
+            deviceScreens={deviceScreens}
+            drivers={drivers}
+            setViewingUnit={setViewingUnit}
+            setNetworkConfigTarget={setNetworkConfigTarget}
+            startTVSession={startTVSession}
+            handleCaptureFrame={handleCaptureFrame}
+            handleRemoteCommand={handleRemoteCommand}
+          />
+        );
+      case "WITHDRAWALS":
+        return (
+          <WithdrawalsTab
+            withdrawRequests={withdrawRequests}
+            driverPayments={driverPayments}
+            drivers={drivers}
+            onApprove={handleApproveWithdrawal}
+            onReject={async (req) => {
+              try {
+                await firebaseService.updateWithdrawRequestStatus(req.id, "rejected");
+                showToast("Withdrawal request rejected.", "success");
+              } catch (e) {
+                showToast("Failed to reject request.", "error");
+              }
+            }}
+          />
+        );
+      case "PAYMENTS":
+        return (
+          <PaymentsTab
+            payments={payments}
+            driverPayments={driverPayments}
+            paymentSubTab={paymentSubTab}
+            setPaymentSubTab={setPaymentSubTab}
+            drivers={drivers}
+            campaigns={campaigns}
+          />
+        );
+      case "TICKETS":
+        return (
+          <TicketsTab
+            tickets={tickets}
+            activeTicketId={activeTicketId}
+            setActiveTicketId={setActiveTicketId}
+            handleStatusChange={handleStatusChange}
+            handleDeleteTicket={handleDeleteSupportTicket}
+          />
+        );
+      case "USERS":
+        return (
+          <UsersTab
+            users={users}
+          />
+        );
+      default:
+        console.log('DEFAULT TAB HIT', activeTab);
+        return (
+          <div style={{
+            background: 'yellow',
+            padding: '40px',
+            fontSize: '32px',
+            color: 'black'
+          }}>
+            TAB: {activeTab} WORKING
+          </div>
+        );
+    }
+  };
+
   return (
     <ErrorBoundary componentName="Admin Command Center">
-      <div className="flex h-screen bg-[#f8fafc] text-slate-600 overflow-hidden relative">
+      <>
+         <div className="flex h-screen bg-[#f8fafc] text-slate-600 overflow-hidden relative">
       <AnimatePresence>
         {showPurgeConfirm && (
           <motion.div
@@ -1500,7 +1823,7 @@ export default function AdminPortal({
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="w-20 bg-slate-950 flex flex-col items-center py-8 gap-8 border-r border-slate-800 relative z-30 transition-all duration-300 hidden md:flex overflow-y-auto custom-scrollbar">
+      <div className="w-20 h-screen bg-slate-950 flex flex-col items-center py-8 gap-5 border-r border-slate-800 relative z-30 transition-all duration-300 hidden md:flex overflow-y-auto custom-scrollbar">
         <div className="flex flex-col gap-3">
           {[
             { id: "DASHBOARD", icon: Activity, title: "Overview" },
@@ -1513,9 +1836,11 @@ export default function AdminPortal({
             { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
             { id: "DRIVERS", icon: Truck, title: "Drivers & Vehicles" },
             { id: "USERS", icon: Users, title: "Staff & Users" },
+            { id: "FRANCHISES", icon: Shield, title: "Franchises" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
             { id: "PACKAGES", icon: Zap, title: "Package Config" },
+            { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1656,9 +1981,11 @@ export default function AdminPortal({
                   { id: "PAYMENTS", icon: CreditCard, title: "Payments Registry" },
                   { id: "DRIVERS", icon: Truck, title: "Drivers & Vehicles" },
                   { id: "USERS", icon: Users, title: "Staff & Users" },
+                  { id: "FRANCHISES", icon: Shield, title: "Franchises" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
                   { id: "PACKAGES", icon: Zap, title: "Package Config" },
+                  { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -1769,6 +2096,13 @@ export default function AdminPortal({
               <Trash2 size={16} className="relative z-10 group-hover:scale-125 transition-transform" />
             </button>
             <button
+              onClick={() => setActiveTab('TERMINAL')}
+              className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center bg-sky-500 text-white shadow-lg shadow-sky-500/20 hover:bg-sky-600 transition-all"
+              title="Terminal Controller"
+            >
+              <TerminalIcon size={16} />
+            </button>
+            <button
               onClick={onLogout}
               className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center bg-red-500 text-white shadow-lg shadow-red-500/20 hover:bg-red-600 transition-all"
               title="Logout"
@@ -1781,2531 +2115,16 @@ export default function AdminPortal({
         <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-10 space-y-6 md:space-y-12 custom-scrollbar">
           {showRoadmap ? (
             <RoadmapChart onClose={() => setShowRoadmap(false)} />
-          ) : activeTab === "DASHBOARD" ? (
-            <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-              {(drivers.length === 0 && campaigns.length === 0) ? (
-                <div className="col-span-full py-20 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center gap-4">
-                  <Activity className="text-slate-200 animate-pulse" size={48} />
-                  <div className="text-center">
-                    <h3 className="text-sm font-black text-slate-400 uppercase italic">Awaiting Network Synchronization</h3>
-                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">Deploy terminals or approve drivers to see metrics</p>
-                  </div>
-                </div>
-              ) : [
-                {
-                  label: "Active Campaigns",
-                  value: (campaigns || []).filter((c) =>
-                    ["active", "ACTIVE", "LIVE"].includes(c.status),
-                  ).length,
-                  delta: "Live Now",
-                  color: "amber",
-                  icon: <Monitor />,
-                },
-                {
-                  label: "Cloud Units Ready",
-                  value: (drivers || []).filter((d) => 
-                    ["ACTIVE", "active"].includes(d.status)
-                  ).length,
-                  delta: "Approved Fleet",
-                  color: "blue",
-                  icon: <ShieldCheck />,
-                },
-                {
-                  label: "Total Revenue",
-                  value: `₹${(totalSuccessfulRevenue || 0).toLocaleString()}`,
-                  delta: "Cumulative",
-                  color: "slate",
-                  icon: <IndianRupee />,
-                },
-                {
-                  label: "Online Now",
-                  value: liveUnitsCount || 0,
-                  delta: "Real-time Pulse",
-                  color: (liveUnitsCount || 0) > 0 ? "amber" : "slate",
-                  icon: <Activity />,
-                },
-              ].map((stat) => (
-                  <motion.div
-                    key={stat.label}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.05 }}
-                    className="bg-slate-950 border border-white/10 p-3 md:p-6 rounded-2xl md:rounded-[2.5rem] group hover:border-amber-500/50 shadow-sm hover:shadow-xl hover:shadow-amber-500/5 transition-all cursor-pointer relative overflow-hidden"
-                  >
-                    <div className="absolute right-0 top-0 w-24 h-24 bg-amber-500/5 blur-2xl rounded-full -mr-12 -mt-12 group-hover:bg-amber-500/10 transition-colors" />
-                    <div className="relative z-10">
-                      <div className="flex items-center justify-between mb-4">
-                        <div
-                          className={cn(
-                            "p-1.5 md:p-3 rounded-xl md:rounded-2xl transition-colors",
-                            stat.color === "amber"
-                              ? "bg-amber-500 text-slate-950"
-                              : "bg-white/10 text-white",
-                          )}
-                        >
-                          {React.cloneElement(stat.icon as any, { size: 18 })}
-                        </div>
-                        <span className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 group-hover:text-amber-500">
-                          {stat.label}
-                        </span>
-                      </div>
-                      <div className="space-y-0.5">
-                        <h3 className="text-xl md:text-2xl font-black text-white truncate italic tracking-tight">
-                          {stat.value}
-                        </h3>
-                        <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-600 opacity-60">
-                          {stat.delta}
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <div className="xl:col-span-2 group">
-                    <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl transition-all h-full">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-sm md:text-base font-black text-slate-900 uppercase italic">
-                          Live Network Performance
-                        </h3>
-                        <p className="text-[10px] md:text-[12px] text-slate-400 uppercase tracking-widest font-black opacity-60">
-                          Active Metric Synchronization
-                        </p>
-                      </div>
-                    </div>
-                    <div className="h-[250px] md:h-[400px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                          data={dynamicChartData}
-                          margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
-                        >
-                          <defs>
-                            <linearGradient
-                              id="colorRev"
-                              x1="0"
-                              y1="0"
-                              x2="0"
-                              y2="1"
-                            >
-                              <stop
-                                offset="5%"
-                                stopColor="#f59e0b"
-                                stopOpacity={0.3}
-                              />
-                              <stop
-                                offset="95%"
-                                stopColor="#f59e0b"
-                                stopOpacity={0}
-                              />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke="#f1f5f9"
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="name"
-                            stroke="#94a3b8"
-                            fontSize={10}
-                            tickLine={false}
-                            axisLine={false}
-                            dy={10}
-                          />
-                          <YAxis
-                            stroke="#94a3b8"
-                            fontSize={10}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={(v) =>
-                              `₹${v >= 1000 ? (v / 1000).toFixed(0) + "k" : v}`
-                            }
-                            dx={-10}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "#fff",
-                              border: "none",
-                              borderRadius: "16px",
-                              fontSize: "11px",
-                              fontWeight: "900",
-                              boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)",
-                              padding: "12px",
-                            }}
-                            itemStyle={{ color: "#f59e0b" }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="revenue"
-                            stroke="#f59e0b"
-                            fillOpacity={1}
-                            fill="url(#colorRev)"
-                            strokeWidth={4}
-                            dot={{
-                              r: 6,
-                              fill: "#f59e0b",
-                              strokeWidth: 3,
-                              stroke: "#fff",
-                            }}
-                            activeDot={{ r: 8, strokeWidth: 0 }}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-3">
-                  <div className="bg-white p-3 md:p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
-                    <div className="flex items-center justify-between mb-2">
-                       <h3 className="text-[10px] font-black text-slate-900 uppercase italic">
-                        Node Activation
-                      </h3>
-                    </div>
-                    <div className="space-y-6">
-                      {dynamicChartData.length > 0 ? (
-                        dynamicChartData.map((item) => (
-                          <div key={item.name} className="space-y-2">
-                            <div className="flex justify-between text-[10px] md:text-[11px] font-black uppercase tracking-widest">
-                              <span className="text-slate-500">{item.name}</span>
-                              <span className="text-slate-950 font-mono italic">
-                                {item.autos} Units
-                              </span>
-                            </div>
-                            <div className="h-2 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100 p-0.5">
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{
-                                  width:
-                                    drivers.length > 0
-                                      ? `${(item.autos / drivers.length) * 100}%`
-                                      : "0%",
-                                }}
-                                className="h-full bg-amber-500 rounded-full shadow-[0_0_8px_#f59e0b]"
-                              />
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="py-12 flex flex-col items-center justify-center opacity-20">
-                          <Database size={32} />
-                          <p className="text-[9px] font-black uppercase tracking-widest mt-4">No Distribution Data</p>
-                        </div>
-                      )}
-                    </div>
-                    <button 
-                      onClick={(e) => handleExtractionClick(e, drivers, "Global_Status_Report")}
-                      disabled={isExtracting}
-                      className={cn(
-                        "w-full mt-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl transition-all",
-                        isExtracting 
-                          ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
-                          : "bg-slate-950 text-white hover:bg-amber-500 hover:text-slate-950 active:scale-95"
-                      )}
-                    >
-                      {isExtracting ? "PROCESSING..." : "GENERATE REPORT"}
-                    </button>
-                  </div>
-                  <div className="bg-amber-500 p-4 md:p-6 rounded-2xl shadow-xl shadow-amber-500/10 text-slate-950 flex flex-col justify-between overflow-hidden relative group">
-                    <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
-                      <Activity size={120} />
-                    </div>
-                    <div className="relative z-10">
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">
-                        Fleet Pulse
-                      </p>
-                      <h4 className="text-3xl font-black italic">
-                        NETWORK
-                        <br />
-                        ACCELERATED
-                      </h4>
-                    </div>
-                    <div className="mt-8 relative z-10">
-                      {drivers.length === 0 ? (
-                        <div className="flex items-center gap-2">
-                           <span className="w-2 h-2 bg-slate-800 rounded-full"></span>
-                           <span className="text-[11px] font-black uppercase opacity-40">
-                             Awaiting Active Screens...
-                           </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-slate-950 rounded-full animate-ping"></span>
-                          <span className="text-[11px] font-black uppercase">
-                            Updating Active Screens...
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : activeTab === "CAMPAIGNS" ? (
-            <div className="space-y-6">
-              <div className="bg-slate-900 p-4 md:p-6 rounded-2xl text-white relative overflow-hidden shadow-2xl">
-                <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
-                <div className="relative z-10 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg md:text-2xl font-black italic uppercase text-amber-500">
-                      Campaign Matrix
-                    </h2>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Global Fleet Deployment Control
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={(e) => handleExtractionClick(e, campaigns, "Campaign_Deployment_Records")}
-                      disabled={isExtracting}
-                      className="bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl border border-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50"
-                    >
-                      {isExtracting ? <RefreshCw size={14} className="animate-spin text-amber-500" /> : <Download size={14} className="text-amber-500" />}
-                      {isExtracting ? "Extracting..." : "Extract Matrix"}
-                    </button>
-                    {(activeTab === "CAMPAIGNS" || activeTab === "REVIEWS") && (
-                      <div className="hidden sm:flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-[10px] font-black text-white uppercase tracking-widest">
-                            {
-                              campaigns.filter((c) => c.status === "ACTIVE")
-                                .length
-                            }
-                          </p>
-                          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
-                            Active nodes
-                          </p>
-                        </div>
-                        <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center text-amber-500">
-                          <Zap size={24} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-                  <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                    <h3 className="text-xs font-black text-slate-900 uppercase italic">
-                      Live Deployment Inventory
-                    </h3>
-                    <span className="text-[10px] font-black text-slate-400">
-                      {campaigns.filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes('showcase')).length}{" "}
-                      Units
-                    </span>
-                  </div>
-                  <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
-                    {campaigns
-                      .filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes('showcase'))
-                      .map((c) => (
-                        <div
-                          key={c.id}
-                          className={cn(
-                            "p-6 flex items-center justify-between hover:bg-slate-50 transition-all cursor-pointer group",
-                            selectedCampaign?.id === c.id &&
-                              "bg-amber-50 border-r-4 border-amber-500",
-                          )}
-                          onClick={() => setSelectedCampaign(c)}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="w-16 h-12 bg-slate-900 rounded-xl overflow-hidden relative border border-slate-800">
-                              {c?.mediaType === "IMAGE" ? (
-                                <img
-                                  src={c.mediaUrl}
-                                  alt=""
-                                  className="w-full h-full object-cover opacity-60"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <Video size={16} className="text-slate-600" />
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-black text-slate-900 uppercase leading-none mb-1">
-                                {c.title}
-                              </h4>
-                              {(() => {
-                                const exp = getCampaignExpiration(c);
-                                if (!exp) return null;
-                                return (
-                                  <div className="flex items-center gap-1.5 mt-1">
-                                    <span className={cn(
-                                      "text-[8px] font-black px-1.5 py-0.5 rounded tracking-wider leading-none",
-                                      exp.expired ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600 animate-pulse"
-                                    )}>
-                                      {exp.timeLeftStr}
-                                    </span>
-                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">
-                                      (Exp: {exp.formattedDate})
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                                  Active Area: <span className="text-slate-900">{c.targetCity}, {c.targetState}</span>
-                                </p>
-                                {c.assignedDrivers && c.assignedDrivers.length > 0 && (
-                                  <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
-                                    <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1">Live Terminals:</p>
-                                    <div className="flex flex-wrap gap-1">
-                                      {c.assignedDrivers.map((driverId: string) => (
-                                        <span key={driverId} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-black text-slate-700 shadow-sm">
-                                          {driverId.slice(-4).toUpperCase()}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteCampaign(c.id);
-                              }}
-                              className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                              title="Delete Campaign"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                            <ChevronRight
-                              size={16}
-                              className={cn(
-                                "text-slate-300 transition-transform",
-                                selectedCampaign?.id === c.id &&
-                                  "translate-x-2 text-amber-500",
-                              )}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    {campaigns.filter((c) => c.status === "ACTIVE").length ===
-                      0 && (
-                      <div className="py-20 text-center space-y-4">
-                        <Monitor size={48} className="mx-auto text-slate-100" />
-                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">
-                          No active deployments detected.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div
-                  className={cn(
-                    "bg-white rounded-[2rem] border border-slate-100 shadow-xl flex flex-col transition-all relative overflow-hidden min-h-[500px]",
-                  )}
-                >
-                  {!selectedCampaign ? (
-                    <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center p-6 md:p-8 text-center space-y-4">
-                      <div className="w-20 h-20 bg-amber-500/10 text-amber-500 rounded-[2rem] flex items-center justify-center animate-pulse">
-                        <MousePointer2 size={32} />
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-black text-slate-900 uppercase">
-                          Selection Required
-                        </h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] max-w-[200px]">
-                          Select a campaign from the deployment inventory to
-                          configure node targeting.
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="p-4 border-b border-slate-50 bg-slate-50/30 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <button 
-                        onClick={() => setSelectedCampaign(null)}
-                        className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl border border-slate-200 transition-all flex items-center gap-2"
-                      >
-                         <ArrowLeft size={16} />
-                         <span className="text-[9px] font-black uppercase tracking-widest hidden xs:inline">Back</span>
-                      </button>
-                      <h3 className="text-xs font-black text-slate-900 uppercase italic">
-                        Node Activation Desk
-                      </h3>
-                    </div>
-                    <span className="px-3 py-1 bg-green-100 text-green-600 text-[8px] font-black uppercase rounded-lg">
-                      Cluster: {selectedCampaign?.title.slice(0, 10)}
-                    </span>
-                  </div>
-                  <div className="p-4 border-b border-slate-50 bg-slate-50/10 space-y-4">
-                    {/* Media Edit Section */}
-                    <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Media Content & Type</h4>
-                        {!isEditingMedia ? (
-                          <button 
-                            onClick={() => {
-                              setEditMediaUrl(selectedCampaign?.mediaUrl || selectedCampaign?.assetUrl || '');
-                              setEditMediaType(selectedCampaign?.mediaType || 'IMAGE');
-                              setIsEditingMedia(true);
-                            }}
-                            className="text-[8px] font-black text-amber-600 uppercase hover:underline"
-                          >
-                            Edit Media link
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => setIsEditingMedia(false)}
-                            className="text-[8px] font-black text-slate-400 uppercase hover:underline"
-                          >
-                            Cancel
-                          </button>
-                        )}
-                      </div>
-
-                      {isEditingMedia ? (
-                        <div className="space-y-3">
-                          <div className="relative group/edit">
-                            <input
-                              type="file"
-                              accept="image/*,video/*"
-                              onChange={(e) => setEditMediaFile(e.target.files?.[0] || null)}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                            />
-                            <div className={cn(
-                              "p-6 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 transition-all",
-                              editMediaFile ? "border-amber-500 bg-amber-50/10" : "border-slate-100 bg-slate-50/50"
-                            )}>
-                              {editMediaFile ? (
-                                <>
-                                  <Check size={20} className="text-amber-500" />
-                                  <p className="text-[9px] font-black uppercase text-slate-900 truncate max-w-full px-4">{editMediaFile.name}</p>
-                                </>
-                              ) : (
-                                <>
-                                  <RefreshCw size={20} className="text-slate-300" />
-                                  <p className="text-[9px] font-black uppercase text-slate-400">Swap with New File</p>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {!editMediaFile && (
-                            <>
-                              <div className="flex items-center gap-4 py-1">
-                                <div className="flex-1 h-px bg-slate-100" />
-                                <span className="text-[7px] font-black text-slate-300 uppercase">OR</span>
-                                <div className="flex-1 h-px bg-slate-100" />
-                              </div>
-                              <input 
-                                type="text"
-                                value={editMediaUrl}
-                                onChange={(e) => setEditMediaUrl(e.target.value)}
-                                placeholder="External Asset URL..."
-                                className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-[10px] font-bold text-slate-900 outline-none focus:ring-2 focus:ring-amber-500/20 transition-all font-mono"
-                              />
-                            </>
-                          )}
-                          
-                          <div className="flex gap-2">
-                             <button 
-                               onClick={() => setEditMediaType('IMAGE')}
-                               className={cn(
-                                 "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
-                                 editMediaType === 'IMAGE' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100"
-                               )}
-                             >
-                               Image
-                             </button>
-                             <button 
-                               onClick={() => setEditMediaType('VIDEO')}
-                               className={cn(
-                                 "flex-1 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all",
-                                 editMediaType === 'VIDEO' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-100"
-                               )}
-                             >
-                               Video
-                             </button>
-                          </div>
-                          
-                          {editUploadProgress > 0 && editUploadProgress < 100 && (
-                            <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                               <div className="h-full bg-amber-500" style={{ width: `${editUploadProgress}%` }} />
-                            </div>
-                          )}
-
-                          <button 
-                            onClick={handleUpdateMedia}
-                            disabled={isUpdatingMedia}
-                            className="w-full py-3 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/10 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
-                          >
-                            {isUpdatingMedia ? 'Processing...' : 'Secure Node Asset'}
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-10 bg-slate-900 rounded-lg overflow-hidden border border-slate-200">
-                             {selectedCampaign?.mediaType === 'IMAGE' ? (
-                               <img src={getSafeUrl(selectedCampaign?.mediaUrl)} className="w-full h-full object-cover opacity-60" />
-                             ) : (
-                               <div className="w-full h-full flex items-center justify-center"><Video size={14} className="text-slate-600" /></div>
-                             )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-tight truncate">
-                               {selectedCampaign?.mediaUrl || 'NOT LINKED'}
-                             </p>
-                             <p className="text-[7px] font-bold text-amber-600 uppercase mt-0.5">{selectedCampaign?.mediaType || 'NO'} ASSET ACTIVE</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Search
-                          size={14}
-                          className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Search nodes by name, number, city..."
-                          className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-2xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all shadow-sm h-14"
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                      </div>
-                      <select
-                        className="bg-white border border-slate-200 px-4 rounded-2xl text-[9px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-14"
-                        value={selectedArea}
-                        onChange={(e) => setSelectedArea(e.target.value)}
-                      >
-                        <option value="ALL">All Areas</option>
-                        {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map(city => (
-                          <option key={city} value={city}>{city?.toUpperCase()}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto max-h-[400px] p-6 space-y-2">
-                    {filteredDrivers.map((d) => (
-                      <label
-                        key={d.uid}
-                        className={cn(
-                          "flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border",
-                          selectedDriverIds.includes(d.uid)
-                            ? "bg-amber-50 border-amber-200"
-                            : "bg-white border-transparent hover:bg-slate-50",
-                        )}
-                      >
-                        <div className="flex items-center gap-4">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
-                            checked={selectedDriverIds.includes(d.uid)}
-                            onChange={(e) =>
-                              e.target.checked
-                                ? setSelectedDriverIds([
-                                    ...selectedDriverIds,
-                                    d.uid,
-                                  ])
-                                : setSelectedDriverIds(
-                                    selectedDriverIds.filter(
-                                      (id) => id !== d.uid,
-                                    ),
-                                  )
-                            }
-                          />
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-amber-500 group-hover:text-white transition-all">
-                              <Truck size={20} />
-                            </div>
-                            <div>
-                              <span className="text-[11px] font-black uppercase text-slate-900 block leading-none">
-                                {d.name}
-                              </span>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-widest">
-                                  AUTO NO: {d.vNo || 'NOT SET'}
-                                </span>
-                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
-                                  {d.city || 'GLOBAL'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div
-                          className={cn(
-                            "w-1.5 h-1.5 rounded-full",
-                            d.status === "active"
-                              ? "bg-green-500"
-                              : "bg-slate-300",
-                          )}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <div className="p-8 bg-slate-950 border-t border-slate-800">
-                    <button
-                      onClick={handleBulkAssign}
-                      disabled={isAssigning || selectedDriverIds.length === 0}
-                      className="w-full py-5 bg-amber-500 text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl shadow-amber-500/10 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3 italic"
-                    >
-                      {isAssigning
-                        ? "Synchronizing Cluster..."
-                        : `Deploy to ${selectedDriverIds.length} Selective Units`}
-                      <Send size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : activeTab === "REVIEWS" ? (
-    <div className="space-y-8">
-      <div className="bg-amber-500 p-6 md:p-8 rounded-[2rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 blur-3xl rounded-full -mr-16 -mt-16" />
-        <div className="relative z-10">
-          <h2 className="text-2xl md:text-5xl font-black italic uppercase leading-none">
-            Quality Control
-          </h2>
-          <p className="text-[10px] md:text-[12px] font-black uppercase tracking-[0.3em] mt-3 opacity-60">
-            Pending Global Verification Queue
-          </p>
-        </div>
-      </div>
-
-      {/* Driver Verification Section */}
-      <div className="space-y-4 pb-12">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Driver Onboarding ({drivers.filter(d => d.status === 'pending_verification').length})</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {drivers.filter(d => d.status === 'pending_verification').map((d) => (
-            <motion.div
-              key={d.uid}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col group"
-            >
-              <div className="p-6 space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-800">
-                    <img 
-                      src={d.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${d.uid}`} 
-                      alt="" 
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div>
-                    <h4 className="text-lg font-black text-slate-900 uppercase leading-none mb-1">{d.name}</h4>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.city || 'Unknown Location'}</p>
-                    {d.phone && <p className="text-[10px] font-bold font-mono text-slate-500 mt-1 uppercase">Phone: {d.phone}</p>}
-                    {d.email && <p className="text-[9px] font-medium font-mono text-slate-400 truncate max-w-[150px]">{d.email}</p>}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                  {[
-                    { label: 'Aadhaar', key: 'aadharPhoto' },
-                    { label: 'RC', key: 'rcPhoto' },
-                    { label: 'License', key: 'dlPhoto' },
-                    { label: 'PAN', key: 'panPhoto' },
-                    { label: 'Insurance', key: 'insurancePhoto' },
-                    { label: 'Selfie', key: 'profileImage' }
-                  ].map(doc => (
-                    <div key={doc.key} className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-1">
-                      <span className="text-[7px] font-black uppercase text-slate-400">{doc.label}</span>
-                      {((d as any)[doc.key] || (doc.key === 'aadharPhoto' && (d as any).documents?.aadhaar) || (doc.key === 'dlPhoto' && (d as any).documents?.drivingLicense) || (doc.key === 'profileImage' && (d as any).documents?.selfie)) ? (
-                        <Check size={12} className="text-green-500" />
-                      ) : (
-                        <X size={12} className="text-slate-300" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      const newId = d.terminalId || `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
-                      const newKey = d.accessKey || Math.floor(1000 + Math.random() * 9000).toString();
-                      firebaseService.updateDriverProfile(d.id, { 
-                        status: 'active', 
-                        isVerified: true,
-                        kycStatus: 'APPROVED',
-                        payoutEnabled: true,
-                        adminApproved: true,
-                        terminalId: newId,
-                        accessKey: newKey,
-                        provisionStatus: 'PROVISIONED'
-                      });
-                      
-                      // Auto-approve the agreement if they are being quick approved
-                      firebaseService.updateDriverAgreement(d.id, {
-                        agreementAccepted: true,
-                        acceptedAt: new Date().toISOString(),
-                        version: '1.0',
-                        ipAddress: 'admin-provisioned'
-                      });
-                      showToast("Driver Approved & Terminal Provisioned", 'success');
-                    }}
-                    className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 font-sans"
-                  >
-                    Quick Approve
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-          {drivers.filter(d => d.status === 'pending_verification').length === 0 && (
-            <div className="col-span-full py-12 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] text-center">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No pending driver verifications</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-4 pt-8">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === 'PENDING').length})</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {campaigns.filter((c) => c.status === "PENDING").length > 0 ? (
-            campaigns
-              .filter((c) => c.status === "PENDING")
-                    .map((c) => (
-                      <motion.div
-                        key={c.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col h-full group"
-                      >
-                        <div className="h-56 bg-slate-950 relative overflow-hidden shrink-0 italic">
-                          {c?.mediaType === "IMAGE" ? (
-                            <img
-                              src={c.mediaUrl}
-                              alt=""
-                              className="w-full h-full object-cover opacity-80 group-hover:scale-110 transition-all duration-1000"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900">
-                              <Video className="text-slate-700 w-16 h-16 mb-4" />
-                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-                                Video Stream Initialization
-                              </span>
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent" />
-                          <div className="absolute top-6 right-6 flex flex-col items-end gap-2">
-                            <span className="bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-500 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-2xl">
-                              {(() => {
-                                if (!c.paymentReceived) return "Awaiting Payment";
-                                if ((c as any).needDesigner && !(c as any).designerApproved) return "Waiting for Designer/User Satisfaction";
-                                if (c.mediaReceived || c.mediaUrl || c.assetUrl) return "Admin: Recv Payment & Media Ready";
-                                return "Awaiting Final Review";
-                              })()}
-                            </span>
-                            {(c as any).needDesigner && (
-                              <span className="bg-blue-500/20 backdrop-blur-md border border-blue-500/30 text-blue-500 px-3 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest">
-                                Designer Selected
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="p-4 md:p-6 flex flex-col flex-1">
-                          <div className="flex-1 space-y-2">
-                            <h4 className="text-lg font-black text-slate-900 uppercase leading-none truncate">
-                              {c.title}
-                            </h4>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                              <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
-                              ID: {c.id?.slice(-8).toUpperCase()}
-                            </p>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
-                              Requested Lifespan: <span className="text-slate-900 font-extrabold">{c.durationDays || 30} Days</span>
-                            </p>
-                            <div className="flex flex-wrap gap-2 pt-2">
-                               <div className={cn(
-                                 "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest border",
-                                 c.paymentReceived ? "bg-green-50 text-green-500 border-green-100" : "bg-red-50 text-red-500 border-red-100"
-                               )}>
-                                  {c.paymentReceived ? "PAID" : "UNPAID"}
-                               </div>
-                               <div className={cn(
-                                 "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[7px] font-black uppercase tracking-widest border",
-                                 (c.mediaReceived || c.mediaUrl || c.assetUrl) ? "bg-green-50 text-green-500 border-green-100" : "bg-amber-50 text-amber-600 border-amber-100"
-                               )}>
-                                  {(c.mediaReceived || c.mediaUrl || c.assetUrl) ? "READY" : "PENDING"}
-                               </div>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3 mt-8">
-                            <button
-                              onClick={() => handleRejectCampaign(c.id!)}
-                              className="py-4 border border-slate-100 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 hover:border-red-100 transition-all"
-                            >
-                              Reject
-                            </button>
-                            <button
-                              onClick={() => handleApproveCampaign(c.id!)}
-                              className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
-                            >
-                              Approve
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => handleDeleteCampaign(c.id!)}
-                            className="w-full mt-3 py-3 text-slate-400 hover:text-red-500 transition-colors text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-                          >
-                            <Trash2 size={12} />
-                            Purge Submission
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))
-                ) : (
-                  <div className="col-span-full py-24 bg-white border border-slate-50 border-dashed rounded-[3rem] flex flex-col items-center justify-center text-slate-200 gap-6 grayscale">
-                    <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center">
-                      <Monitor size={40} className="opacity-20" />
-                    </div>
-                    <div className="text-center space-y-1">
-                      <h4 className="text-sm font-black text-slate-400 uppercase italic">
-                        Queue Equilibrium Reached
-                      </h4>
-                      <p className="text-[10px] font-bold uppercase tracking-widest opacity-60">
-                        All pending submissions have been processed.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : activeTab === "PRICING_APPROVALS" ? (
-          <div className="space-y-8">
-            <div className="bg-slate-900 p-8 rounded-[3rem] text-white relative overflow-hidden shadow-2xl border border-slate-800">
-               <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
-               <div className="relative z-10">
-                  <h2 className="text-3xl font-black italic uppercase text-amber-500">Price Change Requests</h2>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Designer & Base Pricing Approvals Queue</p>
-               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-               {planProposals.length === 0 ? (
-                 <div className="col-span-full py-20 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center gap-4">
-                    <Check className="text-slate-200" size={48} />
-                    <h3 className="text-sm font-black text-slate-400 uppercase italic">All Pricing Synced</h3>
-                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">No pending price proposals from support team</p>
-                 </div>
-               ) : (
-                 planProposals.map((prop) => {
-                   const plan = plans.find(p => p.id === prop.planId);
-                   return (
-                     <motion.div 
-                       key={prop.id}
-                       initial={{ opacity: 0, scale: 0.95 }}
-                       animate={{ opacity: 1, scale: 1 }}
-                       className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6 relative group"
-                     >
-                        <div className="flex items-center justify-between">
-                           <div className="bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">
-                              {prop.type === 'designerPrice' ? 'Designer Rate' : prop.type === 'videoMakerPrice' ? 'Video Rate' : 'Base Rate'}
-                           </div>
-                           <span className="text-[10px] font-bold text-slate-400">{prop.createdAt?.toDate?.()?.toLocaleDateString() || 'Today'}</span>
-                        </div>
-                        
-                        <div>
-                           <h3 className="text-xl font-black text-slate-900 uppercase italic leading-none">{plan?.name || prop.planId}</h3>
-                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Proposed by: {prop.proposedBy}</p>
-                        </div>
-
-                        <div className="flex items-baseline gap-4 py-4 bg-slate-50 rounded-2xl px-6">
-                           <div className="flex-1">
-                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Proposed</p>
-                              <p className="text-2xl font-black text-amber-500 italic">₹{prop.newValue || prop.newPrice}</p>
-                           </div>
-                           <div className="w-px h-10 bg-slate-200" />
-                           <div className="flex-1">
-                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current</p>
-                              <p className="text-2xl font-black text-slate-300 italic">₹{prop.type === 'designerPrice' ? plan?.designerPrice : prop.type === 'videoMakerPrice' ? plan?.videoMakerPrice : plan?.price}</p>
-                           </div>
-                        </div>
-
-                        <div className="flex gap-3">
-                           <button 
-                             onClick={() => handleRejectPlan(prop.id)}
-                             className="flex-1 px-4 py-3 bg-slate-100 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
-                           >
-                              Reject
-                           </button>
-                           <button 
-                             onClick={() => handleApprovePlan(prop.id, prop.planId, prop.newValue || prop.newPrice, prop.type || 'price')}
-                             className="flex-[2] bg-amber-500 text-slate-950 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all"
-                           >
-                              Approve Rate
-                           </button>
-                        </div>
-                     </motion.div>
-                   );
-                 })
-               )}
-            </div>
-          </div>
-        ) : activeTab === "TERMINAL_HUB" ? (
-          <div className="space-y-8 pb-20">
-            {/* Header Stats From Screenshot */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[
-                { label: 'Active Campaigns', value: campaigns.filter(c => c.status === 'ACTIVE').length, sub: 'Live Now', icon: Monitor },
-                { label: 'Cloud Units Ready', value: drivers.filter(d => d.status === 'active').length, sub: 'Approved Fleet', icon: ShieldCheck },
-                { label: 'Total Revenue', value: `₹${totalSuccessfulRevenue.toLocaleString()}`, sub: 'Cumulative', icon: IndianRupee },
-                { label: 'Online Now', value: liveUnitsCount, sub: 'Real-time Pulse', icon: Activity }
-              ].map((stat) => (
-                <div key={stat.label} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
-                  <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
-                    <stat.icon className="text-amber-500" size={100} />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2 mb-6">
-                      <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center">
-                        <stat.icon className="text-amber-500" size={16} />
-                      </div>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</span>
-                    </div>
-                    <h4 className="text-4xl font-black text-white tracking-tight">{stat.value}</h4>
-                    <p className="text-[10px] font-black text-amber-500/60 uppercase tracking-widest mt-2">{stat.sub}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Terminal Management Section */}
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h2 className="text-3xl font-black italic uppercase text-slate-900 leading-tight">Terminal Hub</h2>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic flex flex-wrap items-center gap-2">
-                      <span className="text-slate-900">SYSTEM ARCHITECTURE:</span> Every driver requires a Provisioned Terminal to run Ad Campaigns.
-                      <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
-                      <span className="text-slate-500 underline decoration-slate-200">NOT ASSIGNED:</span> Terminal hardware logic has not been linked to this driver profile yet.
-                      <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
-                      <span className="text-amber-600 font-bold">AWAITING PROVISIONING:</span> Terminal ID generated but synchronization with physical display unit is pending.
-                    </p>
-                </div>
-                <div className="flex gap-3 w-full md:w-auto">
-                  <div className="relative flex-1 md:flex-initial">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input 
-                      type="text" 
-                      placeholder="SEARCH TERMINAL ID..." 
-                      className="w-full md:w-64 pl-12 pr-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20"
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <button className="p-4 bg-slate-900 text-amber-500 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all">
-                    <RefreshCw size={20} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                {drivers.filter(d => (d.terminalId || '').toUpperCase().includes(searchTerm.toUpperCase())).map((d) => {
-                  const status = liveStatus.find(s => s.terminalId === d.terminalId);
-                  const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
-                  
-                  return (
-                    <motion.div
-                      key={d.uid}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-8 space-y-6 relative group overflow-hidden"
-                    >
-                      {/* Status Badge */}
-                      <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-slate-100 shadow-sm">
-                        <div className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-green-500 animate-pulse" : "bg-slate-300")} />
-                        <span className="text-[8px] font-black uppercase text-slate-500">
-                          {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Hardware Instance</p>
-                        <div className="flex items-center gap-3">
-                          <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">
-                             {d.terminalId || "UNASSIGNED"}
-                          </h4>
-                          {!d.terminalId && (
-                            <button 
-                              onClick={() => {
-                                const newId = `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
-                                const newKey = Math.floor(1000 + Math.random() * 9000).toString();
-                                firebaseService.updateDriverProfile(d.uid, { 
-                                  terminalId: newId, 
-                                  accessKey: newKey,
-                                  provisionStatus: 'PROVISIONED' 
-                                })
-                                  .then(() => showToast("Terminal Provisioned", 'info'))
-                                  .catch(e => showToast(e.message, 'error'));
-                              }}
-                              className="text-[8px] font-black bg-amber-500 text-slate-950 px-2 py-1 rounded-md uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-                            >
-                              Gen UID
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Live Screen Preview */}
-                      {status?.currentAdImage && (
-                        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group/screen">
-                          <img 
-                            src={getSafeUrl(status.currentAdImage)} 
-                            className="w-full h-full object-cover transition-transform duration-500 group-hover/screen:scale-110" 
-                            alt="Live Display"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover/screen:opacity-100 transition-opacity flex items-end p-3">
-                            <p className="text-[8px] font-black text-white uppercase tracking-widest">LIVE SCREEN MIRROR</p>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Access Key</p>
-                          <p className="text-lg font-black text-amber-600 font-mono tracking-[0.2em]">{d.accessKey || "------"}</p>
-                          {!d.accessKey && (
-                            <p className="text-[7px] font-bold text-red-400 uppercase mt-1">Awaiting Provisioning</p>
-                          )}
-                        </div>
-                        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                          <div className="flex flex-col">
-                            <p className={cn(
-                              "text-[10px] font-black uppercase",
-                              d.provisionStatus === 'ACTIVE' ? "text-green-600" : "text-amber-500"
-                            )}>
-                              {d.provisionStatus || 'NOT ASSIGNED'}
-                            </p>
-                            <p className="text-[6px] font-bold text-slate-400 mt-0.5 leading-tight">
-                              {d.provisionStatus === 'ACTIVE' ? "Device Fully Synced" : 
-                               d.provisionStatus === 'PROVISIONED' ? "Awaiting First Connection" :
-                               "Pending Admin Provisioning"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Driver</span>
-                          <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.name}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Vehicle</span>
-                          <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.vNo || 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Campaign</span>
-                          <span className="text-[10px] font-black text-amber-600 uppercase italic">
-                            {campaigns.find(c => c.assignedDrivers?.includes(d.uid))?.title || 'No Active Ads'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center py-2">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Last Sync</span>
-                          <span className="text-[9px] font-black text-slate-500 uppercase">
-                            {status?.updatedAt ? new Date(status.updatedAt.toMillis()).toLocaleString() : 'Never'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 flex gap-2">
-                        <button 
-                          onClick={() => {
-                            window.open(`/device-portal?terminalId=${d.terminalId}&accessKey=${d.accessKey}`, '_blank');
-                          }}
-                          className="flex-1 py-4 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl font-sans"
-                        >
-                          Open Portal
-                        </button>
-                        <button 
-                          onClick={async () => {
-                            const loc = driverLocations.find(l => l.driverId === d.uid);
-                            if(loc && loc.lat && loc.lng && loc.lat !== 0) {
-                               setMapCenter([loc.lat, loc.lng]);
-                               setMapZoom(16);
-                               handleFetchDriverHistory(d.uid);
-                               setActiveTab("MAP");
-                            } else {
-                               try {
-                                 showToast("No active fix. Fetching last known...", 'info');
-                                 const logs = await firebaseService.getLocationLogs(d.uid);
-                                 const valid = logs.filter((l: any) => l.lat && l.lng && l.lat !== 0);
-                                 if (valid.length > 0) {
-                                   const last = valid[valid.length - 1];
-                                   setMapCenter([last.lat, last.lng]);
-                                   setMapZoom(16);
-                                   setSelectedDriverHistory(valid);
-                                   setActiveTab("MAP");
-                                 } else {
-                                   showToast("No telemetry data available.", 'error');
-                                 }
-                               } catch (e) {
-                                 showToast("Sync Error.", 'error');
-                               }
-                            }
-                          }}
-                          className="p-4 bg-amber-500 text-slate-950 rounded-2xl hover:scale-105 transition-all shadow-lg shadow-amber-500/20"
-                          title="Track on Map"
-                        >
-                          <MapPin size={16} />
-                        </button>
-                        <button 
-                          onClick={() => {
-                            if(window.confirm(`Revoke access for Terminal ${d.terminalId}?`)) {
-                              firebaseService.revokeTerminal(d.terminalId!, d.uid)
-                                .then(() => showToast("Terminal credentials revoked.", 'info'))
-                                .catch(e => showToast(e.message, 'error'));
-                            }
-                          }}
-                          className="p-4 border border-slate-200 text-slate-400 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                      
-                      {d.terminalId && (
-                        <div className="flex gap-2">
-                           <button 
-                               onClick={() => setNetworkConfigTarget(d.terminalId)}
-                               className="flex-1 py-3 bg-amber-50 text-amber-600 border border-amber-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-amber-100 transition-colors"
-                           >
-                              Config WiFi
-                           </button>
-                           {isOnline && (
-                             <button 
-                                 onClick={() => {
-                                   if (window.confirm("Restart this device remotely?")) {
-                                     const termRefId = terminals.find(t => t.id === d.terminalId)?.id || d.terminalId;
-                                     firebaseService.updateTerminalCommand(termRefId, "REBOOT")
-                                        .then(() => showToast("Reboot command sent.", "success"))
-                                        .catch(e => showToast("Error: " + e.message, "error"));
-                                   }
-                                 }}
-                                 className="flex-1 py-3 bg-red-50 text-red-600 border border-red-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-red-100 transition-colors"
-                             >
-                                Restart
-                             </button>
-                           )}
-                        </div>
-                      )}
-
-                      {/* Decorative Element */}
-                      <div className="absolute -left-10 -bottom-10 w-24 h-24 bg-amber-500/10 blur-3xl rounded-full" />
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        ) : activeTab === "MAP" ? (
-            <div className="flex flex-col space-y-4 relative">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4 shrink-0 px-1">
-                <div>
-                  <h2 className="text-base md:text-2xl font-black italic uppercase text-slate-900 leading-none">
-                    Active Network Overview
-                  </h2>
-                  <p className="text-[8px] md:text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] italic mt-1 md:mt-2">
-                    Live Fleet Telemetry Cluster
-                  </p>
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <div className="flex-1 md:flex-none relative">
-                    <Radio className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                    <input
-                      type="text"
-                      placeholder="SEARCH GPS ID..."
-                      className="w-full md:w-48 pl-10 pr-4 py-2.5 bg-white border border-slate-100 rounded-xl shadow-sm text-[10px] font-black uppercase tracking-widest outline-none focus:ring-1 focus:ring-amber-500"
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white px-4 py-2.5 rounded-xl border border-slate-100 shadow-sm">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">
-                      Online: {driverLocations.filter((l) => l.isOnline).length}
-                    </span>
-                  </div>
-                  <div className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white px-4 py-2.5 rounded-xl border border-slate-100 shadow-sm">
-                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none">
-                      Inactive:{" "}
-                      {driverLocations.filter((l) => !l.isOnline).length}
-                    </span>
-                  </div>
-                  <button 
-                    onClick={() => setShowCoverage(!showCoverage)}
-                    className={cn(
-                      "flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all shadow-sm",
-                      showCoverage ? "bg-amber-500 text-slate-950 border-amber-600" : "bg-white text-slate-400 border-slate-100"
-                    )}
-                  >
-                    <div className={cn("w-1.5 h-1.5 rounded-full", showCoverage ? "bg-slate-950" : "bg-slate-300")} />
-                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">
-                      Coverage: {showCoverage ? "ON" : "OFF"}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setShowIssues(!showIssues)}
-                    className={cn(
-                      "flex items-center gap-3 px-6 py-3 rounded-2xl transition-all shadow-lg active:scale-95 group",
-                      showIssues
-                        ? "bg-red-500 text-white shadow-red-500/20"
-                        : "bg-white text-slate-400 border border-slate-100",
-                    )}
-                  >
-                    <div className={cn("w-1.5 h-1.5 rounded-full", showIssues ? "bg-white" : "bg-slate-300")} />
-                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">
-                      Issues: {showIssues ? "VISIBLE" : "HIDDEN"}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-col md:flex-row gap-4 relative">
-                <div className="bg-slate-100 rounded-[2rem] md:rounded-[2.5rem] relative overflow-hidden border border-slate-100 shadow-xl h-[500px] md:h-[650px] lg:h-[750px] md:flex-1 z-10">
-                  <MapContainer
-                    key={activeTab}
-                    center={mapCenter}
-                    zoom={mapZoom}
-                    className="h-full w-full outline-none"
-                    style={{ height: "100%", width: "100%", background: "#f8fafc" }}
-                    zoomControl={true}
-                    dragging={true}
-                    touchZoom={true}
-                    scrollWheelZoom={false}
-                    doubleClickZoom={true}
-                    boxZoom={true}
-                    keyboard={true}
-                  >
-                    <InvalidateMap />
-                    <div className="absolute top-2 right-12 z-[1000] bg-white/80 backdrop-blur-md px-2 py-1 rounded text-[7px] font-black uppercase text-slate-400">
-                      Map Engine: Leaflet 1.9.4
-                    </div>
-                    <TileLayer
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    />
-                    <ChangeView center={mapCenter} zoom={mapZoom} />
-
-                    {/* Render Campaign Coverage Areas */}
-                    {campaigns
-                      .filter(
-                        (c) => c.status === "ACTIVE" && showCoverage,
-                      )
-                      .map((camp: any) => (
-                        <Circle
-                          key={camp.id}
-                          center={
-                            camp.targetLat && camp.targetLng
-                              ? [camp.targetLat, camp.targetLng]
-                              : [
-                                  mapCenter[0],
-                                  mapCenter[1],
-                                ]
-                          }
-                          radius={camp.coverageRadius || 5000} // Default 5km if not set
-                          pathOptions={{
-                            color: "#f59e0b",
-                            fillColor: "#f59e0b",
-                            fillOpacity: 0.1,
-                            weight: 1,
-                            dashArray: "5, 10",
-                          }}
-                        >
-                          <Popup className="ad-popup">
-                            <div className="p-1">
-                              <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-1">
-                                Ad Campaign
-                              </p>
-                              <h4 className="text-xs font-black text-slate-900">
-                                {camp.title}
-                              </h4>
-                              <p className="text-[10px] text-slate-500 mt-1 uppercase font-bold">
-                                {camp.clientName}
-                              </p>
-                            </div>
-                          </Popup>
-                        </Circle>
-                      ))}
-
-                    {/* Render History Polyline */}
-                    {selectedDriverHistory.length > 1 && (
-                      <Polyline
-                        positions={selectedDriverHistory
-                          .filter(h => h.lat && h.lng)
-                          .map(h => [h.lat, h.lng]) as [number, number][]}
-                        pathOptions={{
-                          color: "#3b82f6",
-                          weight: 4,
-                          opacity: 0.6,
-                          dashArray: "10, 10",
-                          lineJoin: "round"
-                        }}
-                      />
-                    )}
-
-                    {/* Render Issue Reports */}
-                    {showIssues && tickets.filter(t => t.type === 'DEVICE' && t.lat && t.lng).map((ticket) => (
-                      <Marker 
-                        key={ticket.id}
-                        position={[ticket.lat!, ticket.lng!]}
-                        icon={L.divIcon({
-                          className: 'custom-issue-icon',
-                          html: `
-                            <div class="relative bg-red-600 w-8 h-8 rounded-lg flex items-center justify-center text-white border-2 border-white shadow-xl animate-bounce">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                            </div>
-                          `,
-                          iconSize: [32, 32],
-                          iconAnchor: [16, 16]
-                        })}
-                      >
-                         <Popup>
-                            <div className="p-2">
-                               <h4 className="text-xs font-black text-red-600 uppercase mb-1">Issue Reported</h4>
-                               <p className="text-[10px] font-bold text-slate-900">{ticket.title}</p>
-                               <p className="text-[8px] text-slate-400 mt-1">{ticket.status} • {ticket.priority}</p>
-                            </div>
-                         </Popup>
-                      </Marker>
-                    ))}
-
-                    <MarkerClusterGroup maxClusterRadius={20} disableClusteringAtZoom={15}>
-                    {/* Render Driver Markers */}
-                    {driverLocations
-                      .filter(
-                        (loc) =>
-                          typeof loc.lat === "number" &&
-                          typeof loc.lng === "number" &&
-                          loc.lat !== 0 && loc.lng !== 0,
-                      )
-                      .map((loc) => {
-                        const compliance = getComplianceStatus(loc);
-                        const driverObj = drivers.find((d) => d.uid === loc.driverId);
-                        return (
-                          <Marker
-                            key={loc.id}
-                            position={[loc.lat, loc.lng]}
-                            icon={
-                              L.divIcon({
-                                className: "custom-div-icon",
-                                html: `
-                                <div class="relative group">
-                                  <div class="w-10 h-10 ${loc.isOnline ? "bg-slate-900 shadow-[0_0_20px_rgba(245,158,11,0.4)]" : "bg-slate-800 border-slate-700 opacity-60"} rounded-xl flex items-center justify-center text-white transition-all duration-300 border-2 ${compliance.status === 'compliant' ? 'border-emerald-500' : compliance.status === 'off-course' ? 'border-red-500' : 'border-amber-500'} transform group-hover:scale-110 active:scale-95 shadow-2xl">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                      <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9C2.1 11.6 2 11.8 2 12v4c0 .6.4 1 1 1h2"/>
-                                      <circle cx="7" cy="17" r="2"/>
-                                      <path d="M9 17h6"/>
-                                      <circle cx="17" cy="17" r="2"/>
-                                    </svg>
-                                  </div>
-                                  ${loc.isOnline ? `<div class="absolute -top-1.5 -right-1.5 flex h-4 w-4"><span class="animate-ping absolute inline-flex h-full w-full rounded-full ${compliance.status === 'compliant' ? 'bg-emerald-400' : 'bg-green-400'} opacity-75"></span><span class="relative inline-flex rounded-full h-4 w-4 ${compliance.status === 'compliant' ? 'bg-emerald-500' : 'bg-green-500'} border-2 border-white"></span></div>` : ""}
-                                  ${loc.gpsId ? `
-                                    <div class="absolute -bottom-1 -left-1 w-4 h-4 bg-blue-600 rounded-lg flex items-center justify-center border-2 border-white shadow-xl z-50 overflow-hidden" title="HARDWARE GPS ACTIVE: ${loc.gpsId}">
-                                      <div class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                                      <div class="absolute inset-0 bg-blue-400/20 animate-ping"></div>
-                                    </div>
-                                  ` : ""}
-                                </div>
-                              `,
-                                iconSize: [40, 40],
-                                iconAnchor: [20, 20],
-                              })
-                            }
-                            eventHandlers={{
-                              click: () => {
-                                setSelectedLocation({ ...loc, compliance });
-                                setMapCenter([loc.lat, loc.lng]);
-                                setMapZoom(16);
-                                handleFetchDriverHistory(loc.driverId);
-                              },
-                            }}
-                          >
-                            <Popup closeButton={false}>
-                              <div className="p-4 w-64 font-sans bg-white">
-                                <div className="flex items-center gap-3 mb-4">
-                                  <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white shadow-xl relative overflow-hidden", loc.isOnline ? "bg-slate-900 border border-white/10" : "bg-slate-200")}>
-                                     {driverObj?.profileImage ? (
-                                       <img src={driverObj.profileImage} className="w-full h-full object-cover" />
-                                     ) : (
-                                       <Truck size={24} className={loc.isOnline ? "text-amber-500" : "text-slate-400"} />
-                                     )}
-                                     <div className={cn("absolute top-1 right-1 w-2 h-2 rounded-full border border-white", loc.isOnline ? "bg-green-500" : "bg-red-500")} />
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="text-[12px] font-black italic text-slate-900 uppercase truncate">
-                                      {driverObj?.fullName || `Node [${loc.id.slice(-6)}]`}
-                                    </p>
-                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">
-                                      ID: {driverObj?.driverCode || 'AUTH_REQD'}
-                                    </p>
-                                  </div>
-                                </div>
-
-                                <div className="space-y-2 border-t border-slate-50 pt-3">
-                                  {compliance.status !== 'idle' ? (
-                                    <>
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Stack</span>
-                                        <span className="text-[10px] font-black text-slate-900 uppercase truncate max-w-[120px]">{compliance.campaign}</span>
-                                      </div>
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Proximity</span>
-                                        <span className={cn("text-[11px] font-black", compliance.status === 'compliant' ? "text-emerald-500" : "text-red-500")}>
-                                          {(compliance.distance / 1000).toFixed(2)} KM
-                                        </span>
-                                      </div>
-                                      
-                                      <div className={cn(
-                                        "p-2 rounded-xl border flex items-center justify-center gap-2 mt-2",
-                                        compliance.status === 'compliant' 
-                                          ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
-                                          : "bg-red-50 border-red-100 text-red-600"
-                                      )}>
-                                        {compliance.status === 'compliant' ? <Check size={12} className="shrink-0" /> : <AlertTriangle size={12} className="shrink-0" />}
-                                        <span className="text-[9px] font-black uppercase tracking-widest">
-                                          {compliance.status === 'compliant' ? "Network Compliant" : "Range Violation"}
-                                        </span>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="p-3 bg-slate-50 rounded-xl text-center border border-slate-100">
-                                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed">
-                                        STANDBY MODE<br/><span className="text-slate-300">NO ACTIVE PAYLOAD</span>
-                                      </p>
-                                    </div>
-                                  )}
-
-                                  <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 pt-1">
-                                    <span className="uppercase tracking-widest">Velocity</span>
-                                    <span className="text-slate-900">{loc.speed || 0} KM/H</span>
-                                  </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 mt-4">
-                                  <button
-                                    onClick={() => handleFetchDriverHistory(loc.driverId)}
-                                    className="px-3 py-2.5 bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
-                                  >
-                                    TRAIL <MapPin size={10} />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setMapCenter([loc.lat, loc.lng]);
-                                      setMapZoom(18);
-                                    }}
-                                    className="px-3 py-2.5 bg-slate-950 text-white rounded-xl text-[8px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg active:scale-95"
-                                  >
-                                    FOCUS
-                                  </button>
-                                </div>
-                              </div>
-                            </Popup>
-                          </Marker>
-                        );
-                      })}
-                    </MarkerClusterGroup>
-
-                    {/* Static Markers for Offline Units with Last Known Position */}
-                    {driverLocations
-                      .filter((loc) => (!loc.lat || loc.lat === 0) && loc.isOnline)
-                      .map((loc) => {
-                         const driver = drivers.find(d => d.uid === loc.driverId);
-                         return (
-                            <div key={`no-fix-info-${loc.uid}`} /> 
-                         );
-                      })}
-
-                    {/* GPS Alert for units without fix */}
-                    {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length > 0 && (
-                      <div className="absolute bottom-6 right-6 z-[1000] bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest animate-bounce shadow-2xl flex items-center gap-2">
-                        <AlertTriangle size={14} />
-                        {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length} Units Missing GPS Fix
-                      </div>
-                    )}
-
-                    {/* Map Legend */}
-                    <div className="absolute top-6 right-16 z-[1000] space-y-4">
-                      <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-slate-100 shadow-xl space-y-2 hidden md:block w-48">
-                        <div className="flex items-center justify-between mb-2">
-                           <span className="text-[10px] font-black uppercase text-slate-900 italic">Map Legend</span>
-                           <Activity size={10} className="text-amber-500" />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
-                          <span className="text-[8px] font-black uppercase text-slate-600">Online Unit</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 bg-slate-300 rounded-full" />
-                          <span className="text-[8px] font-black uppercase text-slate-600">Offline/Syncing</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 bg-amber-500/20 border border-amber-500/50 rounded-full" />
-                          <span className="text-[8px] font-black uppercase text-slate-600">Ad Coverage Area</span>
-                        </div>
-                        <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
-                          <div className="w-3 h-3 bg-blue-600 rounded-sm flex items-center justify-center">
-                            <div className="w-1 h-1 bg-white rounded-full"></div>
-                          </div>
-                          <span className="text-[8px] font-black uppercase text-slate-600">Hardware GPS</span>
-                        </div>
-                      </div>
-
-                      {/* GPS Fix Tracker Widget */}
-                      {driverLocations.filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0)).length > 0 && (
-                        <div className="bg-red-500/90 backdrop-blur-md p-4 rounded-2xl border border-red-400 shadow-xl space-y-3 w-48 text-white">
-                          <div className="flex items-center gap-2">
-                            <AlertTriangle size={14} className="animate-pulse" />
-                            <span className="text-[9px] font-black uppercase tracking-widest">GPS Fix Alert</span>
-                          </div>
-                          <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
-                            {driverLocations
-                              .filter(loc => loc.isOnline && (!loc.lat || loc.lat === 0))
-                              .map((loc) => {
-                                const driver = drivers.find(d => d.uid === loc.driverId);
-                                return (
-                                  <div key={loc.driverId || Math.random().toString()} className="flex flex-col bg-white/10 p-2 rounded-lg border border-white/10">
-                                    <span className="text-[8px] font-black uppercase truncate">{driver?.fullName || 'Unknown Unit'}</span>
-                                    <span className="text-[6px] font-bold opacity-70 uppercase">ID: {loc.terminalId || 'N/A'}</span>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                          <p className="text-[7px] font-bold uppercase tracking-tighter leading-tight opacity-80">
-                            These units are connected but missing location telemetry.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {selectedDriverHistory.length > 1 && (
-                      <Polyline
-                        positions={selectedDriverHistory.map((log) => [
-                          log.lat,
-                          log.lng,
-                        ])}
-                        pathOptions={{
-                          color: "#f59e0b",
-                          weight: 4,
-                          opacity: 0.8,
-                          dashArray: "10, 10",
-                        }}
-                      />
-                    )}
-                  </MapContainer>
-
-                  {/* Movement History Overlay */}
-                  {selectedDriverHistory.length > 0 && (
-                    <div className="absolute top-6 left-6 z-[1000] w-72 bg-white/95 backdrop-blur-md rounded-[2.5rem] border border-slate-100 shadow-2xl p-8 space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none mb-1">
-                            Node History
-                          </h4>
-                          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none">
-                            Live Movement Segment
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setSelectedDriverHistory([])}
-                          className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:text-slate-900 transition-all"
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-
-                      <div className="space-y-4 max-h-64 overflow-y-auto pr-3 custom-scrollbar">
-                        {selectedDriverHistory.slice(0, 20).map((log, i) => (
-                          <div
-                            key={log.timestamp?.seconds ? `${log.timestamp.seconds}-${i}` : `log-${i}`}
-                            className="flex gap-4 relative pb-4 last:pb-0"
-                          >
-                            {i < selectedDriverHistory.length - 1 && (
-                              <div className="absolute left-2 top-4 bottom-0 w-px bg-slate-100" />
-                            )}
-                            <div className="w-4 h-4 rounded-full bg-amber-500 border-4 border-white shadow-sm mt-0.5 relative z-10" />
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between mb-1">
-                                <p className="text-[10px] font-black text-slate-900">
-                                  {new Date(
-                                    log.timestamp?.toDate?.() || log.timestamp,
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    second: "2-digit",
-                                  })}
-                                </p>
-                                <span className="text-[8px] font-black text-amber-500 italic">
-                                  {Math.round(log.speed || 0)} KPH
-                                </span>
-                              </div>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
-                                {log.activeCampaignId === "idle"
-                                  ? "No Ad Pulse"
-                                  : "Campaign Active"}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
-                        <div className="bg-slate-50 p-3 rounded-2xl text-center">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                            Data Nodes
-                          </p>
-                          <p className="text-sm font-black text-slate-900 italic">
-                            {selectedDriverHistory.length}
-                          </p>
-                        </div>
-                        <div className="bg-slate-50 p-3 rounded-2xl text-center">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                            Exp Core
-                          </p>
-                          <p className="text-sm font-black text-amber-500 italic">
-                            High
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Overlay Stats */}
-                  <div className="absolute top-2 left-2 md:top-6 md:left-6 z-[400] flex flex-col gap-2 md:gap-3 pointer-events-none scale-90 md:scale-100 origin-top-left">
-                    {ticketNotifications.length > 0 && (
-                      <motion.div
-                        initial={{ x: -20, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        className="bg-red-500 text-white p-4 rounded-2xl shadow-2xl border border-red-400 flex items-center gap-4 pointer-events-auto cursor-pointer"
-                        onClick={() => {
-                          setActiveTab("TICKETS");
-                          setTicketNotifications([]);
-                        }}
-                      >
-                        <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center animate-pulse">
-                          <AlertCircle size={18} />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">
-                            Issue Reported
-                          </p>
-                          <p className="text-[9px] font-bold opacity-80 uppercase leading-none">
-                            {ticketNotifications.length} Active Driver Tickets
-                          </p>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    <div className="bg-slate-950/90 backdrop-blur-xl p-3 md:p-6 rounded-2xl md:rounded-3xl border border-white/10 shadow-2xl flex items-center gap-3 md:gap-4 pointer-events-auto group hover:scale-105 transition-all">
-                      <div className="w-8 h-8 md:w-12 md:h-12 bg-amber-500 rounded-xl md:rounded-2xl flex items-center justify-center text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.3)] shrink-0">
-                        <Activity size={24} />
-                      </div>
-                      <div>
-                        <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 opacity-60">
-                          Avg Velocity
-                        </p>
-                        <div className="flex items-baseline gap-0.5 md:gap-1">
-                          <h4 className="text-lg md:text-2xl font-black text-white italic leading-none">
-                            {(
-                              driverLocations.reduce(
-                                (acc, curr) => acc + (curr.speed || 0),
-                                0,
-                              ) / (driverLocations.length || 1)
-                            ).toFixed(1)}
-                          </h4>
-                          <span className="text-[10px] font-black text-amber-500 uppercase leading-none">
-                            km/h
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Focus Sidebar */}
-                <div className="w-full md:w-80 space-y-4 shrink-0 overflow-y-auto max-h-[300px] md:max-h-none">
-                  <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl space-y-6">
-                    <h3 className="text-xs font-black text-slate-900 uppercase tracking-tighter italic">
-                      Selection Focus
-                    </h3>
-                    {selectedLocation ? (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="space-y-6"
-                      >
-                        <div className="text-center p-6 bg-slate-50 rounded-3xl border border-slate-100 italic relative">
-                          <div className="absolute top-4 right-4 text-green-500">
-                            <div className="w-2 h-2 rounded-full bg-current animate-ping" />
-                          </div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                            Assigned Unit
-                          </p>
-                          <h4 className="text-xl font-black text-slate-900 uppercase tracking-tighter">
-                            {drivers.find(
-                              (d) => d.uid === selectedLocation.driverId,
-                            )?.name || "Fleet Node"}
-                          </h4>
-                          <p className="text-[9px] font-bold text-slate-500 font-mono mt-2 uppercase tracking-widest">
-                            REF:{" "}
-                            {selectedLocation.driverId?.slice(0, 12) ||
-                              "REF_PENDING"}
-                          </p>
-                        </div>
-                        <div className="space-y-3">
-                          {[
-                            {
-                              label: "Current Latitude",
-                              value: selectedLocation.lat?.toFixed(6) || "0.0",
-                            },
-                            {
-                              label: "Current Longitude",
-                              value: selectedLocation.lng?.toFixed(6) || "0.0",
-                            },
-                            {
-                              label: "Transmission",
-                              value: selectedLocation.isOnline
-                                ? "ENCRYPTED"
-                                : "OFFLINE",
-                              highlight: true,
-                            },
-                            { label: "Last Sync", value: "Active" },
-                          ].map((item) => (
-                            <div
-                              key={item.label}
-                              className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-50"
-                            >
-                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
-                                {item.label}
-                              </span>
-                              <span
-                                className={cn(
-                                  "text-[9px] font-bold italic",
-                                  item.highlight
-                                    ? "text-amber-600"
-                                    : "text-slate-900",
-                                )}
-                              >
-                                {item.value}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <button
-                          className="w-full py-4 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl"
-                          onClick={() => setSelectedLocation(null)}
-                        >
-                          CLEAR FOCUS
-                        </button>
-                      </motion.div>
-                    ) : (
-                      <div className="text-center py-12 px-6">
-                        <MapPin
-                          size={32}
-                          className="text-slate-200 mx-auto mb-4"
-                        />
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed">
-                          Select a live node from the mesh to monitor real-time
-                          telemetry
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-amber-500 p-6 rounded-[2rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer">
-                    <div className="absolute -right-8 -bottom-8 opacity-10 group-hover:scale-110 transition-transform">
-                      <Truck size={120} />
-                    </div>
-                    <div className="relative z-10">
-                      <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-1">
-                        Network Capacity
-                      </p>
-                      <h4 className="text-2xl font-black italic">
-                        UPTIME SECURED
-                      </h4>
-                    </div>
-                    <div className="mt-8 flex items-center justify-between relative z-10">
-                      <div className="flex -space-x-2">
-                        {[1, 2, 3, 4].map((i) => {
-                          const driver = drivers[i % drivers.length];
-                          return (
-                            <div
-                              key={i}
-                              className="w-7 h-7 rounded-full bg-slate-900 border-2 border-amber-500 overflow-hidden flex items-center justify-center"
-                            >
-                              <img
-                                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${driver?.uid || "fleet" + i}`}
-                                alt="Unit"
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[14px] font-black leading-none">
-                          {drivers.length > 0
-                            ? ((liveUnitsCount / drivers.length) * 100).toFixed(
-                                1,
-                              )
-                            : "100"}
-                          %
-                        </p>
-                        <p className="text-[8px] font-bold uppercase tracking-widest opacity-60">
-                          SLA Pulse
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : activeTab === "PAYMENTS" ? (
-            <div className="space-y-4">
-              <div className="bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
-                <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/5 blur-3xl rounded-full" />
-                <div className="relative z-10">
-                  <h2 className="text-lg md:text-xl font-black italic uppercase text-amber-500">
-                    {paymentSubTab === "INCOME"
-                      ? "Revenue History"
-                      : "Expense History"}
-                  </h2>
-                  <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest italic opacity-80">
-                    {paymentSubTab === "INCOME"
-                      ? "Customer Ad Payments & Hub Income"
-                      : "Driver Earnings & Network Payouts"}
-                  </p>
-                </div>
-                <div className="flex gap-4 items-center relative z-10 mt-4 md:mt-0">
-                  <div className="bg-white/5 p-1 rounded-xl border border-white/10 flex">
-                    <button
-                      onClick={() => setPaymentSubTab("INCOME")}
-                      className={cn(
-                        "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                        paymentSubTab === "INCOME"
-                          ? "bg-amber-500 text-slate-950"
-                          : "text-slate-400 hover:text-white",
-                      )}
-                    >
-                      Income
-                    </button>
-                    <button
-                      onClick={() => setPaymentSubTab("EXPENSE")}
-                      className={cn(
-                        "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                        paymentSubTab === "EXPENSE"
-                          ? "bg-amber-500 text-slate-950"
-                          : "text-slate-400 hover:text-white",
-                      )}
-                    >
-                      Expenses
-                    </button>
-                  </div>
-                  <button
-                    onClick={(e) =>
-                      handleExtractionClick(
-                        e,
-                        paymentSubTab === "INCOME" ? payments : driverPayments,
-                        `Fleet_${paymentSubTab}_History`,
-                      )
-                    }
-                    className="bg-amber-500 text-slate-950 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-amber-400 transition-all flex items-center gap-2"
-                  >
-                    <Download size={14} />
-                    EXPORT
-                  </button>
-                </div>
-              </div>
-              
-              <div className="bg-transparent">
-                  <div className="space-y-4">
-                    {filteredDrivers.map((d) => (
-                      <details
-                        key={d.uid}
-                        className="bg-white rounded-[2rem] border border-slate-100 group [&_summary::-webkit-details-marker]:hidden shadow-sm overflow-hidden"
-                      >
-                        <summary className="p-6 md:p-8 cursor-pointer list-none flex flex-col md:flex-row justify-between items-start md:items-center outline-none gap-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-950 rounded-[1.5rem] overflow-hidden relative border border-slate-100 shadow-sm shrink-0">
-                                <img src={d.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${d.uid}`} alt="" className="w-full h-full object-cover" />
-                            </div>
-                            <div className="flex flex-col">
-                              <h4 className="text-sm md:text-xl font-black text-slate-900 italic tracking-tighter leading-none">
-                                {d.name}
-                              </h4>
-                              <span className="text-[10px] md:text-xs font-bold text-slate-500 mt-1.5 uppercase tracking-[0.2em]">
-                                 {d.vNo || "Unspecified Unit"}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-4 w-full md:w-auto mt-2 md:mt-0 justify-between md:justify-end">
-                             <div className="flex items-center gap-2 bg-slate-50 p-2 md:p-3 rounded-2xl border border-slate-100">
-                               <div className={`w-2.5 h-2.5 rounded-full ${d.status === "active" ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" : "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"}`} />
-                               <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-700">{d.status}</span>
-                             </div>
-                             <ChevronRight className="w-5 h-5 text-slate-400 group-open:rotate-90 transition-transform" />
-                          </div>
-                        </summary>
-                        <div className="px-6 md:px-8 pb-6 md:pb-8 pt-0 space-y-4">
-                          <div className="w-full border-t border-slate-50 mb-4" />
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
-                               <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Phone Contact</p>
-                               <p className="text-xs font-mono font-black text-slate-700">{d.phone || "UNSPECIFIED"}</p>
-                            </div>
-                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
-                              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">GPS Tracking ID</p>
-                              <p className="text-xs font-mono font-black text-amber-600">{d.gpsId || "UNLINKED"}</p>
-                            </div>
-                            <div className="bg-slate-50 p-5 rounded-[1.5rem] flex flex-col justify-center">
-                              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Subscription / Tier</p>
-                              <p className="text-xs font-black text-slate-700 uppercase tracking-widest">{d.subscriptionTier || "FREE"}</p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex flex-wrap gap-3 pt-4 border-t border-slate-50">
-                            <button
-                              onClick={() => {
-                                setSelectedDriverForEarning(d);
-                                setShowEarningModal(true);
-                              }}
-                              className="flex-1 md:flex-none px-6 py-4 bg-amber-500 text-slate-950 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:scale-105 transition-all text-center"
-                            >
-                              Make Payment
-                            </button>
-                            {d.status === 'pending_verification' && (
-                              <button
-                                onClick={() => {
-                                  setSelectedDriverForAgreement(d);
-                                }}
-                                className="flex-1 md:flex-none px-6 py-4 bg-slate-900 text-amber-500 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-all text-center flex items-center justify-center gap-2"
-                              >
-                                <Shield size={14} /> REVIEW DOCS
-                              </button>
-                            )}
-                            {d.status !== "active" && !d.accessKey && (
-                              <button
-                                onClick={() => {
-                                  setSelectedDriverForProvision(d);
-                                  setShowProvisionModal(true);
-                                }}
-                                className="flex-1 md:flex-none px-6 py-4 bg-white border-2 border-slate-100 text-slate-500 rounded-[1.2rem] text-[10px] font-black uppercase tracking-[0.2em] hover:border-amber-500 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-2"
-                              >
-                                <Smartphone size={14} /> Provision Device
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-              </div>
-            </div>
-          ) : activeTab === "USERS" ? (
-            <div className="space-y-6 pb-32">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-950 p-4 md:p-6 rounded-2xl shadow-2xl border border-slate-800 text-white relative overflow-hidden">
-                <div className="relative z-10 space-y-1 md:space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-amber-500/10 p-2 md:p-3 rounded-lg border border-amber-500/20">
-                      <Users size={16} className="text-amber-500 md:w-5 md:h-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter">
-                        Staff & Users
-                      </h2>
-                      <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">
-                        Manage roles (Assign Franchise / Support)
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[800px]">
-                    <thead>
-                      <tr className="border-b-2 border-slate-900/10">
-                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">UID / Email</th>
-                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Name</th>
-                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Phone</th>
-                        <th className="py-4 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Role</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {users.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-12 text-center text-slate-400 text-xs italic">
-                            No users found in database.
-                          </td>
-                        </tr>
-                      ) : (
-                        users.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="py-4">
-                              <div className="flex items-center gap-2">
-                                <div>
-                                  <div className="text-xs font-bold text-slate-800 select-all">{item.email || 'N/A'}</div>
-                                  <div className="text-[10px] text-slate-400 font-mono select-all">ID: {item.id}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4">
-                              <span className="text-xs font-semibold text-slate-700">{item.name || 'Anonymous'}</span>
-                            </td>
-                            <td className="py-4">
-                              <span className="text-xs font-mono text-slate-600">{item.phone || 'N/A'}</span>
-                            </td>
-                            <td className="py-4">
-                              <select 
-                                value={item.role || 'USER'}
-                                onChange={async (e) => {
-                                  const newRole = e.target.value;
-                                  try {
-                                    setOpFeedback({ message: 'Updating role...', type: 'info' });
-                                    await firebaseService.updateUserRole(item.id, newRole);
-                                    setUsers(prev => prev.map(u => u.id === item.id ? { ...u, role: newRole } : u));
-                                    setOpFeedback({ message: 'Role assigned successfully', type: 'success' });
-                                  } catch (err) {
-                                    setOpFeedback({ message: 'Failed to assign role', type: 'error' });
-                                  }
-                                }}
-                                className="px-2 py-1 bg-slate-100 rounded border-0 text-[10px] font-black uppercase tracking-wider text-slate-700 outline-none focus:ring-2 focus:ring-amber-500"
-                              >
-                                <option value="USER">USER</option>
-                                <option value="DRIVER">DRIVER</option>
-                                <option value="CUSTOMER">CUSTOMER</option>
-                                <option value="FRANCHISE_OWNER">FRANCHISE_OWNER</option>
-                                <option value="SUPPORT">SUPPORT</option>
-                                <option value="ADMIN">ADMIN</option>
-                              </select>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-slate-300 space-y-4">
-              <Truck size={48} strokeWidth={1} />
-              <p className="text-xs font-black uppercase tracking-[0.3em]">
-                Module Synchronizing...
-              </p>
-            </div>
-          )}
-        </main>
-      </div>
-
-      {activeTab === "WITHDRAWALS" && (
-        <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto">
-          <div className="max-w-4xl mx-auto space-y-8">
-            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
-              <div>
-                <h2 className="text-3xl font-black italic uppercase text-amber-500">
-                  Payout Hub
-                </h2>
-                <p className="text-[10px] font-black uppercase text-slate-400">
-                  Manual UPI Clearances
-                </p>
-              </div>
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={(e) => handleExtractionClick(e, withdrawRequests, "Payout_Clearance_Records")}
-                  disabled={isExtracting}
-                  className="flex items-center gap-2 px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-50"
-                >
-                  {isExtracting ? <RefreshCw size={14} className="animate-spin text-amber-500" /> : <Download size={14} className="text-amber-500" />}
-                  {isExtracting ? "Extracting..." : "Extract Records"}
-                </button>
-                <button
-                  onClick={() => setActiveTab("DASHBOARD")}
-                  className="p-4 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-6">
-              {withdrawRequests.length > 0 ? (
-                withdrawRequests.map((req) => {
-                  const driver = drivers.find((d) => d.uid === req.driverId);
-                  return (
-                    <div
-                      key={req.id}
-                      className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between border border-slate-100 group hover:border-amber-500/50 transition-all"
-                    >
-                      <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-900 font-black border border-slate-100 shadow-inner group-hover:bg-amber-50">
-                          <Truck size={24} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-black text-slate-900 uppercase tracking-tighter italic">
-                              {driver?.name || `Driver (${req.driverId?.slice(-6) || "???"})`}
-                            </h4>
-                            <span className="text-[8px] font-bold px-2 py-0.5 bg-slate-100 rounded text-slate-500 font-mono tracking-widest">
-                              {req.driverId?.slice(-6).toUpperCase()}
-                            </span>
-                          </div>
-                          {driver?.phone && (
-                            <p className="text-[9px] font-bold text-slate-500 font-mono mt-1 uppercase">
-                              Phone: {driver.phone}
-                            </p>
-                          )}
-                          {driver?.bankDetails?.accountNumber && (
-                            <p className="text-[9px] font-bold text-amber-600 font-mono mt-0.5 uppercase">
-                              A/C: {driver.bankDetails.accountNumber} | IFSC: {driver.bankDetails.ifscCode}
-                            </p>
-                          )}
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                            UPI:{" "}
-                            <span className="text-slate-900">
-                              {req.upiId || "NOT_FOUND"}
-                            </span>
-                          </p>
-                          <p className="text-[8px] text-slate-300 font-bold uppercase mt-0.5">
-                            {new Date(
-                              req.createdAt?.seconds * 1000,
-                            ).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6 mt-6 md:mt-0 w-full md:w-auto">
-                        <div className="text-right">
-                          <p className="text-2xl font-black text-slate-900 italic tracking-tighter">
-                            ₹{(req.amount || 0).toLocaleString()}
-                          </p>
-                          <p className="text-[9px] font-black text-amber-600 uppercase tracking-[0.2em]">
-                            {req.status === "pending" ? "UNSETTLED" : "CLEARED"}
-                          </p>
-                        </div>
-                        <div className="h-10 w-px bg-slate-100 hidden md:block"></div>
-                        <div className="flex gap-2 flex-1 md:flex-none items-center">
-                          {req.status === "pending" ? (
-                            <button
-                              onClick={() => handleApproveWithdrawal(req)}
-                              className="flex-1 md:flex-none px-8 py-4 bg-slate-950 text-amber-500 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-slate-200 hover:scale-[1.02] active:scale-95 transition-all"
-                            >
-                              Approve & Settle
-                            </button>
-                          ) : (
-                            <div className="px-6 py-4 bg-green-50 text-green-600 rounded-2xl flex items-center gap-2 border border-green-100">
-                              <Check size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest leading-none">
-                                Paid
-                              </span>
-                            </div>
-                          )}
-                          <button
-                            onClick={() => handleDeleteWithdrawRequest(req.id)}
-                            className="p-3 text-slate-300 hover:text-red-500 transition-colors"
-                            title="Delete Record"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2rem] border border-dashed border-slate-200">
-                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                    <IndianRupee className="text-slate-300" size={24} />
-                  </div>
-                  <p className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">
-                    No Pending Clearances
-                  </p>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-                    All driver payouts are synchronized
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "PACKAGES" && (
-        <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto min-h-[100dvh] pb-42">
-          <div className="max-w-6xl mx-auto space-y-8">
-            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
-              <div>
-                <h2 className="text-2xl md:text-3xl font-black italic uppercase text-amber-500">
-                  Package Configurator
-                </h2>
-                <p className="text-[10px] font-black uppercase text-slate-400">
-                  Adjust core network plan parameters
-                </p>
-              </div>
-              <div className="flex items-center gap-4">
-                <button className="px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Export Pricing</button>
-                <button className="px-5 py-3 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-500/20">Save All Changes</button>
-                <button
-                  onClick={() => setActiveTab("DASHBOARD")}
-                  className="p-4 bg-white/10 rounded-2xl hover:bg-white/20 transition-all"
-                  title="Close Tab"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-
             <motion.div
-               initial={{ opacity: 0, x: 20 }}
-               animate={{ opacity: 1, x: 0 }}
-               className="space-y-10"
+              key={activeTab}
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
             >
-
-           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {[
-                { id: 'BASIC', name: 'Elite Starter', price: '₹999', desc: '3 Auto Displays • 1 Day Assigned' },
-                { id: 'STARTER', name: 'Brand Velocity', price: '₹1999', desc: '7 Auto Displays • 2 Days' },
-                { id: 'PRO', name: 'Dominion Pro', price: '₹4999', desc: 'Priority Network • 7 Days' }
-              ].map((p) => (
-                <div key={p.id} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden group">
-                   <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-3xl pointer-events-none group-hover:bg-amber-500/10 transition-all" />
-                   <div className="flex items-center gap-4 mb-8">
-                      <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-amber-500 shadow-xl shadow-slate-900/20">
-                         <Zap size={28} />
-                      </div>
-                      <div>
-                         <h3 className="text-sm font-black text-slate-900 uppercase italic tracking-tight">{p.name}</h3>
-                         <p className="text-xs font-black text-amber-500 tracking-widest mt-1">{p.price}</p>
-                      </div>
-                   </div>
-                   
-                   <div className="space-y-6">
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Display Parameters</label>
-                         <textarea 
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all"
-                            defaultValue={p.desc}
-                            rows={4}
-                         />
-                      </div>
-                      <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visibility state</span>
-                         <div className="w-12 h-6 bg-amber-500 rounded-full relative shadow-inner">
-                            <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-md" />
-                         </div>
-                      </div>
-                      <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all mt-4">
-                         Push to Network
-                      </button>
-                   </div>
-                </div>
-              ))}
-           </div>
-        </motion.div>
-         </div>
-        </div>
-      )}
-
-      {activeTab === "NOTICES" && (
-        <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-50 p-6 md:p-10 overflow-y-auto">
-          <div className="max-w-4xl mx-auto space-y-8">
-            <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-10">
-                <Zap size={120} />
-              </div>
-              <div className="relative z-10">
-                <h2 className="text-3xl font-black italic uppercase text-amber-500">
-                  Offer Hub
-                </h2>
-                <p className="text-[10px] font-black uppercase text-slate-400">
-                  Manage Global Customer Signal Offers
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab("DASHBOARD")}
-                className="p-3 bg-white/10 rounded-2xl relative z-10"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="bg-white p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 space-y-6">
-              <h3 className="text-sm font-black uppercase italic tracking-widest text-slate-900">
-                Broadcast New Signal
-              </h3>
-              <form
-                onSubmit={handleCreateNotice}
-                className="grid grid-cols-1 md:grid-cols-2 gap-6"
-              >
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                    Offer Headline
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. PLATINUM REBATE 20%"
-                    value={newNotice.offer}
-                    onChange={(e) =>
-                      setNewNotice({
-                        ...newNotice,
-                        offer: e.target.value.toUpperCase(),
-                      })
-                    }
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                    Target Region
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. PAN-INDIA / BENGALURU"
-                    value={newNotice.targetRegion}
-                    onChange={(e) =>
-                      setNewNotice({
-                        ...newNotice,
-                        targetRegion: e.target.value.toUpperCase(),
-                      })
-                    }
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                    Detailed Message
-                  </label>
-                  <textarea
-                    placeholder="Write a compelling call to action..."
-                    rows={3}
-                    value={newNotice.message}
-                    onChange={(e) =>
-                      setNewNotice({ ...newNotice, message: e.target.value })
-                    }
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-4">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                    Offer Visual (Flex/Poster)
-                  </label>
-
-                  <div className="flex flex-col md:flex-row gap-4">
-                    <div className="flex-1 space-y-2">
-                      <input
-                        type="text"
-                        placeholder="https://... (Direct Image URL)"
-                        value={newNotice.imageUrl}
-                        onChange={(e) =>
-                          setNewNotice({
-                            ...newNotice,
-                            imageUrl: e.target.value,
-                          })
-                        }
-                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                      />
-                    </div>
-
-                    <div className="flex items-center">
-                      <span className="text-[8px] font-black text-slate-300 uppercase px-2">
-                        OR
-                      </span>
-                      <label className="cursor-pointer flex flex-col items-center justify-center px-6 py-4 bg-amber-500 text-slate-950 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-amber-600 transition-all border-2 border-transparent relative">
-                        <div className="flex items-center gap-2">
-                          <Download size={16} className="rotate-180" />
-                          {isUploading ? "Uploading..." : "Upload File"}
-                        </div>
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/*"
-                          onChange={handleFileUpload}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  {newNotice.imageUrl && (
-                    <div className="mt-2 rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 aspect-video relative group max-w-sm">
-                      <img
-                        src={newNotice.imageUrl}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setNewNotice((prev) => ({ ...prev, imageUrl: "" }))
-                        }
-                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="md:col-span-2 flex justify-end">
-                  <button className="px-8 py-4 bg-slate-950 text-amber-500 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-slate-200 hover:scale-[1.02] active:scale-95 transition-all">
-                    Publish Hub Offer
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1 italic">
-                Active Signal Pool ({notices.length})
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {notices.map((notice) => (
-                  <div
-                    key={notice.id}
-                    className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group overflow-hidden"
-                  >
-                    <div className="flex justify-between items-start relative z-10">
-                      <div className="space-y-1">
-                        <span className="text-[8px] font-black px-2 py-0.5 bg-amber-500/10 text-amber-600 rounded uppercase tracking-widest border border-amber-500/20">
-                          {notice.targetRegion || "ALL SIGNALS"}
-                        </span>
-                        <h4 className="text-xl font-black italic uppercase tracking-tighter text-slate-900 leading-tight">
-                          {notice.offer}
-                        </h4>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteNotice(notice.id)}
-                        className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                    {notice.imageUrl && (
-                      <div className="mt-4 rounded-xl overflow-hidden border border-slate-100 bg-slate-50 aspect-video relative z-10">
-                        <img
-                          src={notice.imageUrl}
-                          alt={notice.offer}
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    )}
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed mt-4 relative z-10">
-                      {notice.message}
-                    </p>
-                    <div className="absolute bottom-0 right-0 w-24 h-24 bg-slate-50 rounded-full translate-x-12 translate-y-12 group-hover:scale-150 transition-transform" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+              {renderTabContent()}
+            </motion.div>
+          )}
 
       {showEarningModal && selectedDriverForEarning && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -4356,6 +2175,7 @@ export default function AdminPortal({
             onClick={() => {
               setShowCampaignModal(false);
               setCampaignMediaFile(null);
+              setSelectedCanvaAsset(null);
               setCampaignUploadProgress(0);
             }}
           ></div>
@@ -4382,45 +2202,73 @@ export default function AdminPortal({
                   className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold"
                 />
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Campaign Media (Photo/Video)</label>
-                  <div className="relative group/upload">
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      onChange={handleCampaignFileChange}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    />
-                    <div className="p-8 border-2 border-dashed border-slate-100 rounded-3xl group-hover/upload:border-amber-500/50 bg-slate-50/50 flex flex-col items-center justify-center gap-3 transition-all">
-                      {campaignMediaFile ? (
-                        <>
-                          <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
-                            {campaignMediaType === 'VIDEO' ? <Play size={24} /> : <ImageIcon size={24} />}
-                          </div>
-                          <div className="text-center">
-                            <p className="text-[10px] font-black uppercase text-slate-900 truncate max-w-[200px]">{campaignMediaFile.name}</p>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase">Size: {(campaignMediaFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300">
-                             <RefreshCw size={24} />
-                          </div>
-                          <div className="text-center">
-                            <p className="text-[10px] font-black uppercase text-slate-900">Click or Drag Upload</p>
-                            <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">MP4, JPG, PNG Supported</p>
-                          </div>
-                        </>
+
+                  <div className="flex bg-slate-100 rounded-xl p-1 mb-2">
+                    <button 
+                      type="button"
+                      onClick={() => setMediaSource('UPLOAD')}
+                      className={cn("flex-1 py-2 text-[10px] font-bold rounded-lg", mediaSource === 'UPLOAD' ? 'bg-white shadow' : 'text-slate-500')}
+                    >Upload File</button>
+                    <button 
+                      type="button"
+                      onClick={() => setMediaSource('CANVA')}
+                      className={cn("flex-1 py-2 text-[10px] font-bold rounded-lg", mediaSource === 'CANVA' ? 'bg-white shadow' : 'text-slate-500')}
+                    >Canva Library</button>
+                  </div>
+
+                  {mediaSource === 'UPLOAD' ? (
+                    <div className="relative group/upload">
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        onChange={handleCampaignFileChange}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      />
+                      <div className="p-8 border-2 border-dashed border-slate-100 rounded-3xl group-hover/upload:border-amber-500/50 bg-slate-50/50 flex flex-col items-center justify-center gap-3 transition-all">
+                        {campaignMediaFile ? (
+                          <>
+                            <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
+                              {campaignMediaType === 'VIDEO' ? <Play size={24} /> : <ImageIcon size={24} />}
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[10px] font-black uppercase text-slate-900 truncate max-w-[200px]">{campaignMediaFile.name}</p>
+                              <p className="text-[8px] font-bold text-slate-400 uppercase">Size: {(campaignMediaFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300">
+                               <RefreshCw size={24} />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[10px] font-black uppercase text-slate-900">Click or Drag Upload</p>
+                              <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">MP4, JPG, PNG Supported</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 border rounded-2xl max-h-[300px] overflow-y-auto">
+                      <CanvaAssetLibrary onSelect={(asset) => {
+                        setSelectedCanvaAsset(asset);
+                        setCampaignMediaFile(null); // Clear manual file if Canva asset selected
+                      }} />
+                      {selectedCanvaAsset && (
+                        <div className="bg-green-100 p-2 rounded-xl mt-2 text-[10px]">
+                          Selected: {selectedCanvaAsset.name}
+                        </div>
                       )}
                     </div>
-                  </div>
+                  )}
+
                   {campaignUploadProgress > 0 && campaignUploadProgress < 100 && (
-            <div className="px-2">
-              <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500" style={{ width: `${campaignUploadProgress}%` }} />
-              </div>
-            </div>
-          )}
+                    <div className="px-2">
+                      <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500" style={{ width: `${campaignUploadProgress}%` }} />
+                      </div>
+                    </div>
+                  )}
         </div>
         {!campaignMediaFile && (
           <div className="space-y-4">
@@ -4966,7 +2814,7 @@ export default function AdminPortal({
                         >
                           <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center relative overflow-hidden px-0", isSelected ? "bg-amber-500 text-slate-950" : "bg-slate-100 text-slate-400")}>
                             {d.profileImage ? (
-                              <img src={d.profileImage} className="w-full h-full object-cover" />
+                              <img src={getSafeUrl(d.profileImage)} className="w-full h-full object-cover" />
                             ) : (
                               <Users size={18} />
                             )}
@@ -5413,7 +3261,6 @@ export default function AdminPortal({
           </div>
         )}
       </AnimatePresence>
-    </div>
       <AnimatePresence>
         {selectedDriverForAgreement && (
           <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
@@ -5536,6 +3383,10 @@ export default function AdminPortal({
           </div>
         )}
       </AnimatePresence>
+      </main>
+      </div>
+      </div>
+      </>
     </ErrorBoundary>
   );
 }

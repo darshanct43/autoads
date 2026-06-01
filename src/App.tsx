@@ -105,6 +105,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    firebaseService.runFranchiseMigration();
+
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
       console.log("[App] Hash Change detected:", hash);
@@ -303,7 +305,7 @@ export default function App() {
                   {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
                   {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
                   {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-                  {role === 'FRANCHISE_OWNER' && <FranchisePortal onLogout={handleLogout} />}
+                  {(role === 'FRANCHISE_OWNER' || role === 'FRANCHISE_STAFF') && <FranchisePortal onLogout={handleLogout} />}
                   {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
                 </ErrorBoundary>
                 

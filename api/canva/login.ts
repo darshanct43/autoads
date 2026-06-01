@@ -32,10 +32,11 @@ export default async function handler(req: any, res: any) {
     const host = req.headers['x-forwarded-host'] || req.headers.host || '';
     const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000');
     const secureFlag = isLocal ? '' : 'Secure; ';
+    const sameSite = isLocal ? 'Lax' : 'None';
     res.setHeader('Set-Cookie', [
-      `canva_oauth_state=${state}; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=3600`,
-      `canva_code_verifier=${code_verifier}; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=3600`,
-      `canva_oauth_uid=${uid}; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=3600`
+      `canva_oauth_state=${state}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`,
+      `canva_code_verifier=${code_verifier}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`,
+      `canva_oauth_uid=${uid}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`
     ]);
 
     // Create redirect_uri
@@ -52,9 +53,8 @@ export default async function handler(req: any, res: any) {
     }
 
     const scopes = [
-      'profile:read'
+      'design:content:read'
     ].join(' ');
-    console.log('CANVA_SCOPE=', scopes);
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -70,14 +70,6 @@ export default async function handler(req: any, res: any) {
 
     // Redirect the user safely across local express and serverless contexts
     console.log(`[CANVA OAUTH] Initiated auth flow for uid=${uid} state=${state}`);
-    console.log(`[CANVA OAUTH] Authorization URL: ${authUrl}`);
-    console.log('--- URLSearchParams state verification ---');
-    console.log('State in params:', params.get('state'));
-    console.log('Params toString():', params.toString());
-    console.log('------------------------------------------');
-    console.log(`[CANVA OAUTH] Scope string: ${scopes}`);
-    console.log(`[CANVA OAUTH] Client ID: ${client_id}`);
-    console.log(`[CANVA OAUTH] Redirect URI: ${redirect_uri}`);
     
     if (typeof res.redirect === 'function') {
       res.redirect(authUrl);

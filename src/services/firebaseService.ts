@@ -21,6 +21,7 @@ import {
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
 import { compressImage } from '../lib/utils';
+import { INITIAL_CITIES, INITIAL_FRANCHISES } from '../modules/cityManagement/cities';
 
 export interface Driver {
   id: string;
@@ -105,6 +106,8 @@ export interface AdCampaign {
   videoMakerFee?: number;
   paymentId?: string;
   ads?: any[];
+  mediaSource?: 'UPLOAD' | 'CANVA';
+  mediaAssetId?: string;
 }
 
 export interface UserProfile {
@@ -201,12 +204,18 @@ export interface WithdrawRequest {
   processedAt?: any;
 }
 
-export interface DriverPayout {
+export interface RevenueLedger {
   id?: string;
-  driverId: string;
-  amount: number;
-  payoutId: string;
-  status: 'pending' | 'paid' | 'failed';
+  campaignId: string;
+  campaignName: string;
+  franchiseId?: string;
+  source: 'HQ' | 'FRANCHISE';
+  grossRevenue: number;
+  franchisePercent?: number;
+  platformPercent?: number;
+  franchiseRevenue: number;
+  platformRevenue: number;
+  status: 'PENDING_SETTLEMENT' | 'PROCESSING' | 'PAID';
   createdAt: any;
 }
 
@@ -216,11 +225,13 @@ const PAYMENTS_COLLECTION = 'payments';
 const USERS_COLLECTION = 'users';
 const ASSIGNMENTS_COLLECTION = 'driverAssignments';
 const PAYOUTS_COLLECTION = 'driverPayouts';
+const REVENUE_LEDGER_COLLECTION = 'revenueLedger';
 const TICKETS_COLLECTION = 'supportTickets';
 const DRIVER_PAYMENTS_COLLECTION = 'driverPayments';
 const WITHDRAW_REQUESTS_COLLECTION = 'withdrawRequests';
 const NOTICES_COLLECTION = 'publicNotices';
 const DRIVER_DOCUMENTS_COLLECTION = 'driverDocuments';
+const INVITATIONS_COLLECTION = 'invitations';
 
 enum OperationType {
   CREATE = 'create',
@@ -386,15 +397,46 @@ export const firebaseService = {
     }
   },
 
-  async updateCampaignStatus(campaignId: string, status: AdCampaign['status'] | 'APPROVED' | 'LIVE') {
-    let finalStatus: AdCampaign['status'] = 'PENDING';
-    if (status === 'APPROVED' || status === 'ACTIVE' || status === 'LIVE') finalStatus = 'ACTIVE';
-    if (status === 'REJECTED') finalStatus = 'REJECTED';
-    
-    await updateDoc(doc(db, 'campaigns', campaignId), {
-      status: finalStatus,
-      updatedAt: serverTimestamp()
-    });
+  async processPaymentSuccess(paymentId: string) {
+    try {
+      const paymentRef = doc(db, PAYMENTS_COLLECTION, paymentId);
+      const paymentSnap = await getDoc(paymentRef);
+      if (!paymentSnap.exists()) throw new Error("Payment not found");
+      const paymentData = paymentSnap.data() as Payment;
+
+      const campaignRef = doc(db, CAMPAIGNS_COLLECTION, paymentData.campaignId);
+      const campaignSnap = await getDoc(campaignRef);
+      if (!campaignSnap.exists()) throw new Error("Campaign not found");
+      const campaignData = campaignSnap.data() as AdCampaign;
+
+      let franchiseRevenue = 0;
+      let platformRevenue = paymentData.amount;
+      const source = campaignData.createdBy // need to find how this is determined
+        ? (paymentData.campaignId.includes('HQ') ? 'HQ' : 'FRANCHISE')
+        : 'HQ';
+      
+      let ledgerData: any = {
+        campaignId: paymentData.campaignId,
+        campaignName: campaignData.title,
+        grossRevenue: paymentData.amount,
+        source: source,
+        status: 'PENDING_SETTLEMENT',
+        createdAt: serverTimestamp()
+      };
+
+      if (source === 'FRANCHISE') {
+         // Placeholder calculation for now, assuming franchiseId is available
+         franchiseRevenue = paymentData.amount * 0.70;
+         platformRevenue = paymentData.amount * 0.30;
+      }
+
+      ledgerData.franchiseRevenue = franchiseRevenue;
+      ledgerData.platformRevenue = platformRevenue;
+
+      await addDoc(collection(db, REVENUE_LEDGER_COLLECTION), ledgerData);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, REVENUE_LEDGER_COLLECTION);
+    }
   },
 
   async updatePaymentStatus(paymentId: string, status: 'SUCCESS' | 'FAILED' | 'PENDING_ADMIN_VERIFY') {
@@ -402,6 +444,9 @@ export const firebaseService = {
       status,
       updatedAt: serverTimestamp()
     });
+    if (status === 'SUCCESS') {
+      await this.processPaymentSuccess(paymentId);
+    }
   },
 
   async updateDeviceStatus(deviceId: string, status: Device['status'], currentCampaignId?: string) {
@@ -412,7 +457,41 @@ export const firebaseService = {
     });
   },
 
-  // ... (keeping other methods)
+  // Revenue Ledger Management
+  subscribeToRevenueLedger(callback: (ledger: any[]) => void, franchiseId?: string) {
+    let q = query(collection(db, REVENUE_LEDGER_COLLECTION));
+    if (franchiseId) {
+       q = query(collection(db, REVENUE_LEDGER_COLLECTION), where('franchiseId', '==', franchiseId));
+    }
+    
+    return onSnapshot(q, (snapshot) => {
+      const ledger = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      ledger.sort((a: any, b: any) => {
+        const timeA = a.createdAt?.toMillis?.() || 0;
+        const timeB = b.createdAt?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+      callback(ledger);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, REVENUE_LEDGER_COLLECTION));
+  },
+
+  async updateRevenueSettlement(ledgerId: string, updates: { 
+    status: 'PAID' | 'PROCESSING', 
+    referenceNumber?: string, 
+    notes?: string, 
+    paidAt?: any 
+  }) {
+    try {
+      await updateDoc(doc(db, REVENUE_LEDGER_COLLECTION, ledgerId), {
+        ...updates,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, REVENUE_LEDGER_COLLECTION);
+      throw e;
+    }
+  },
+
   // Plans
   async getPlans() {
     try {
@@ -1454,10 +1533,10 @@ export const firebaseService = {
   },
 
   // Payouts
-  subscribeToPayouts(driverId: string, callback: (payouts: DriverPayout[]) => void) {
+  subscribeToPayouts(driverId: string, callback: (payouts: any[]) => void) {
     const q = query(collection(db, PAYOUTS_COLLECTION), where('driverId', '==', driverId));
     return onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as DriverPayout[];
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       callback(docs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, PAYOUTS_COLLECTION, true);
@@ -2573,5 +2652,224 @@ export const firebaseService = {
       const users = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       callback(users);
     });
-  }
+  },
+
+  // Franchises and Cities Methods for Phase 1
+  subscribeToFranchises(callback: (franchises: any[]) => void) {
+    const q = query(collection(db, "franchises"));
+    return onSnapshot(q, (snapshot) => {
+      const franchises = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(franchises);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "franchises");
+    });
+  },
+
+  subscribeToCities(callback: (cities: any[]) => void) {
+    const q = query(collection(db, "cities"));
+    return onSnapshot(q, (snapshot) => {
+      const cities = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(cities);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "cities");
+    });
+  },
+
+  async saveFranchise(franchise: any) {
+    const path = `franchises/${franchise.id}`;
+    try {
+      await setDoc(doc(db, "franchises", franchise.id), {
+        ...franchise,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return true;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, path);
+      throw e;
+    }
+  },
+
+  async saveCity(city: any) {
+    const path = `cities/${city.id}`;
+    try {
+      await setDoc(doc(db, "cities", city.id), {
+        ...city,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return true;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, path);
+      throw e;
+    }
+  },
+
+  async runFranchiseMigration() {
+    console.log("[FirebaseService] Initiating franchise and cities migration...");
+    try {
+      const fSnap = await getDocs(collection(db, "franchises"));
+      const cSnap = await getDocs(collection(db, "cities"));
+
+      if (fSnap.empty) {
+        console.log("[FirebaseService] /franchises is empty. Registering INITIAL_FRANCHISES...");
+        for (const franchise of INITIAL_FRANCHISES) {
+          await setDoc(doc(db, "franchises", franchise.id), {
+            ...franchise,
+            createdAt: franchise.createdAt || new Date().toISOString(),
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+
+      if (cSnap.empty) {
+        console.log("[FirebaseService] /cities is empty. Registering INITIAL_CITIES...");
+        for (const city of INITIAL_CITIES) {
+          await setDoc(doc(db, "cities", city.id), {
+            ...city,
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+
+      console.log("[FirebaseService] Migration completed successfully!");
+      return true;
+    } catch (e) {
+      console.error("[FirebaseService] Failed running auto-migration:", e);
+      return false;
+    }
+  },
+
+  // Invitations Methods for Phase 1 Onboarding
+  subscribeToInvitations(callback: (invitations: any[]) => void) {
+    const q = query(collection(db, INVITATIONS_COLLECTION), orderBy("createdAt", "desc"));
+    return onSnapshot(q, (snapshot) => {
+      const invitations = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(invitations);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, INVITATIONS_COLLECTION);
+    });
+  },
+
+  async saveInvitation(invitation: any) {
+    const path = `${INVITATIONS_COLLECTION}/${invitation.id}`;
+    try {
+      await setDoc(doc(db, INVITATIONS_COLLECTION, invitation.id), {
+        ...invitation,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return true;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, path);
+      throw e;
+    }
+  },
+
+  async getInvitation(id: string): Promise<any> {
+    const docRef = doc(db, INVITATIONS_COLLECTION, id);
+    try {
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        return { id: snap.id, ...snap.data() };
+      }
+      return null;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.GET, `${INVITATIONS_COLLECTION}/${id}`);
+      throw e;
+    }
+  },
+
+  async claimInvitation(inviteId: string, uid: string, phone: string, name: string) {
+    try {
+      const inviteRef = doc(db, INVITATIONS_COLLECTION, inviteId);
+      const inviteSnap = await getDoc(inviteRef);
+      if (!inviteSnap.exists()) {
+        throw new Error("Invitation not found");
+      }
+      const inviteData = inviteSnap.data();
+      const role = inviteData.role || 'FRANCHISE_OWNER';
+
+      // 1. Update invitation document to CLAIMED
+      await updateDoc(inviteRef, {
+        status: 'CLAIMED',
+        claimedByUid: uid,
+        phoneUsed: phone,
+        claimedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Save User Profile with the verified role loaded from invitation metadata
+      await this.saveUserProfile(uid, name || inviteData.ownerName, phone, role);
+
+      // Save role-specific and registration metadata inside the user profile document in users collection
+      const userRef = doc(db, USERS_COLLECTION, uid);
+      await setDoc(userRef, {
+        email: inviteData.ownerEmail || '',
+        franchiseId: inviteData.franchiseId,
+        cityId: inviteData.cityId || '',
+        cityName: inviteData.cityName || '',
+        isApproved: true,
+        status: 'ACTIVE',
+        specialization: inviteData.specialization || (role === 'FRANCHISE_OWNER' ? 'FRANCHISE_OWNER' : 'OPERATIONS_STAFF'),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // 3. Create or Update associated Franchise record and set status to ACTIVE (Only for Owners)
+      if (role === 'FRANCHISE_OWNER') {
+        const franchiseRef = doc(db, "franchises", inviteData.franchiseId);
+        await setDoc(franchiseRef, {
+          id: inviteData.franchiseId,
+          cityId: inviteData.cityId,
+          cityName: inviteData.cityName || inviteData.cityId,
+          ownerName: name || inviteData.ownerName,
+          ownerEmail: inviteData.ownerEmail,
+          ownerPhone: phone,
+          status: 'ACTIVE',
+          revenueModel: inviteData.revenueModel || '50/50 Split',
+          totalDevices: inviteData.totalDevices || 0,
+          totalDrivers: inviteData.totalDrivers || 0,
+          createdAt: inviteData.createdAt || new Date().toISOString(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+
+      return true;
+    } catch (e) {
+      console.error("[FirebaseService] Claim invitation transactional steps failed:", e);
+      throw e;
+    }
+  },
+
+  subscribeToLoungeMessages(franchiseId: string, callback: (messages: any[]) => void) {
+    const q = query(
+      collection(db, 'franchises', franchiseId, 'loungeMessages'),
+      orderBy('timestamp', 'asc')
+    );
+    return onSnapshot(q, (snapshot) => {
+      const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      callback(messages);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, `franchises/${franchiseId}/loungeMessages`, true));
+  },
+
+  async sendLoungeMessage(franchiseId: string, message: {
+    text: string;
+    senderId: string;
+    senderName: string;
+    senderRole: string;
+    senderSpecialization?: string;
+    mediaUrl?: string;
+    mediaType?: 'IMAGE' | 'VIDEO';
+    mentions?: string[];
+    isAnnouncement?: boolean;
+  }) {
+    try {
+      const colRef = collection(db, 'franchises', franchiseId, 'loungeMessages');
+      const docRef = await addDoc(colRef, {
+        ...message,
+        timestamp: serverTimestamp()
+      });
+      return docRef.id;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, `franchises/${franchiseId}/loungeMessages`);
+      throw e;
+    }
+  },
 };

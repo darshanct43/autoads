@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon } from 'lucide-react';
+import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
 import { auth } from '../../lib/firebase';
@@ -111,6 +111,19 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [activeRidePref, setActiveRidePref] = useState<any>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
   const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
+
+  // --- Recovered Hardware Controllers ---
+  const [terminalVolume, setTerminalVolume] = useState<number>(75);
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [emergencyBroadcast, setEmergencyBroadcast] = useState<string | null>(null);
+
+  // Synchronize terminal volume with video element volume
+  useEffect(() => {
+    if (videoRef.current) {
+      const volFraction = Math.max(0, Math.min(100, terminalVolume)) / 100;
+      videoRef.current.volume = volFraction;
+    }
+  }, [terminalVolume, currentIndex]);
 
   // --- Smart Brightness Mode logic ---
   const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
@@ -338,6 +351,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
          setPlaylist([]);
          setStatusLogs(prev => ["SYS: CACHE PURGED", ...prev]);
       }
+      if (terminal) {
+         if (typeof terminal.volume === 'number') {
+            setTerminalVolume(terminal.volume);
+         }
+         setIsLocked(!!terminal.isLocked);
+         setEmergencyBroadcast(terminal.emergencyBroadcast || null);
+      }
     });
 
     return () => {
@@ -448,6 +468,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       if (term && term.status === 'ACTIVE') {
         setActiveTerminal(term);
+        if (typeof term.volume === 'number') {
+          setTerminalVolume(term.volume);
+        }
+        setIsLocked(!!term.isLocked);
+        setEmergencyBroadcast(term.emergencyBroadcast || null);
         
         // --- Simulated TeamViewer Auto ID Obtain ---
         if (!term.teamViewerId) {
@@ -715,6 +740,107 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none">
+      {/* Locked Device Overlay */}
+      <AnimatePresence>
+        {isLocked && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/98 backdrop-blur-xl z-[400] flex flex-col items-center justify-center p-8 text-center select-none"
+          >
+            {/* Background pulsing grid/glow effect */}
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.12),transparent_70%)] pointer-events-none" />
+            
+            <div className="max-w-md w-full bg-slate-900/50 border border-red-500/20 rounded-[2rem] p-8 backdrop-blur-md shadow-2xl relative space-y-6">
+              <div className="flex justify-center">
+                <div className="w-20 h-20 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 animate-pulse border border-red-500/25">
+                  <Lock size={36} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h1 className="text-3xl font-black italic uppercase tracking-wider text-red-500 leading-none">
+                  DEVICE LOCKED
+                </h1>
+                <p className="text-[10px] font-black tracking-[0.2em] uppercase text-red-300 font-mono">
+                  Security Mode Initiated
+                </p>
+              </div>
+
+              <div className="h-[1px] bg-slate-800" />
+
+              <div className="space-y-4 text-left">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  This display unit has been remotely locked by the administrative center. Normal campaign playback and customer services are suspended.
+                </p>
+
+                <div className="p-4 bg-slate-950/60 rounded-xl space-y-2 text-xs font-mono text-slate-400 border border-slate-800">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">TERMINAL ID:</span>
+                    <span className="text-white font-bold">{activeTerminal?.id || terminalId || "N/A"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">DRIVER ID:</span>
+                    <span className="text-white font-bold">{driver?.uid || "N/A"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">BATTERY STATUS:</span>
+                    <span className="text-white font-bold">{systemMetrics.battery}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">NETWORK STATE:</span>
+                    <span className={cn("font-bold", online ? "text-emerald-400" : "text-amber-500")}>
+                      {online ? "ONLINE" : "OFFLINE"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="h-[1px] bg-slate-800" />
+
+              <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                Please contact system dispatcher for authorization.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Emergency Broadcast Banner Overlay */}
+      <AnimatePresence>
+        {emergencyBroadcast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-0 left-0 right-0 z-[300] bg-amber-500 text-slate-950 font-sans border-b-2 border-amber-600 shadow-[0_10px_30px_rgba(245,158,11,0.35)] select-none pointer-events-auto"
+          >
+            <div className="w-full max-w-7xl mx-auto px-6 py-4 md:py-5 flex items-center justify-between gap-6">
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <div className="w-10 h-10 bg-slate-950/10 rounded-xl flex items-center justify-center text-slate-950 animate-pulse shrink-0 border border-slate-950/15">
+                  <AlertCircle size={22} className="animate-bounce" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black tracking-[0.2em] uppercase bg-slate-950 text-amber-500 px-2 py-0.5 rounded">
+                      EMERGENCY BROADCAST
+                    </span>
+                    <span className="w-2 h-2 rounded-full bg-red-600 animate-ping shrink-0" />
+                  </div>
+                  <p className="text-sm md:text-base font-black uppercase tracking-tight truncate md:whitespace-normal mt-1 leading-tight text-slate-950 break-words">
+                    {emergencyBroadcast}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-900 border border-slate-950/25 px-2 py-1 rounded hidden sm:block">
+                Center Control Active
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* SCANLINE / NOISE OVERLAY */}
       <div className="absolute inset-0 pointer-events-none z-[100] opacity-[0.03] scanline" />
       <div className="absolute inset-0 pointer-events-none z-[101] opacity-[0.02] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
@@ -1020,7 +1146,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               <SmartPassengerQR deviceId={activeTerminal?.id || terminalId || "ACTIVE"} />
 
               {/* Dynamic Mode Notification Banners */}
-              {(isSchoolActive || activeRidePref || brightnessProfile) && (
+              {(isSchoolActive || activeRidePref || brightnessProfile || terminalVolume !== undefined) && (
                 <div className="absolute top-12 left-12 z-50 flex flex-col gap-2 pointer-events-none text-left">
                   {/* School Safe mode timing banner */}
                   {isSchoolActive && (
@@ -1074,6 +1200,29 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                       </div>
                     </motion.div>
                   )}
+
+                  {/* Volume Level HUD banner */}
+                  {terminalVolume !== undefined && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-slate-950/85 backdrop-blur-md text-white rounded-2xl flex items-center gap-2 shadow-lg border border-white/10 font-sans"
+                    >
+                      {terminalVolume === 0 ? (
+                        <VolumeX size={14} className="text-red-400" />
+                      ) : (
+                        <Volume2 size={14} className="text-emerald-400" />
+                      )}
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
+                          Terminal Volume: <span className="text-emerald-400 font-black">{terminalVolume}%</span>
+                        </p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-400 leading-none mt-0.5 flex items-center gap-1.5 font-mono">
+                          <span>{terminalVolume === 0 ? "MUTED" : terminalVolume > 70 ? "HIGH" : terminalVolume > 30 ? "MEDIUM" : "LOW"}</span>
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
               )}
 
@@ -1095,7 +1244,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                     key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
                     ref={videoRef}
                     autoPlay 
-                    muted 
+                    muted={terminalVolume === 0}
                     loop={playlist.length === 1}
                     playsInline
                     className="w-full h-full object-cover"

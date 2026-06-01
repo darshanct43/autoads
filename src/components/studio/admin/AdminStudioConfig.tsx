@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Layers, Plus, Trash2, Edit2, Wand2, Type, Image as ImageIcon, Check, Link, Globe, RefreshCw } from 'lucide-react';
+import { CanvaDesignsBrowser } from './CanvaDesignsBrowser';
 import { studioConfigService, StudioConfigItem } from '../../../services/studioConfigService';
 import { cn } from '../../../lib/utils';
 import { auth, db } from '../../../lib/firebase';
@@ -303,6 +304,7 @@ export const AdminStudioConfig: React.FC = () => {
                         >
                           Disconnect Canva
                         </button>
+                        <CanvaDesignsBrowser />
                       </div>
                     ) : (
                       <button

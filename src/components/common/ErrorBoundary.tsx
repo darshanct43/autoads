@@ -23,6 +23,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('ERROR BOUNDARY TRIGGERED', error);
     console.error(`[ErrorBoundary] Catch at ${this.props.componentName || 'Unknown'}:`, error, errorInfo);
   }
 

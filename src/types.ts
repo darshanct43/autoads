@@ -6,6 +6,7 @@ export type UserRole =
   | 'STAFF' 
   | 'DEVICE' 
   | 'FRANCHISE_OWNER' 
+  | 'FRANCHISE_STAFF'
   | 'SUPPORT_MANAGER' 
   | 'SUPPORT_AGENT';
 
@@ -14,6 +15,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  phone?: string;
   avatar?: string;
   cityId?: string; // scoping for multi-city
   franchiseId?: string; // scoping for franchise-owner
@@ -59,6 +61,8 @@ export interface AdCampaign {
   categoryTags?: string[];
   safeContent?: boolean;
   kidsSafe?: boolean;
+  mediaSource?: 'UPLOAD' | 'CANVA';
+  mediaAssetId?: string;
 }
 
 export interface AutoDevice {

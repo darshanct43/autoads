@@ -72,6 +72,16 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, RolePermissions> = {
     canAccessSystemsAudit: false,
     canDischargeFinances: false
   },
+  FRANCHISE_STAFF: {
+    canApproveDrivers: true, // Switched on for local drivers
+    canApproveCampaigns: false,
+    canApproveDevices: false,
+    canManageSupportTeams: false,
+    canViewGlobalAnalytics: false, // Scoped to their cityId
+    canManageFranchises: false,
+    canAccessSystemsAudit: false,
+    canDischargeFinances: false
+  },
   CUSTOMER: {
     canApproveDrivers: false,
     canApproveCampaigns: false,

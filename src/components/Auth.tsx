@@ -18,7 +18,7 @@ interface AuthProps {
 }
 
 export default function Auth({ onLogin }: AuthProps) {
-  const [authMode, setAuthMode] = useState<'CREDENTIALS' | 'SIGNUP' | 'DRIVER_PROFILE' | 'FORGOT_PASSWORD' | 'RECOVERY_SET_PASSWORD'>('CREDENTIALS');
+  const [authMode, setAuthMode] = useState<'CREDENTIALS' | 'SIGNUP' | 'DRIVER_PROFILE' | 'FORGOT_PASSWORD' | 'RECOVERY_SET_PASSWORD' | 'CLAIM_INVITATION'>('CREDENTIALS');
   const [isRegistering, setIsRegistering] = useState(false);
   const [showLegacyAuth, setShowLegacyAuth] = useState(false);
   const [role, setRole] = useState<UserRole>('CUSTOMER');
@@ -31,6 +31,106 @@ export default function Auth({ onLogin }: AuthProps) {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
+
+  // Invitation claim states
+  const [claimCodeInput, setClaimCodeInput] = useState('');
+  const [validatedInvite, setValidatedInvite] = useState<any | null>(null);
+  const [validatingInvite, setValidatingInvite] = useState(false);
+  const [claimPassword, setClaimPassword] = useState('');
+  const [claimPhone, setClaimPhone] = useState('');
+  const [claimName, setClaimName] = useState('');
+
+  // Handle invitation code in hash URL
+  useEffect(() => {
+    const handleHash = async () => {
+      if (window.location.hash.startsWith('#claim')) {
+        setAuthMode('CLAIM_INVITATION');
+        const hash = window.location.hash;
+        const match = hash.match(/[?&]code=([^&]*)/);
+        const code = match ? decodeURIComponent(match[1]) : '';
+        if (code) {
+          setClaimCodeInput(code);
+          await triggerInviteValidation(code);
+        }
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const triggerInviteValidation = async (code: string) => {
+    if (!code.trim()) return;
+    setError('');
+    setSuccess('');
+    setValidatingInvite(true);
+    setValidatedInvite(null);
+    try {
+      const invite = await firebaseService.getInvitation(code.trim().toUpperCase());
+      if (!invite) {
+        setError('This invitation code is invalid. Please check the code and try again.');
+      } else if (invite.status !== 'PENDING') {
+        setError(`This invitation has already been ${invite.status.toLowerCase()}.`);
+      } else if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
+        setError('This invitation has expired.');
+      } else {
+        setValidatedInvite(invite);
+        setClaimName(invite.ownerName || '');
+        setClaimPhone('');
+      }
+    } catch (err: any) {
+      setError('Failed to validate invitation: ' + err.message);
+    } finally {
+      setValidatingInvite(false);
+    }
+  };
+
+  const handleClaimSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!validatedInvite) return;
+    if (claimPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (!claimPhone || claimPhone.length < 10) {
+      setError('Please provide a valid 10-digit mobile phone number.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      // 1. Create Google Firebase Auth Email account
+      const userCredential = await createUserWithEmailAndPassword(auth, validatedInvite.ownerEmail, claimPassword);
+      const user = userCredential.user;
+
+      // 2. Perform Claim Transactions directly inside firebaseService
+      await firebaseService.claimInvitation(
+        validatedInvite.id,
+        user.uid,
+        claimPhone,
+        claimName || validatedInvite.ownerName
+      );
+
+      const resolvedRole = validatedInvite.role || 'FRANCHISE_OWNER';
+      if (resolvedRole === 'FRANCHISE_STAFF') {
+        setSuccess('Account claimed and staff registration completed successfully!');
+      } else {
+        setSuccess('Account claimed and franchise successfully activated!');
+      }
+      onLogin(resolvedRole as UserRole);
+    } catch (err: any) {
+      console.error("[Claim Error]", err);
+      // Let's check if the email is already in use by another user profile
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email address is already registered. If you are updating, log in directly.');
+      } else {
+        setError(err.message || 'Failed to claim invitation. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const checkUser = async () => {
@@ -47,6 +147,10 @@ export default function Auth({ onLogin }: AuthProps) {
             userRole = 'ADMIN';
           } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
             userRole = 'SUPPORT';
+          } else if (profile?.role === 'FRANCHISE_STAFF') {
+            userRole = 'FRANCHISE_STAFF';
+          } else if (profile?.role === 'FRANCHISE_OWNER') {
+            userRole = 'FRANCHISE_OWNER';
           } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
             userRole = 'FRANCHISE_OWNER';
           } else if (profile?.role === 'DRIVER' || driverProfile) {
@@ -88,6 +192,10 @@ export default function Auth({ onLogin }: AuthProps) {
         userRole = 'ADMIN';
       } else if (emailLower === 'vijayathrishu@gmail.com' || profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower.includes('support')) {
         userRole = 'SUPPORT';
+      } else if (profile?.role === 'FRANCHISE_STAFF') {
+        userRole = 'FRANCHISE_STAFF';
+      } else if (profile?.role === 'FRANCHISE_OWNER') {
+        userRole = 'FRANCHISE_OWNER';
       } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
         userRole = 'FRANCHISE_OWNER';
       } else if (profile?.role === 'DRIVER' || driverProfile || emailLower.includes('driver')) {
@@ -223,6 +331,10 @@ export default function Auth({ onLogin }: AuthProps) {
         userRole = 'ADMIN';
       } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
         userRole = 'SUPPORT';
+      } else if (profile?.role === 'FRANCHISE_STAFF') {
+        userRole = 'FRANCHISE_STAFF';
+      } else if (profile?.role === 'FRANCHISE_OWNER') {
+        userRole = 'FRANCHISE_OWNER';
       } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
         userRole = 'FRANCHISE_OWNER';
       } else if (profile?.role === 'DRIVER' || driverProfile) {
@@ -485,7 +597,11 @@ export default function Auth({ onLogin }: AuthProps) {
                       </div>
 
                       <button type="submit" disabled={loading} className="w-full py-5 bg-slate-950 text-amber-500 font-black rounded-2xl text-[12px] uppercase tracking-[0.25em] shadow-2xl hover:scale-[1.01] transition-all disabled:opacity-50">{loading ? 'Processing...' : 'Secure Sign In'}</button>
-                      <button type="button" onClick={() => setAuthMode('FORGOT_PASSWORD')} className="w-full text-center py-2 text-[9px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors italic">Recovery Access</button>
+                      <button type="button" onClick={() => setIsRegistering(true)} className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-all text-center">New Member? Register Here</button>
+                      <div className="flex justify-between items-center py-2 px-1">
+                        <button type="button" onClick={() => setAuthMode('FORGOT_PASSWORD')} className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors italic">Recovery Access</button>
+                        <button type="button" onClick={() => setAuthMode('CLAIM_INVITATION')} className="text-[9px] font-black text-amber-500 uppercase tracking-widest hover:text-amber-600 transition-colors italic">Claim Invitation</button>
+                      </div>
                     </div>
                   </form>
                 ) : (
@@ -608,6 +724,142 @@ export default function Auth({ onLogin }: AuthProps) {
                 </div>
                 <button type="submit" disabled={!driverProfile.agreed || loading} className={cn("w-full py-5 font-black rounded-2xl text-[11px] uppercase tracking-[0.25em] transition-all", driverProfile.agreed ? "bg-slate-950 text-amber-500" : "bg-slate-100 text-slate-300 cursor-not-allowed")}>{loading ? 'Processing...' : 'Finalize Enrollment'}</button>
               </form>
+            )}
+
+            {authMode === 'CLAIM_INVITATION' && (
+              <div className="space-y-6">
+                {!validatedInvite ? (
+                  <form onSubmit={(e) => { e.preventDefault(); triggerInviteValidation(claimCodeInput); }} className="space-y-6">
+                    <div className="space-y-4">
+                      <div className="text-center">
+                        <span className="text-[9px] font-mono bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full font-black tracking-widest uppercase">Franchise Gateway</span>
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mt-2">Claim Franchise Onboarding</h3>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 ml-1 text-center">Enter Unique Invitation Code</label>
+                        <input 
+                          type="text" 
+                          value={claimCodeInput} 
+                          onChange={(e) => setClaimCodeInput(e.target.value.toUpperCase())} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 text-sm font-black tracking-widest text-center focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none transition-all placeholder:text-slate-300" 
+                          placeholder="INV-XXXXXX" 
+                          required 
+                        />
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-loose text-center mt-3 mx-2">
+                          Please enter the claim code issued to your operating region or sent to your representative email address.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit" 
+                      disabled={validatingInvite || !claimCodeInput.trim()} 
+                      className="w-full py-5 bg-slate-950 text-amber-500 font-black rounded-2xl text-[12px] uppercase tracking-[0.20em] shadow-xl hover:scale-[1.01] transition-all disabled:opacity-50"
+                    >
+                      {validatingInvite ? 'Verifying Invite...' : 'Authenticate Invite Code'}
+                    </button>
+
+                    <button 
+                      type="button" 
+                      onClick={() => { setAuthMode('CREDENTIALS'); setError(''); }} 
+                      className="w-full text-center py-2 text-[9px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-950 transition-colors italic cursor-pointer block"
+                    >
+                      Back to Secure Sign In
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleClaimSubmit} className="space-y-6">
+                    <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-3 text-white">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                        <span className="text-[8px] font-mono bg-emerald-500 text-slate-950 px-2 py-0.5 rounded font-black tracking-widest uppercase">Verified Claim Link</span>
+                        <span className="text-xs font-mono text-slate-400">{validatedInvite.id}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-y-3 text-[10px] font-mono text-slate-300">
+                        <div>
+                          <span className="text-slate-500 block text-[8px] uppercase font-black">Operational City</span>
+                          <span className="font-extrabold uppercase text-white">{validatedInvite.cityName}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[8px] uppercase font-black">Franchise ID</span>
+                          <span className="font-extrabold text-white">{validatedInvite.franchiseId}</span>
+                        </div>
+                        <div className="col-span-2 pt-1">
+                          <span className="text-slate-500 block text-[8px] uppercase font-black">Invited Owner Email</span>
+                          <span className="lowercase break-all select-all font-bold text-amber-400">{validatedInvite.ownerEmail}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[8px] uppercase font-black">Revenue Split Model</span>
+                          <span className="font-semibold text-slate-300">{validatedInvite.revenueModel || '50/50 Split'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[8px] uppercase font-black">Verification status</span>
+                          <span className="text-emerald-500 font-black uppercase text-[9px] tracking-wider">● {validatedInvite.status}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 ml-1">Your Full Name</label>
+                        <input 
+                          type="text" 
+                          value={claimName} 
+                          onChange={(e) => setClaimName(e.target.value)} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-xs font-black tracking-tight focus:outline-none transition-all text-slate-800" 
+                          placeholder="Representative Legal Name" 
+                          required 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 ml-1">Contact Mobile Number</label>
+                        <input 
+                          type="tel" 
+                          maxLength={10}
+                          value={claimPhone} 
+                          onChange={(e) => setClaimPhone(e.target.value.replace(/\D/g, ''))} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-xs font-black tracking-tight focus:outline-none transition-all text-slate-800 placeholder:text-slate-300" 
+                          placeholder="10-digit mobile phone" 
+                          required 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 ml-1">Set Portal Password</label>
+                        <input 
+                          type="password" 
+                          value={claimPassword} 
+                          onChange={(e) => setClaimPassword(e.target.value)} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-xs font-black tracking-tight focus:outline-none transition-all text-slate-800" 
+                          placeholder="Min 6 characters" 
+                          required 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-500/10 p-4 rounded-2xl border border-amber-500/10 text-center">
+                      <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider leading-relaxed">
+                        Claiming grants direct franchise executive privileges. The operation region starts active duty immediately.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button 
+                        type="button" 
+                        onClick={() => { setValidatedInvite(null); setError(''); }} 
+                        className="flex-1 py-4.5 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-wider text-center focus:outline-none cursor-pointer"
+                      >
+                        Reset Code
+                      </button>
+                      <button 
+                        type="submit" 
+                        disabled={loading} 
+                        className="flex-[2] py-4.5 bg-slate-950 text-amber-500 font-black rounded-2xl text-[10px] uppercase tracking-wider hover:scale-[1.01] transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        {loading ? 'Claiming Hub...' : 'Unfreeze & Initialize'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             )}
           </div>
         </motion.div>

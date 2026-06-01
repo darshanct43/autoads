@@ -34,6 +34,20 @@ service cloud.firestore {
       );
     }
 
+    function isFranchiseOwner() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'FRANCHISE_OWNER'
+      );
+    }
+
+    function isSupportManager() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPORT_MANAGER'
+      );
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -42,7 +56,45 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (isOwner(userId) || isAdmin());
+
+      // Ensure standard self-registration is secure and role-restricted, while allowing admins/staff/franchise owners to register records
+      allow create: if isSignedIn() && (
+        isAdmin() || 
+        isStaff() || 
+        isFranchiseOwner() ||
+        (isOwner(userId) && 
+         (!('role' in request.resource.data) || request.resource.data.role in ['CUSTOMER', 'DRIVER']) &&
+         (!('isApproved' in request.resource.data) || request.resource.data.isApproved == false) &&
+         (!('franchiseId' in request.resource.data)) &&
+         (!('cityId' in request.resource.data)) &&
+         (!('studioPlan' in request.resource.data)) &&
+         (!('subscriptionTier' in request.resource.data)) &&
+         (!('permissions' in request.resource.data))
+        )
+      );
+
+      // Verify that profile fields are locked during owner updates, while granting support managers limited roles operations, and admins full control
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (isSupportManager() && 
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['permissions']) &&
+         request.resource.data.role != 'ADMIN' &&
+         resource.data.role != 'ADMIN'
+        ) ||
+        (isOwner(userId) && 
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+           'role', 
+           'isApproved', 
+           'franchiseId', 
+           'cityId', 
+           'studioPlan', 
+           'subscriptionTier', 
+           'permissions'
+         ])
+        )
+      );
+
+      allow delete: if isAdmin();
     }
 
     match /drivers/{driverId} {
@@ -127,6 +179,12 @@ service cloud.firestore {
       allow read: if isAdmin() || isStaff();
       allow create: if isSignedIn() || true;
     }
+
+    match /activityLogs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
     
     match /terminals/{terminalId} {
       allow read: if true;
@@ -171,6 +229,43 @@ service cloud.firestore {
 
     match /canvaOauthStates/{stateId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /franchises/{franchiseId} {
+      allow read: if true;
+      allow write: if isAdmin() || isStaff() || isSupportManager();
+
+      match /loungeMessages/{messageId} {
+        allow read, create: if isSignedIn() && (
+          isAdmin() || 
+          isStaff() ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId == franchiseId)
+        );
+        allow update, delete: if isAdmin() || (
+          isSignedIn() && 
+          resource.data.senderId == request.auth.uid
+        );
+      }
+    }
+
+    match /cities/{cityId} {
+      allow read: if true;
+      allow write: if isAdmin() || isStaff() || isSupportManager();
+    }
+
+    match /invitations/{invitationId} {
+      allow list: if isAdmin() || isStaff();
+      allow get: if true;
+      allow create: if isAdmin() || isStaff();
+      allow update: if isAdmin() || isStaff() || (
+        isSignedIn() && 
+        request.resource.data.status == 'CLAIMED' && 
+        resource.data.status == 'PENDING' &&
+        request.resource.data.claimedByUid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedByUid', 'phoneUsed', 'claimedAt', 'updatedAt'])
+      );
+      allow delete: if isAdmin();
     }
   }
 }

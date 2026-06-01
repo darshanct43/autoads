@@ -19,15 +19,7 @@ export default async function handler(req: any, res: any) {
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
 
-  console.log('FULL QUERY:', req.query);
-  console.log('FULL URL:', req.url);
-  console.log('code=', req.query.code);
-  console.log('state=', req.query.state);
-
   console.log('[CANVA OAUTH] Callback triggered:', { code: !!code, state, error: errorParam });
-  console.log('[CANVA OAUTH] Full query:', JSON.stringify(req.query));
-  console.log('code=', req.query.code);
-  console.log('state=', req.query.state);
 
   const renderError = (errMsg: string) => {
     res.setHeader('Content-Type', 'text/html');
@@ -224,10 +216,11 @@ export default async function handler(req: any, res: any) {
     // Clear authentication state cookies
     const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000');
     const secureFlag = isLocal ? '' : 'Secure; ';
+    const sameSite = isLocal ? 'Lax' : 'None';
     res.setHeader('Set-Cookie', [
-      `canva_oauth_state=; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=0`,
-      `canva_code_verifier=; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=0`,
-      `canva_oauth_uid=; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=0`
+      `canva_oauth_state=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`,
+      `canva_code_verifier=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`,
+      `canva_oauth_uid=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`
     ]);
 
     // Render HTML response that signals parent window (passing tokenData) and closes itself
