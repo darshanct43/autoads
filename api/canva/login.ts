@@ -21,7 +21,7 @@ export default async function handler(req: any, res: any) {
     const secureFlag = isLocal ? '' : 'Secure; ';
     const sameSite = isLocal ? 'Lax' : 'None';
     res.setHeader('Set-Cookie', [
-      `canva_oauth_state=${state}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`,
+      `canva_oauth_state=${encodeURIComponent(state)}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`,
       `canva_code_verifier=${code_verifier}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`
     ]);
 

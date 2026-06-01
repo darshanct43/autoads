@@ -84,7 +84,7 @@ export default async function handler(req: any, res: any) {
     // Look up cookie values first for stateless OAuth session verification
     const cookies = parseCookies(req.headers.cookie);
     console.log('[CANVA OAUTH] Cookies in callback:', cookies);
-    const cookieState = cookies['canva_oauth_state'];
+    const cookieState = cookies['canva_oauth_state'] ? decodeURIComponent(cookies['canva_oauth_state']) : undefined;
     const cookieCodeVerifier = cookies['canva_code_verifier'];
 
     let code_verifier = cookieCodeVerifier || '';
@@ -92,6 +92,8 @@ export default async function handler(req: any, res: any) {
 
     console.log('[CANVA OAUTH] Validation Debug:', { 
       hasCookieState: !!cookieState, 
+      queryState: state,
+      cookieState: cookieState,
       cookiesMatch: cookieState === state,
       hasCodeVerifier: !!code_verifier
     });
