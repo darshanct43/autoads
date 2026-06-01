@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { dbAdm, isAdminAuthReady } from '../../lib/firebase-admin.js';
-import crypto from 'crypto';
 
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -82,49 +81,20 @@ export default async function handler(req: any, res: any) {
     console.log('[CANVA OAUTH] Cookies in callback:', cookies);
     const cookieState = cookies['canva_oauth_state'];
     const cookieCodeVerifier = cookies['canva_code_verifier'];
-    const cookieUid = cookies['canva_oauth_uid'];
 
-    let uid = queryUid || cookieUid || '';
+    let uid = queryUid || '';
     let code_verifier = cookieCodeVerifier || '';
     let stateVerified = false;
 
-    const stateDocRef = isAdminAuthReady ? dbAdm.collection('canvaOauthStates').doc(state) : null;
-
-    console.log('[CANVA OAUTH] Debug:', { 
-      isAdminAuthReady, 
+    console.log('[CANVA OAUTH] Validation Debug:', { 
       hasCookieState: !!cookieState, 
       cookiesMatch: cookieState === state,
-      stateLookupAttempted: !!(isAdminAuthReady && stateDocRef)
+      hasCodeVerifier: !!code_verifier
     });
 
     if (cookieState && cookieState === state) {
       console.log('[CANVA OAUTH] Statelessly verified OAuth state via cookies.');
       stateVerified = true;
-    }
-
-    if (isAdminAuthReady && stateDocRef) {
-      // Look up the OAuth state in Firestore/Admin SDK
-      try {
-        const stateDoc = await stateDocRef.get();
-        if (stateDoc.exists) {
-          const stateData = stateDoc.data();
-          console.log('[CANVA OAUTH] State lookup result: Found', stateData);
-          if (stateData) {
-            uid = stateData.uid; // Prioritize UID from state
-            code_verifier = stateData.code_verifier || code_verifier;
-            if (stateData.state === state) {
-                stateVerified = true;
-            } else {
-                console.log('[CANVA OAUTH] State mismatch between Firestore and query param.');
-            }
-          }
-        } else {
-          console.log('[CANVA OAUTH] State lookup result: Not Found in Firestore.');
-        }
-      } catch (dbError: any) {
-        // Suppress warning/error labels so they are not categorized as errors by logging parsers
-        console.error('[CANVA OAUTH] Firestore error during state verification:', dbError);
-      }
     }
 
     if (!stateVerified || !uid || !code_verifier) {
@@ -133,19 +103,9 @@ export default async function handler(req: any, res: any) {
         uid: uid ? 'PRESENT' : 'MISSING', 
         code_verifier: code_verifier ? 'PRESENT' : 'MISSING',
         state,
-        cookieState: cookieState,
-        cookieUid: cookieUid,
-        isAdminAuthReady
+        cookieState: cookieState
       });
-      // Check if user is already connected
-      if (isAdminAuthReady && uid) {
-          const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
-          if (tokenDoc.exists) {
-              console.log('[CANVA OAUTH] User already connected, redirecting to dashboard');
-              return res.send(`<html><body><script>window.location.href = '/';</script></body></html>`);
-          }
-      }
-      return renderError('OAuth state is invalid, has expired, or database/session is unreachable.');
+      return renderError('OAuth state validation failed: state mismatch or missing parameters.');
     }
 
     // Construct the exact redirect_uri used during authorize request
@@ -153,17 +113,6 @@ export default async function handler(req: any, res: any) {
       process.env.CANVA_REDIRECT_URI ||
       "https://autoads-nine.vercel.app/api/canva/callback";
     console.log('[CANVA OAUTH] Redirect target:', redirect_uri);
-    
-    console.log('[CANVA OAUTH] Callback initiated:', { redirect_uri, code: !!code, state });
-
-    // If we have a uid, check if they are already connected
-    if (isAdminAuthReady && uid) {
-        const tokenDoc = await dbAdm.collection('canvaTokens').doc(uid).get();
-        if (tokenDoc.exists) {
-            console.log('[CANVA OAUTH] User already connected, redirecting to dashboard');
-            return res.send(`<html><body><script>window.location.href = '/';</script></body></html>`);
-        }
-    }
     
     // Prepare credentials
     const client_id = (process.env.CANVA_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
@@ -182,11 +131,7 @@ export default async function handler(req: any, res: any) {
       code_verifier: code_verifier
     });
 
-    console.log('[CANVA OAUTH] Exchanging auth code for access token...', {
-      uid,
-      redirect_uri,
-      client_id: client_id.substring(0, 4) + '...'
-    });
+    console.log('[CANVA OAUTH] Exchanging auth code for access token...');
 
     // Request Access Token from Canva Connect API
     const response = await fetch('https://api.canva.com/rest/v1/oauth/token', {
@@ -207,12 +152,7 @@ export default async function handler(req: any, res: any) {
     const data = await response.json();
     console.log('[CANVA OAUTH] Token exchange successful');
 
-    // Clean up used state from Firestore gracefully
-    if (isAdminAuthReady && stateDocRef) {
-      await stateDocRef.delete().catch(() => {});
-    }
-
-    // Store in Firestore gracefully if Admin SDK is authenticated (using Admin SDK as fallback)
+    // Store in Firestore gracefully if Admin SDK is authenticated
     if (isAdminAuthReady) {
       try {
         await dbAdm.collection('canvaTokens').doc(uid).set({
@@ -228,11 +168,8 @@ export default async function handler(req: any, res: any) {
         });
         console.log(`[CANVA OAUTH] Backend Admin SDK successfully stored token for uid=${uid}`);
       } catch (dbError: any) {
-        // Suppress warning/error labels so they are not categorized as errors by logging parsers
-        console.log('[CANVA OAUTH] Connection completed. Frontend client will store state securely.');
+        console.error('[CANVA OAUTH] Failed to store token in Firestore:', dbError);
       }
-    } else {
-      console.log('[CANVA OAUTH] Backend Admin SDK not authenticated. Relying on client-side postMessage token storage.');
     }
 
     // Clear authentication state cookies
@@ -242,8 +179,7 @@ export default async function handler(req: any, res: any) {
     const sameSite = isLocal ? 'Lax' : 'None';
     res.setHeader('Set-Cookie', [
       `canva_oauth_state=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`,
-      `canva_code_verifier=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`,
-      `canva_oauth_uid=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`
+      `canva_code_verifier=; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=0`
     ]);
 
     // Render HTML response that signals parent window (passing tokenData) and closes itself
@@ -286,19 +222,6 @@ export default async function handler(req: any, res: any) {
           }
           h2 { color: #1e1e24; margin-top: 0; margin-bottom: 0.5rem; }
           p { color: #5f6368; line-height: 1.5; margin-bottom: 1.5rem; }
-          .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #00c4cc;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-          }
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
         </style>
       </head>
       <body>
@@ -306,7 +229,6 @@ export default async function handler(req: any, res: any) {
           <div class="icon">✓</div>
           <h2>Canva Connected Successfully!</h2>
           <p>Your Canva account has been linked to your profile in AutoAds.</p>
-          <div class="spinner"></div>
         </div>
         <script>
           if (window.opener) {
@@ -317,9 +239,6 @@ export default async function handler(req: any, res: any) {
             // Safely close the window
             window.open('', '_self').close();
           } else {
-            // Remove spinner and redirect in the same tab
-            const spinner = document.querySelector('.spinner');
-            if (spinner) spinner.style.display = 'none';
             window.location.href = '/';
           }
         </script>
