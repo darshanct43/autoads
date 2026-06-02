@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function getEffectiveBucketName(): string {
@@ -23,6 +23,17 @@ const s3Client = new S3Client({
 });
 
 export const s3Service = {
+  async listFiles(prefix: string): Promise<string[]> {
+    validateAWS();
+    const bucket = getEffectiveBucketName();
+    const command = new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+    });
+    const response = await s3Client.send(command);
+    return (response.Contents || []).map(c => c.Key || '');
+  },
+
   async uploadFile(fileName: string, buffer: Buffer, contentType: string) {
     validateAWS();
     const bucket = getEffectiveBucketName();
