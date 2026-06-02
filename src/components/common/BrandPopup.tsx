@@ -37,7 +37,7 @@ export default function BrandPopup() {
 
             <div className="relative h-64 bg-slate-950 flex items-center justify-center overflow-hidden">
                <img 
-                 src={`${import.meta.env.BASE_URL}mayaan_logo.jpeg`} 
+                 src={`${import.meta.env.BASE_URL}mayaan_logo.svg`} 
                  alt="Mayaan Logo" 
                  className="w-80 h-auto object-contain relative z-10 drop-shadow-[0_10px_40px_rgba(255,255,255,0.1)] scale-110" 
                />

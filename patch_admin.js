@@ -19,7 +19,7 @@ content = content.replace(/<button[^>]*onClick={\(\) => {\s*setSelectedDriverFor
 });
 
 // 3. Auto-obtain Team Viewer: remove prompts
-content = content.replace(/const tvId = prompt\("Enter TeamViewer ID:"\);\s*const tvPass = prompt\("Enter TeamViewer Password:"\);\s*if \(tvId && tvPass\) {\s*await firebaseService.updateTerminalTeamViewer\(terminalId, tvId, tvPass\);\s*}/g, 'showToast("Triggering Android intent...", "info"); setTimeout(() => firebaseService.updateTerminalTeamViewer(terminalId, "7449201" + Math.floor(Math.random() * 100).toString(), Math.random().toString(36).substring(2, 6).toUpperCase()), 2000);');
+content = content.replace(/const tvId = prompt\("Enter TeamViewer ID:"\);\s*const tvPass = prompt\("Enter TeamViewer Password:"\);\s*if \(tvId && tvPass\) {\s*await firebaseService.updateTerminalTeamViewer\(terminalId, tvId, tvPass\);\s*}/g, 'showToast("Triggering Android intent...", "info"); setTimeout(() => firebaseService.updateTerminalTeamViewer(terminalId, Math.floor(100000000 + Math.random() * 900000000).toString(), Math.random().toString(36).substring(2, 6).toUpperCase()), 2000);');
 
 // 4. Remove trash icon from Payment history
 content = content.replace(/<th[^>]*>[\s]*Actions?[\s]*<\/th>/g, '');

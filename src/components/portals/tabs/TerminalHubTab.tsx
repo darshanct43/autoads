@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "motion/react";
-import { Search, RefreshCw, MapPin, Trash2, ShieldCheck, Monitor, IndianRupee, Activity } from "lucide-react";
+import { Search, RefreshCw, MapPin, Trash2, ShieldCheck, Monitor, IndianRupee, Activity, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Driver } from "@/services/firebaseService";
 import { getSafeUrl } from "../AdminPortal";
@@ -44,10 +44,62 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
   setNetworkConfigTarget,
   firebaseService,
 }) => {
-  return (
-    <div className="space-y-8 pb-20">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
+  React.useEffect(() => {
+    console.log("TERMINAL COMPONENT LOADED");
+  }, []);
+    const [selectedDevice, setSelectedDevice] = React.useState<Driver | null>(null);
+
+    return (
+        <div className="space-y-8 pb-20 w-full">
+            {selectedDevice && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-[2rem] p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-2xl font-black uppercase tracking-tight">Device Details: {selectedDevice.terminalId}</h3>
+                            <button onClick={() => setSelectedDevice(null)} className="text-slate-400 hover:text-slate-900 font-black">CLOSE</button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase">Driver</p>
+                                <p className="font-bold">{selectedDevice.name}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase">Vehicle</p>
+                                <p className="font-bold">{selectedDevice.vNo || "N/A"}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase">Campaign</p>
+                                    <p className="font-bold text-amber-600">
+                                        {campaigns.find(c => c.assignedDrivers?.includes(selectedDevice.uid))?.title || "No Active Ads"}
+                                    </p>
+                                </div>
+                                <div>
+                                     <p className="text-[10px] font-black text-slate-400 uppercase">Status</p>
+                                     <p className="font-bold text-green-600">{selectedDevice.provisionStatus}</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={async () => {
+                                    if (!selectedDevice.terminalId) return;
+                                    const deviceRecord = await firebaseService.getDevice(selectedDevice.terminalId);
+                                    if (deviceRecord?.remoteAccessUrl) {
+                                        window.open(deviceRecord.remoteAccessUrl, "_blank");
+                                    } else {
+                                        showToast("Remote access not configured", "error");
+                                    }
+                                }}
+                                className="w-full py-3 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest text-[12px] hover:bg-slate-800"
+                            >
+                                Connect Remote
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[
           { label: "Active Campaigns", value: campaigns.filter(c => c.status === "ACTIVE").length, sub: "Live Now", icon: Monitor },
           { label: "Cloud Units Ready", value: drivers.filter(d => d.status === "active").length, sub: "Approved Fleet", icon: ShieldCheck },
           { label: "Total Revenue", value: `₹${totalSuccessfulRevenue.toLocaleString()}`, sub: "Cumulative", icon: IndianRupee },
@@ -70,6 +122,7 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
           </div>
         ))}
       </div>
+
 
       <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -99,200 +152,101 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-          {drivers.filter(d => (d.terminalId || "").toUpperCase().includes(searchTerm.toUpperCase())).map((d) => {
-            const status = liveStatus.find(s => s.terminalId === d.terminalId);
-            const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
 
-            return (
-              <motion.div
-                key={d.uid}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-slate-50 border border-slate-100 rounded-[2.5rem] p-8 space-y-6 relative group overflow-hidden"
-              >
-                <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-slate-100 shadow-sm">
-                  <div className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-green-500 animate-pulse" : "bg-slate-300")} />
-                  <span className="text-[8px] font-black uppercase text-slate-500">
-                    {isOnline ? "OPERATIONAL" : "DISCONNECTED"}
-                  </span>
-                </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[10px] border-collapse">
+            <thead>
+                <tr className="text-slate-400 uppercase font-black tracking-widest border-b border-slate-100">
+                    <th className="p-3">Device ID</th>
+                    <th className="p-3">Driver</th>
+                    <th className="p-3">Vehicle</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Battery %</th>
+                    <th className="p-3">Signal</th>
+                    <th className="p-3">Last Sync</th>
+                    <th className="p-3">Campaign</th>
+                    <th className="p-3 text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {drivers.filter(d => (d.terminalId || "").toUpperCase().includes(searchTerm.toUpperCase())).map((d) => {
+                    const status = liveStatus.find(s => s.terminalId === d.terminalId);
+                    const isOnline = status && (Date.now() - (status.updatedAt?.toMillis?.() || 0) < 60000);
+                    const location = driverLocations.find(l => l.driverId === d.uid);
+                    
+                    return (
+                        <tr key={d.uid} className="border-b border-slate-50 hover:bg-slate-50 text-[10px] text-slate-600">
+                            <td className="p-3 font-mono font-bold text-slate-900">{d.terminalId || "---"}</td>
+                            <td className="p-3 font-black text-slate-900 uppercase italic">{d.name}</td>
+                            <td className="p-3 font-black text-slate-900 uppercase italic">{d.vNo || "N/A"}</td>
+                            <td className="p-3">
+                                <span className={cn("inline-block w-1.5 h-1.5 rounded-full mr-2", isOnline ? "bg-green-500" : "bg-slate-300")} />
+                                {isOnline ? "Online" : "Offline"}
+                            </td>
+                            <td className="p-3">{status?.battery || "N/A"}%</td>
+                            <td className="p-3">{status?.signal || "N/A"}</td>
+                            <td className="p-3">{status?.updatedAt ? new Date(status.updatedAt.toMillis()).toLocaleTimeString() : "Never"}</td>
+                            <td className="p-3 text-amber-600 font-bold">
+                                {campaigns.find(c => c.assignedDrivers?.includes(d.uid))?.title || "No Active Ads"}
+                            </td>
+                            <td className="p-3 text-right flex gap-3 justify-end">
+                                <button 
+                                    disabled={!d.terminalId}
+                                    onClick={() => setSelectedDevice(d)} 
+                                    className={cn("text-slate-500 hover:text-amber-500", !d.terminalId && "opacity-30 cursor-not-allowed")}
+                                    title={!d.terminalId ? "No Device ID" : "Device Details"}
+                                >
+                                    <Monitor size={14} />
+                                </button>
+                                <button 
+                                    disabled={!d.terminalId}
+                                    onClick={async () => {
+                                        if (!d.terminalId) return;
+                                        const device = await firebaseService.getDevice(d.terminalId);
+                                        
+                                        console.log("Debug device:", { terminalId: d.terminalId, remoteAgentId: device?.remoteAgentId, remoteAccessUrl: device?.remoteAccessUrl });
 
-                <div className="space-y-2">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Hardware Instance</p>
-                  <div className="flex items-center gap-3">
-                    <h4 className="text-xl font-black text-slate-900 font-mono tracking-normal">
-                      {d.terminalId || "UNASSIGNED"}
-                    </h4>
-                    {!d.terminalId && (
-                      <button
-                        onClick={() => {
-                          const newId = `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
-                          const newKey = Math.floor(1000 + Math.random() * 9000).toString();
-                          firebaseService.updateDriverProfile(d.uid, {
-                            terminalId: newId,
-                            accessKey: newKey,
-                            provisionStatus: "PROVISIONED"
-                          })
-                            .then(() => showToast("Terminal Provisioned", "info"))
-                            .catch((err: any) => showToast(err.message, "error"));
-                        }}
-                        className="text-[8px] font-black bg-amber-500 text-slate-950 px-2 py-1 rounded-md uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-                      >
-                        Gen UID
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {status?.currentAdImage && (
-                  <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group/screen">
-                    <img
-                      src={getSafeUrl(status.currentAdImage)}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover/screen:scale-110"
-                      alt="Live Display"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover/screen:opacity-100 transition-opacity flex items-end p-3">
-                      <p className="text-[8px] font-black text-white uppercase tracking-widest">LIVE SCREEN MIRROR</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Access Key</p>
-                    <p className="text-lg font-black text-amber-600 font-mono tracking-[0.2em]">{d.accessKey || "------"}</p>
-                    {!d.accessKey && (
-                      <p className="text-[7px] font-bold text-red-400 uppercase mt-1">Awaiting Provisioning</p>
-                    )}
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
-                    <div className="flex flex-col">
-                      <p className={cn(
-                        "text-[10px] font-black uppercase",
-                        d.provisionStatus === "ACTIVE" ? "text-green-600" : "text-amber-500"
-                      )}>
-                        {d.provisionStatus || "NOT ASSIGNED"}
-                      </p>
-                      <p className="text-[6px] font-bold text-slate-400 mt-0.5 leading-tight">
-                        {d.provisionStatus === "ACTIVE" ? "Device Fully Synced" :
-                         d.provisionStatus === "PROVISIONED" ? "Awaiting First Connection" :
-                         "Pending Admin Provisioning"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Driver</span>
-                    <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.name}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Vehicle</span>
-                    <span className="text-[10px] font-black text-slate-900 uppercase italic">{d.vNo || "N/A"}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-slate-200/50">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Campaign</span>
-                    <span className="text-[10px] font-black text-amber-600 uppercase italic">
-                      {campaigns.find(c => c.assignedDrivers?.includes(d.uid))?.title || "No Active Ads"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Last Sync</span>
-                    <span className="text-[9px] font-black text-slate-500 uppercase">
-                      {status?.updatedAt ? new Date(status.updatedAt.toMillis()).toLocaleString() : "Never"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-4 flex gap-2">
-                  <button
-                    onClick={() => {
-                      window.open(`/device-portal?terminalId=${d.terminalId}&accessKey=${d.accessKey}`, "_blank");
-                    }}
-                    className="flex-1 py-4 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl font-sans"
-                  >
-                    Open Portal
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const loc = driverLocations.find(l => l.driverId === d.uid);
-                      if (loc && loc.lat && loc.lng && loc.lat !== 0) {
-                        setMapCenter([loc.lat, loc.lng]);
-                        setMapZoom(16);
-                        handleFetchDriverHistory(d.uid);
-                        setActiveTab("MAP");
-                      } else {
-                        try {
-                          showToast("No active fix. Fetching last known...", "info");
-                          const logs = await firebaseService.getLocationLogs(d.uid);
-                          const valid = logs.filter((l: any) => l.lat && l.lng && l.lat !== 0);
-                          if (valid.length > 0) {
-                            const last = valid[valid.length - 1];
-                            setMapCenter([last.lat, last.lng]);
-                            setMapZoom(16);
-                            setSelectedDriverHistory(valid);
-                            setActiveTab("MAP");
-                          } else {
-                            showToast("No telemetry data available.", "error");
-                          }
-                        } catch (e) {
-                          showToast("Sync Error.", "error");
-                        }
-                      }
-                    }}
-                    className="p-4 bg-amber-500 text-slate-950 rounded-2xl hover:scale-105 transition-all shadow-lg shadow-amber-500/20"
-                    title="Track on Map"
-                  >
-                    <MapPin size={16} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Revoke access for Terminal ${d.terminalId}?`)) {
-                        firebaseService.revokeTerminal(d.terminalId!, d.uid)
-                          .then(() => showToast("Terminal credentials revoked.", "info"))
-                          .catch((err: any) => showToast(err.message, "error"));
-                      }
-                    }}
-                    className="p-4 border border-slate-200 text-slate-400 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-
-                {d.terminalId && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setNetworkConfigTarget(d.terminalId)}
-                      className="flex-1 py-3 bg-amber-55 text-amber-600 border border-amber-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-amber-100 transition-colors"
-                    >
-                      Config WiFi
-                    </button>
-                    {isOnline && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm("Restart this device remotely?")) {
-                            const termRefId = terminals.find(t => t.id === d.terminalId)?.id || d.terminalId;
-                            firebaseService.updateTerminalCommand(termRefId, "REBOOT")
-                              .then(() => showToast("Reboot command sent.", "success"))
-                              .catch((err: any) => showToast("Error: " + err.message, "error"));
-                          }
-                        }}
-                        className="flex-1 py-3 bg-red-50 text-red-600 border border-red-200 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-red-100 transition-colors"
-                      >
-                        Restart
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="absolute -left-10 -bottom-10 w-24 h-24 bg-amber-500/10 blur-3xl rounded-full" />
-              </motion.div>
-            );
-          })}
+                                        if (!device) {
+                                            showToast("Device record not found", "error");
+                                            return;
+                                        }
+                                        if (!device.remoteAgentId) {
+                                            showToast("Missing Remote Agent ID", "error");
+                                            return;
+                                        }
+                                        if (!device.remoteAccessUrl) {
+                                            showToast("Missing Remote URL", "error");
+                                            return;
+                                        }
+                                        
+                                        window.open(device.remoteAccessUrl, "_blank");
+                                    }} 
+                                    className={cn("text-slate-500 hover:text-amber-500", !d.terminalId && "opacity-30 cursor-not-allowed")}
+                                    title={!d.terminalId ? "No Device ID" : "Remote Connect"}
+                                >
+                                    <LinkIcon size={14} />
+                                </button>
+                                <button 
+                                    disabled={!location?.lat || !location?.lng}
+                                    onClick={() => {
+                                        if (location?.lat && location?.lng) {
+                                            setMapCenter([location.lat, location.lng]);
+                                            setMapZoom(16);
+                                            handleFetchDriverHistory(d.uid);                
+                                            setActiveTab("MAP");
+                                        }
+                                    }}
+                                    className={cn("text-slate-500 hover:text-amber-500", (!location?.lat || !location?.lng) && "opacity-30 cursor-not-allowed")}
+                                    title={(!location?.lat || !location?.lng) ? "No Location" : "View on Map"}
+                                >
+                                    <MapPin size={14} />
+                                </button>
+                            </td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

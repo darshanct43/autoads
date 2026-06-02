@@ -83,7 +83,7 @@ export const FirebaseStorageTester: React.FC = () => {
             </button>
 
             <div className="max-h-40 overflow-y-auto bg-black text-emerald-400 p-2 rounded border border-slate-800">
-                {log.length === 0 ? "Ready to test." : log.map((l, i) => <div key={i}>{l}</div>)}
+                {log.length === 0 ? "Ready to test." : log.map((l, i) => <div key={l}>{l}</div>)}
             </div>
 
             {status === 'error' && (

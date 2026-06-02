@@ -4,11 +4,11 @@ import { firebaseService } from '@/services/firebaseService';
 
 export default function StaticImpactVideos() {
   const [urls, setUrls] = useState<Record<string, string>>({
-    qr: "/uploads/qr_showcase.mp4",
-    couples: "/uploads/couples_showcase.mp4",
-    food: "/uploads/food_showcase.mp4",
-    awareness: "/uploads/awareness_showcase.mp4",
-    film: "/uploads/film_showcase.mp4"
+    qr: "/uploads/showcase_qr_showcase.mp4",
+    couples: "/uploads/showcase_couples_showcase.mp4",
+    food: "/uploads/showcase_food_showcase.mp4",
+    awareness: "/uploads/showcase_awareness_showcase.mp4",
+    film: "/uploads/showcase_film_showcase.mp4"
   });
   const [activeTab, setActiveTab] = useState<string>('qr');
   const [isNoteExpanded, setIsNoteExpanded] = useState<boolean>(false);

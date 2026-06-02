@@ -67,23 +67,6 @@ function parseServiceAccount(raw: string | undefined): any {
 const serviceAccount = parseServiceAccount(rawSA);
 const isAdminAuthReady = !!(serviceAccount && serviceAccount.private_key);
 
-// Audit logs
-console.log('--- FIREBASE ADMIN AUDIT START ---');
-console.log('1. Length of FIREBASE_SERVICE_ACCOUNT:', rawSA?.length);
-try {
-    const parsed = JSON.parse(rawSA || '{}');
-    console.log('2. JSON.parse successful:', true);
-    console.log('3. serviceAccount.private_key exists:', !!parsed.private_key);
-    console.log('4. serviceAccount.client_email exists:', !!parsed.client_email);
-} catch (e: any) {
-    console.log('2. JSON.parse failed:', e.message);
-}
-console.log('5. isAdminAuthReady value:', isAdminAuthReady);
-if (!isAdminAuthReady) {
-    console.log('6. Reason isAdminAuthReady is FALSE:', !serviceAccount ? 'Service account is null (parsing failed)' : 'Missing private_key');
-}
-console.log('--- FIREBASE ADMIN AUDIT END ---');
-
 if (!getApps().length) {
   if (serviceAccount) {
     try {

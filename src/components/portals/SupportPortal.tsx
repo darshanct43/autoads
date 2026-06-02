@@ -36,7 +36,8 @@ import {
   FileText,
   Paperclip,
   Crown,
-  Loader2
+  Loader2,
+  Baby
 } from 'lucide-react';
 import { FileUpload } from '@/components/common/FileUpload';
 import { cn } from '@/lib/utils';
@@ -44,7 +45,7 @@ import { firebaseService, AdCampaign, SupportTicket, ChatMessage, Driver } from 
 import { storageService } from '@/services/storageService';
 import { auth } from '@/lib/firebase';
 import { UserRole } from '@/types';
-import AdminAssistant from '../common/AdminAssistant';
+import AdminAssistant from '../common/AdminAssistant'; // Testingedit
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import NotificationCenter from '../common/NotificationCenter';
@@ -264,7 +265,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
     assetUrl: '',
     mediaType: 'IMAGE' as 'IMAGE' | 'VIDEO',
     designerFee: 0,
-    videoMakerFee: 0
+    videoMakerFee: 0,
+    isKidSafe: false,
+    kidSafeMediaUrl: ''
   });
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
@@ -509,10 +512,14 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const finalTitle = newCampaign.title.trim() || `Ad Campaign #${Math.floor(1000 + Math.random() * 9000)}`;
-    const finalDescription = newCampaign.description.trim() || 'A dynamically deployed campaign designed for high local coverage.';
-    const defaultPlaceholder = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80';
-    const finalMediaUrl = (newCampaign.mediaUrl || '').trim() || defaultPlaceholder;
+    if (!newCampaign.title.trim() || !newCampaign.mediaUrl.trim()) {
+      showToast("Title and Media are required to create a campaign.", 'error');
+      return;
+    }
+    
+    const finalTitle = newCampaign.title.trim();
+    const finalDescription = newCampaign.description.trim();
+    const finalMediaUrl = newCampaign.mediaUrl.trim();
 
     setIsSubmitting(true);
     try {
@@ -522,7 +529,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         mediaUrl: finalMediaUrl,
         assetUrl: finalMediaUrl,
         mediaType: newCampaign.mediaType,
-        mediaReceived: true
+        mediaReceived: true,
+        isKidSafe: newCampaign.isKidSafe,
+        kidSafeMediaUrl: newCampaign.kidSafeMediaUrl
       });
       showToast("Campaign created and submitted for review", 'success');
       setNewCampaign({ 
@@ -532,7 +541,9 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         assetUrl: '', 
         mediaType: 'IMAGE',
         designerFee: 0,
-        videoMakerFee: 0
+        videoMakerFee: 0,
+        isKidSafe: false,
+        kidSafeMediaUrl: ''
       });
       setActiveTab('STATUS');
     } catch (err) {
@@ -975,6 +986,29 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
                          </div>
                          <div className="space-y-4">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Media Payload Status</label>
+                            <button
+                               type="button"
+                               onClick={() => setNewCampaign({...newCampaign, isKidSafe: !newCampaign.isKidSafe})}
+                               className={cn(
+                                 "w-full py-4 px-6 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
+                                 newCampaign.isKidSafe ? "bg-amber-500 text-slate-950 border-amber-500" : "bg-white text-slate-400 border-slate-100 hover:border-slate-200"
+                               )}
+                             >
+                                <Baby size={14} /> {newCampaign.isKidSafe ? 'Kid/School Safe Enabled' : 'Enable Kid/School Safe Mode'}
+                             </button>
+                             
+                       {newCampaign.isKidSafe && (
+                        <div className="space-y-2 p-6 bg-slate-50 border border-amber-100 rounded-2xl">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Kid/School Content URL</label>
+                          <input 
+                            type="url" 
+                            placeholder="https://example.com/kid-content.mp4"
+                            value={newCampaign.kidSafeMediaUrl}
+                            onChange={e => setNewCampaign({...newCampaign, kidSafeMediaUrl: e.target.value})}
+                            className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                          />
+                        </div>
+                       )}
                             
                             {!newCampaign.mediaUrl ? (
                               <div className="space-y-4">

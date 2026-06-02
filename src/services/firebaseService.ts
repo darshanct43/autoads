@@ -310,13 +310,99 @@ export interface Payment {
   createdAt: any;
 }
 
+export interface SafeRideSession {
+  id?: string;
+  terminalId: string;
+  driverId: string;
+  vehicleNumber: string;
+  activatedAt: any;
+  expiresAt: any;
+  active: boolean;
+}
+
 export const firebaseService = {
-  // Existing methods ...
+  // Existing ...
+  async activateSafeRide(terminalId: string, driverId: string, vehicleNumber: string) {
+    try {
+      const db = (await import('../lib/firebase')).db;
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      
+      const activatedAt = new Date();
+      const expiresAt = new Date(activatedAt.getTime() + 15 * 60000); // 15 mins
+      
+      const sessionData: SafeRideSession = {
+        terminalId,
+        driverId,
+        vehicleNumber,
+        activatedAt,
+        expiresAt,
+        active: true,
+      };
+      
+      return await addDoc(collection(db, 'safeRideSessions'), sessionData);
+    } catch (e) {
+      console.error("Error activating safe ride:", e);
+      throw e;
+    }
+  },
+  
+  async getSafeRideSession(terminalId: string) {
+      const { db } = await import('../lib/firebase');
+      const { collection, query, where, getDocs } = await import('firebase/firestore');
+      
+      const q = query(collection(db, 'safeRideSessions'), 
+          where('terminalId', '==', terminalId),
+          where('active', '==', true)
+      );
+      
+      const snap = await getDocs(q);
+      if (snap.empty) return null;
+      
+      const doc = snap.docs[0];
+      const data = doc.data() as SafeRideSession;
+      
+      if (new Date() > data.expiresAt.toDate()) {
+          // Deactivate
+          await updateDoc(doc.ref, { active: false });
+          return null;
+      }
+      return { id: doc.id, ...data };
+  },
+
+  async deactivateSafeRide(sessionId: string) {
+      const { db } = await import('../lib/firebase');
+      const { doc, updateDoc } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'safeRideSessions', sessionId), { active: false });
+  },
+
+  subscribeToSafeRideSession(terminalId: string, callback: (session: SafeRideSession | null) => void) {
+      const { db } = require('../lib/firebase');
+      const { collection, query, where, onSnapshot } = require('firebase/firestore');
+      
+      const q = query(
+          collection(db, 'safeRideSessions'),
+          where('terminalId', '==', terminalId),
+          where('active', '==', true)
+      );
+      
+      return onSnapshot(q, (snap: any) => {
+          if (snap.empty) {
+              callback(null);
+          } else {
+              const doc = snap.docs[0];
+              callback({ id: doc.id, ...doc.data() } as SafeRideSession);
+          }
+      });
+  },
+  
+  // Existing...
 
   // Added/Restored methods for compatibility
   subscribeToDrivers(callback: (drivers: Driver[]) => void) {
+    console.log("[DEBUG] Firebase: Subscribing to drivers collection...");
     const q = query(collection(db, 'drivers'));
     return onSnapshot(q, (snapshot) => {
+      console.log("[DEBUG] Firebase: snapshot received, count:", snapshot.docs.length);
       const drivers = snapshot.docs.map(doc => {
         const data = doc.data();
         return { ...data, id: doc.id, uid: doc.id } as any;
@@ -328,7 +414,10 @@ export const firebaseService = {
         return dateB - dateA;
       });
       callback(drivers);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'drivers'));
+    }, (error) => {
+      console.error("[DEBUG] Firebase: snapshot error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'drivers');
+    });
   },
 
   subscribeToPayments(callback: (payments: Payment[]) => void, customerId?: string, customerPhone?: string) {
@@ -360,11 +449,37 @@ export const firebaseService = {
   },
 
   subscribeToDevices(callback: (devices: Device[]) => void) {
-    const q = query(collection(db, 'devices'), orderBy('vNo', 'asc'));
+    console.log("[DEBUG] Firebase: Subscribing to devices collection...");
+    const q = query(collection(db, 'devices'));
     return onSnapshot(q, (snapshot) => {
+      console.log("[DEBUG] Firebase: devices snapshot received, count:", snapshot.docs.length);
       const devices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Device));
       callback(devices);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'devices'));
+  },
+
+  async getDevices() {
+    const q = query(collection(db, 'devices'));
+    const snap = await getDocs(q);
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+  },
+
+  async getDevice(terminalId: string) {
+    const docRef = doc(db, 'devices', terminalId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() };
+    }
+    return null;
+  },
+
+  async getTerminal(terminalId: string) {
+    const docRef = doc(db, 'terminals', terminalId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() };
+    }
+    return null;
   },
 
   async initializeDevices(devices: Omit<Device, 'id'>[]) {
@@ -968,8 +1083,10 @@ export const firebaseService = {
   },
 
   subscribeToTerminals(callback: (terminals: any[]) => void) {
+    console.log("[DEBUG] Firebase: Subscribing to terminals collection...");
     const q = query(collection(db, 'terminals'));
     return onSnapshot(q, (snapshot) => {
+      console.log("[DEBUG] Firebase: terminals snapshot received, count:", snapshot.docs.length);
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       // Sort client-side to ensure stability without composite indexes
       docs.sort((a: any, b: any) => {

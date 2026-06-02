@@ -18,24 +18,30 @@ import {
   Firestore, 
   setLogLevel,
   enableNetwork,
-  disableNetwork
+  disableNetwork,
+  collection,
+  getDocs
 } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
+import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 setLogLevel('error'); // Suppress verbose warning logs
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId,
 };
+
+console.log("[Firebase] Initializing with project:", firebaseConfig.projectId);
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 (window as any)._firebaseApp = app;
 
-const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || '(default)');
+const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || firebaseAppletConfig.firestoreDatabaseId || '(default)');
 
 let dbInstance: Firestore;
 try {
@@ -48,6 +54,13 @@ try {
 
 export const db: Firestore = dbInstance;
 console.log("[Firebase] Firestore initialized. Database ID:", firestoreDbId);
+
+// Verify connectivity
+getDocs(collection(db, 'drivers')).then(snap => {
+  console.log("[CHECK] Drivers collection size at startup:", snap.size);
+}).catch(err => {
+  console.error("[CHECK] Drivers collection read error:", err);
+});
 
 // Explicitly initialize Auth with local persistence and popup resolver
 let authInstance: Auth;

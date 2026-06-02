@@ -275,7 +275,7 @@ export function SubscriptionManager() {
           <div key={plan.id} className={cn("p-8 rounded-[2rem] border shadow-sm transition-all space-y-6", plan.highlight ? "bg-slate-900 text-white border-slate-800 shadow-xl" : "bg-white border-slate-100 hover:shadow-lg text-slate-900")}>
             <div className="flex gap-1.5 items-center">
               {Array.from({ length: 3 }).map((_, i) => (
-                <ThreeDStar key={i} active={i < plan.stars} type={plan.id as 'brass' | 'silver' | 'gold'} />
+                <ThreeDStar key={`${plan.id}-${i}`} active={i < plan.stars} type={plan.id as 'brass' | 'silver' | 'gold'} />
               ))}
             </div>
             <div className="space-y-1">

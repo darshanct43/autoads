@@ -16,6 +16,8 @@ const LANGUAGES = {
     welcomeSub: "Optimize the vehicle screen for a perfect, safe family commute.",
     kidsMode: "Kids Mode",
     kidsModeSub: "👶 Clean, educational, kid-friendly ecosystem",
+    schoolMode: "School Trip",
+    schoolModeSub: "🏫 Special curated educational ads",
     familyMode: "Family Mode",
     familyModeSub: "👨‍👩‍👧 Relax with family-friendly content",
     quietRide: "Quiet Ride",
@@ -39,6 +41,8 @@ const LANGUAGES = {
     welcomeSub: "ನಿಮ್ಮ ಕುಟುಂಬದ ಪ್ರಯಾಣದ ಸುಖಕ್ಕಾಗಿ ವಾಹನದ ಸ್ಕ್ರೀನ್ ಸೆಟ್ಟಿಂಗ್ಸ್ ಬದಲಾಯಿಸಿ.",
     kidsMode: "ಕಿಡ್ಸ್ ಮೋಡ್",
     kidsModeSub: "👶 ಮಕ್ಕಳಿಗೆ ಸುರಕ್ಷಿತ, ಕಲಿಯುವ ಪರಿಸರ",
+    schoolMode: "ಸ್ಕೂಲ್ ಟ್ರಿಪ್",
+    schoolModeSub: "🏫 ವಿಶೇಷ ಕ್ಯುರೇಟೆಡ್ ಶೈಕ್ಷಣಿಕ ಜಾಹೀರಾತುಗಳು",
     familyMode: "ಫ್ಯಾಮಿಲಿ ಮೋಡ್",
     familyModeSub: "👨‍👩‍👧 ಕುಟುಂಬದವರೊಂದಿಗೆ ಆರಾಮದಾಯಕ ಮತ್ತು ಸುರಕ್ಷಿತ ವೀಕ್ಷಣೆ",
     quietRide: "ಕ್ವಯಟ್ ರೈಡ್",
@@ -62,6 +66,8 @@ const LANGUAGES = {
     welcomeSub: "अपने परिवार के आरामदायक सफर के लिए स्क्रीन को अनुकूलित करें।",
     kidsMode: "किड्स मोड",
     kidsModeSub: "👶 बच्चों के लिए स्वच्छ, सुरक्षित और उपयोगी मनोरंजन",
+    schoolMode: "स्कूल ट्रिप",
+    schoolModeSub: "🏫 विशेष क्यूरेटेड शैक्षिक विज्ञापन",
     familyMode: "फैमिली मोड",
     familyModeSub: "👨‍👩‍👧 परिवार के साथ सुखद और सुरक्षित मनोरंजन",
     quietRide: "शांत सवारी",
@@ -91,9 +97,9 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
   const [localNightMode, setLocalNightMode] = useState<boolean>(false);
 
   // New interactive confirmation state tracks
-  const [tempSelection, setTempSelection] = useState<'KIDS' | 'FAMILY' | 'QUIET' | 'NIGHT' | null>(null);
+  const [tempSelection, setTempSelection] = useState<'KIDS' | 'SCHOOL' | 'FAMILY' | 'QUIET' | 'NIGHT' | null>(null);
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
-  const [confirmedMode, setConfirmedMode] = useState<'KIDS' | 'FAMILY' | 'QUIET' | 'NIGHT' | null>(null);
+  const [confirmedMode, setConfirmedMode] = useState<'KIDS' | 'SCHOOL' | 'FAMILY' | 'QUIET' | 'NIGHT' | null>(null);
 
   // Extract linked device ID from URL params or location hashes
   useEffect(() => {
@@ -138,7 +144,7 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
   }, [deviceId]);
 
   // One-tap direct execution helper. Completes and updates Firestore instantly in < 1 sec
-  const handleSelectCabinMode = async (mode: 'KIDS' | 'FAMILY' | 'QUIET' | 'NIGHT' | 'RESET') => {
+  const handleSelectCabinMode = async (mode: 'KIDS' | 'SCHOOL' | 'FAMILY' | 'QUIET' | 'NIGHT' | 'RESET') => {
     if (!deviceId) return;
     setIsSubmitting(true);
     setStatusMessage(null);
@@ -160,7 +166,7 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
     }
 
     const now = new Date();
-    const expires = new Date(now.getTime() + 30 * 60 * 1000); // Expiries automatically after 30 minutes
+    const expires = new Date(now.getTime() + 15 * 60 * 1000); // Expiries automatically after 15 minutes
 
     let payload: any = {
       rideId: `ride_${Date.now()}`,
@@ -180,6 +186,11 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
       payload.familyMode = true;
       payload.blockedCategories = ['alcohol', 'betting', 'gambling', 'political'];
       payload.driverOverrideMode = 'CHILDREN';
+    } else if (mode === 'SCHOOL') {
+      payload.childrenPresent = true;
+      payload.familyMode = true;
+      payload.blockedCategories = ['alcohol', 'gambling', 'political', 'dating', 'adult'];
+      payload.driverOverrideMode = 'SCHOOL_TRIP';
     } else if (mode === 'FAMILY') {
       payload.familyMode = true;
       payload.blockedCategories = ['alcohol', 'political'];
@@ -224,9 +235,9 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
 
   // Helper flags matching either temporary selections or currently active firebase profiles
   const isKidsSelected = tempSelection === 'KIDS' || (tempSelection === null && activeOverrideMode === 'CHILDREN');
+  const isSchoolSelected = tempSelection === 'SCHOOL' || (tempSelection === null && activeOverrideMode === 'SCHOOL');
   const isFamilySelected = tempSelection === 'FAMILY' || (tempSelection === null && activeOverrideMode === 'FAMILY');
-  const isQuietSelected = tempSelection === 'QUIET' || (tempSelection === null && activeOverrideMode === 'SILENT' && !localNightMode);
-  const isNightSelected = tempSelection === 'NIGHT' || (tempSelection === null && activeOverrideMode === 'SILENT' && localNightMode);
+  const isQuietSelected = tempSelection === 'QUIET' || (tempSelection === null && activeOverrideMode === 'SILENT');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-slate-950 p-4 sm:p-6 justify-between select-none pb-28">
@@ -334,6 +345,35 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
                   <div>
                     <h3 className="text-sm font-black text-white uppercase tracking-tight">{t.kidsMode}</h3>
                     <p className="text-[10px] font-medium text-slate-400 mt-0.5 leading-tight">{t.kidsModeSub}</p>
+                  </div>
+                </div>
+              </button>
+
+              {/* School Trip Card */}
+              <button
+                onClick={() => setTempSelection('SCHOOL')}
+                className={`group relative p-5 rounded-3xl border text-left transition-all overflow-hidden ${
+                  isSchoolSelected 
+                    ? 'bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-slate-900/80 border-amber-400 shadow-xl shadow-amber-500/5 scale-[1.02] translate-y-[-1px]' 
+                    : 'bg-slate-900/45 border-white/5 hover:border-white/15'
+                }`}
+              >
+                {isSchoolSelected && (
+                  <div className="absolute top-0 right-0 bg-gradient-to-l from-amber-500 to-orange-500 text-slate-950 text-[9px] font-black uppercase tracking-widest px-3.5 py-1 rounded-bl-xl flex items-center gap-1.5 shadow-md">
+                    <span className="w-1.5 h-1.5 bg-slate-950 rounded-full animate-ping" />
+                    <span>SELECTED</span>
+                  </div>
+                )}
+                
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-active:scale-95 ${
+                    isSchoolSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    <School size={22} className="shrink-0" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">{t.schoolMode}</h3>
+                    <p className="text-[10px] font-medium text-slate-400 mt-0.5 leading-tight">{t.schoolModeSub}</p>
                   </div>
                 </div>
               </button>
@@ -477,9 +517,9 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
               <span className="text-[9px] font-extrabold text-amber-500 tracking-wider uppercase leading-none mb-1">Comfort Preference</span>
               <span className="text-xs font-black text-white tracking-tight flex items-center gap-1">
                 {tempSelection === 'KIDS' && "👶 Kids Mode"}
+                {tempSelection === 'SCHOOL' && "🏫 School Trip"}
                 {tempSelection === 'FAMILY' && "👨‍👩‍👧 Family Mode"}
                 {tempSelection === 'QUIET' && "🔇 Quiet Ride"}
-                {tempSelection === 'NIGHT' && "🌙 Night Comfort"}
                 <span className="text-slate-400 text-[10px] font-medium leading-none ml-1">selected</span>
               </span>
             </div>
@@ -523,9 +563,9 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
                 <h2 className="text-3xl font-black text-white tracking-tight uppercase">Safe Ride Activated</h2>
                 <p className="text-sm font-black text-amber-400 tracking-wide">
                   {confirmedMode === 'KIDS' && "Kid-friendly content is now active"}
+                  {confirmedMode === 'SCHOOL' && "School-safe content is now active"}
                   {confirmedMode === 'FAMILY' && "Family-safe viewing enabled"}
                   {confirmedMode === 'QUIET' && "Reduced sound mode enabled"}
-                  {confirmedMode === 'NIGHT' && "Comfort dimming activated"}
                 </p>
               </div>
 

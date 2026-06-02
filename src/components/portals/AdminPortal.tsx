@@ -85,7 +85,9 @@ import { RevenueManagementTab } from "./tabs/RevenueManagementTab";
 import { PricingApprovalsTab } from "./tabs/PricingApprovalsTab";
 import { PackagesTab } from "./tabs/PackagesTab";
 import { FranchisesTab } from "./tabs/FranchisesTab";
+import { DeviceHealthCenterTab } from "./tabs/DeviceHealthCenterTab";
 import { TerminalHubTab } from "./tabs/TerminalHubTab";
+import { RemoteConnectTab } from "./tabs/RemoteConnectTab";
 import { CampaignsTab } from "./tabs/CampaignsTab";
 import { ReviewsTab } from "./tabs/ReviewsTab";
 import { CanvaAssetLibrary } from "../campaigns/CanvaAssetLibrary";
@@ -1589,28 +1591,34 @@ export default function AdminPortal({
             isSubmitting={isSubmitting}
           />
         );
+      case "DEVICE_HEALTH":
+        return <DeviceHealthCenterTab />;
       case "TERMINAL_HUB":
         return (
-          <TerminalHubTab
-            campaigns={campaigns}
-            drivers={drivers}
-            totalSuccessfulRevenue={totalSuccessfulRevenue}
-            liveUnitsCount={liveUnitsCount}
-            liveStatus={liveStatus}
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            driverLocations={driverLocations}
-            terminals={terminals}
-            showToast={showToast}
-            setMapCenter={setMapCenter}
-            setMapZoom={setMapZoom}
-            handleFetchDriverHistory={handleFetchDriverHistory}
-            setSelectedDriverHistory={setSelectedDriverHistory}
-            setActiveTab={setActiveTab}
-            setNetworkConfigTarget={setNetworkConfigTarget}
-            firebaseService={firebaseService}
-          />
+          <ErrorBoundary>
+            <TerminalHubTab
+              campaigns={campaigns}
+              drivers={drivers}
+              totalSuccessfulRevenue={totalSuccessfulRevenue}
+              liveUnitsCount={liveUnitsCount}
+              liveStatus={liveStatus}
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              driverLocations={driverLocations}
+              terminals={terminals}
+              showToast={showToast}
+              setMapCenter={setMapCenter}
+              setMapZoom={setMapZoom}
+              handleFetchDriverHistory={handleFetchDriverHistory}
+              setSelectedDriverHistory={setSelectedDriverHistory}
+              setActiveTab={setActiveTab}
+              setNetworkConfigTarget={setNetworkConfigTarget}
+              firebaseService={firebaseService}
+            />
+          </ErrorBoundary>
         );
+      case "REMOTE_CONNECT":
+          return <RemoteConnectTab />;
       case "MAP":
         return (
           <MapTab
@@ -1829,6 +1837,7 @@ export default function AdminPortal({
             { id: "DASHBOARD", icon: Activity, title: "Overview" },
             { id: "MAP", icon: MapPin, title: "Live Tracking" },
             { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
+            { id: "DEVICE_HEALTH", icon: Cpu, title: "Device Health" },
             { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests", badge: planProposals.length > 0 },
             { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
             { id: "MONITOR", icon: Smartphone, title: "Live Units", badge: liveScreensCount > 0 },
@@ -2096,11 +2105,18 @@ export default function AdminPortal({
               <Trash2 size={16} className="relative z-10 group-hover:scale-125 transition-transform" />
             </button>
             <button
-              onClick={() => setActiveTab('TERMINAL')}
+              onClick={() => setActiveTab('TERMINAL_HUB')}
               className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center bg-sky-500 text-white shadow-lg shadow-sky-500/20 hover:bg-sky-600 transition-all"
               title="Terminal Controller"
             >
               <TerminalIcon size={16} />
+            </button>
+            <button
+              onClick={() => setActiveTab('REMOTE_CONNECT')}
+              className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center bg-amber-500 text-white shadow-lg shadow-amber-500/20 hover:bg-amber-600 transition-all"
+              title="Remote Connect Center"
+            >
+              <Server size={16} />
             </button>
             <button
               onClick={onLogout}

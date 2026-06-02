@@ -16,31 +16,26 @@ export default async function handler(req: any, res: any) {
     const code_verifier = crypto.randomBytes(32).toString('base64url');
     const code_challenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 
-    // Store auth state in Firestore reliably
+    console.log('[PKCE AUDIT] Generated verifier:', code_verifier);
+    console.log('[PKCE AUDIT] Generated challenge:', code_challenge);
+    console.log('[PKCE AUDIT] Length of verifier:', code_verifier.length);
+
+    // Store auth state in Firestore
     if (isAdminAuthReady) {
         await dbAdm.collection('canvaPendingAuth').doc(state).set({
             code_verifier,
+            createdAt: Date.now(),
             expiresAt: Date.now() + 3600000
         });
 
         // Verify write
         const verifyDoc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
         if (!verifyDoc.exists || verifyDoc.data()?.code_verifier !== code_verifier) {
-            throw new Error('Failed to verify Firestore auth state write.');
+            return res.status(500).json({ error: 'Failed to create pending OAuth session' });
         }
     } else {
-        throw new Error('Firestore is not ready. Cannot proceed with OAuth.');
+        return res.status(500).json({ error: 'Firestore not ready for auth state storage.' });
     }
-
-    // Always set cookie headers for fallback
-    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000');
-    const secureFlag = isLocal ? '' : 'Secure; ';
-    const sameSite = isLocal ? 'Lax' : 'None';
-    res.setHeader('Set-Cookie', [
-      `canva_oauth_state=${encodeURIComponent(state)}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`,
-      `canva_code_verifier=${code_verifier}; Path=/; HttpOnly; ${secureFlag}SameSite=${sameSite}; Max-Age=3600`
-    ]);
 
     // Create redirect_uri
     const redirect_uri =

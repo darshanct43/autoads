@@ -1,17 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { dbAdm, isAdminAuthReady } from '../../lib/firebase-admin.js';
 
-function parseCookies(cookieHeader: string | undefined): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  if (!cookieHeader) return cookies;
-  cookieHeader.split(';').forEach(cookie => {
-    const parts = cookie.split('=');
-    if (parts.length >= 2) {
-      cookies[parts[0].trim()] = parts.slice(1).join('=').trim();
-    }
-  });
-  return cookies;
-}
 
 export default async function handler(req: any, res: any) {
   const state = req.query.state as string;
@@ -79,33 +68,28 @@ export default async function handler(req: any, res: any) {
         return renderError('Invalid state format: missing uid.');
     }
 
-    // Look up auth state in Firestore first
+    // Look up auth state in Firestore
     let code_verifier = '';
-    console.log('[CANVA OAUTH] Checking Firestore for state:', state, 'isAdminAuthReady:', isAdminAuthReady);
-    if (isAdminAuthReady) {
-      try {
+    
+    if (!isAdminAuthReady) {
+        return renderError('Internal Server Error: Firestore not ready.');
+    }
+    
+    try {
         const doc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
-        console.log('[CANVA OAUTH] Firestore doc exists:', doc.exists);
-        if (doc.exists) {
-          code_verifier = doc.data()?.code_verifier || '';
-          console.log('[CANVA OAUTH] Found code_verifier in Firestore');
-        } else {
-          console.log('[CANVA OAUTH] Document does not exist for state:', state);
+        if (!doc.exists) {
+            return res.status(400).send('Pending OAuth session not found');
         }
-      } catch (e) {
-        console.error('[CANVA OAUTH] Error reading Firestore:', e);
-      }
+        code_verifier = doc.data()?.code_verifier || '';
+    } catch (e) {
+        return renderError('Error reading pending OAuth session.');
     }
 
-    // Fallback to cookie if not found in Firestore
     if (!code_verifier) {
-      const cookies = parseCookies(req.headers.cookie);
-      console.log('[CANVA OAUTH] Debugging cookies:', {
-        allCookies: Object.keys(cookies),
-        codeVerifierPresentInCookies: !!cookies['canva_code_verifier']
-      });
-      code_verifier = cookies['canva_code_verifier'] || '';
+        return res.status(400).send('PKCE verifier missing');
     }
+
+    console.log('[PKCE AUDIT] Retrieved verifier:', code_verifier);
 
     const cookieStateRaw = undefined;
     const cookieStateDecoded = undefined;

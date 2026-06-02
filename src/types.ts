@@ -76,6 +76,33 @@ export interface AutoDevice {
   cityId?: string; // Scoped city
   franchiseId?: string; // Scoped franchise
   approvedBy?: string;
+  autoNumber?: string;
+  driverName?: string;
+  remoteUrl?: string;
+  vncSessionId?: string;
+  screenVersion?: string;
+  batteryLevel?: number;
+  lastHeartbeat?: string;
+  appVersion?: string;
+  storageUsedPercent?: number;
+  ramUsedPercent?: number;
+  cpuUsagePercent?: number;
+  deviceTemperature?: number;
+  chargingStatus?: string;
+  networkType?: string;
+  signalStrength?: number;
+}
+
+export interface DeviceTelemetry {
+  deviceId: string;
+  timestamp: string;
+  batteryLevel: number;
+  cpuUsagePercent: number;
+  ramUsedPercent: number;
+  storageUsedPercent: number;
+  temperature: number;
+  networkType: string;
+  signalStrength: number;
 }
 
 export interface SupportTicket {

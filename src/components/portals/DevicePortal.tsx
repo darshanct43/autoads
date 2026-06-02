@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
+import { firebaseService, AdCampaign, Driver, SafeRideSession } from '../../services/firebaseService';
 import { auth } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
 import { isSchoolTiming, filterAds } from '../smartAds/SmartAdEngine';
@@ -40,6 +40,12 @@ const getSafeUrl = (url: string | undefined | null) => {
   // Reject invalid HTML preview URLs that are accidentally supplied as campaign media
   if (cleaned.includes('aistudio.google.com') || cleaned.includes('showPreview=')) {
     console.warn("[DevicePortal] getSafeUrl rejected AI Studio preview page URL:", url);
+    return undefined;
+  }
+
+  // Block known broken or invalid media sources
+  if (cleaned.includes('assets.mixkit.co') || cleaned.includes('d3v3y4z5a6b7c8.cloudfront.net') || cleaned.includes('5f897ff02aa9')) {
+    console.warn("[DevicePortal] getSafeUrl rejected known broken media source:", url);
     return undefined;
   }
 
@@ -111,10 +117,17 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [activeRidePref, setActiveRidePref] = useState<any>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
   const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
+  const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
+    BrightnessManager.calculateBrightness('AUTO', 75, null)
+  );
+
+  // --- Family Safe Ride State ---
+  const [safeRideSession, setSafeRideSession] = useState<SafeRideSession | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
 
   // --- Recovered Hardware Controllers ---
   const [terminalVolume, setTerminalVolume] = useState<number>(75);
-  const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [isDeviceLocked, setIsDeviceLocked] = useState<boolean>(false);
   const [emergencyBroadcast, setEmergencyBroadcast] = useState<string | null>(null);
 
   // Synchronize terminal volume with video element volume
@@ -123,12 +136,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       const volFraction = Math.max(0, Math.min(100, terminalVolume)) / 100;
       videoRef.current.volume = volFraction;
     }
-  }, [terminalVolume, currentIndex]);
+  }, [terminalVolume]);
 
-  // --- Smart Brightness Mode logic ---
-  const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
-    BrightnessManager.calculateBrightness('AUTO', 75, null)
-  );
+  const [terminalsDump, setTerminalsDump] = useState('');
+  useEffect(() => {
+    firebaseService.getTerminals().then(t => setTerminalsDump(JSON.stringify(t)));
+  }, []);
 
   useEffect(() => {
     const updateBrightness = () => {
@@ -148,6 +161,18 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   }, []);
 
   // Sync ride preferences when activeTerminal is provisioned or manual terminalId is set
+  useEffect(() => {
+     if (!safeRideSession) return;
+     if (timeRemaining <= 0) {
+         setSafeRideSession(null);
+         return;
+     }
+     const timer = setInterval(() => {
+         setTimeRemaining(prev => Math.max(0, prev - 1));
+     }, 1000);
+     return () => clearInterval(timer);
+  }, [safeRideSession, timeRemaining]);
+
   useEffect(() => {
     const tid = activeTerminal?.id || terminalId;
     if (!tid) return;
@@ -351,11 +376,24 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
          setPlaylist([]);
          setStatusLogs(prev => ["SYS: CACHE PURGED", ...prev]);
       }
+      if (terminal?.remoteCommand === 'FAMILY_SAFE_RIDE') {
+          console.log("[CMD] Family Safe Ride Received:", terminal.remoteCommandData);
+          setSafeRideSession({ 
+              terminalId: activeTerminal.id, 
+              driverId: terminal.driverId,
+              vehicleNumber: terminal.vNo || 'N/A',
+              activatedAt: new Date(),
+              expiresAt: terminal.remoteCommandData.expiresAt,
+              active: true
+          });
+          const expires = new Date(terminal.remoteCommandData.expiresAt).getTime();
+          setTimeRemaining(Math.max(0, Math.floor((expires - Date.now()) / 1000)));
+      }
       if (terminal) {
          if (typeof terminal.volume === 'number') {
             setTerminalVolume(terminal.volume);
          }
-         setIsLocked(!!terminal.isLocked);
+         setIsDeviceLocked(!!terminal.isLocked);
          setEmergencyBroadcast(terminal.emergencyBroadcast || null);
       }
     });
@@ -430,11 +468,8 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           }
 
           // 5. Fallback: provision a brand new default demo terminal & driver!
-          console.log("[Terminal] No terminals or drivers exist in the system. Auto-creating a demo driver & terminal...");
-          const defaultDriverId = "DRV-DEMO-SYSTEM";
-          const { terminalId: tid } = await firebaseService.autoEnsureTerminalForDriver(defaultDriverId);
-          localStorage.setItem('auto_ads_terminal_id', tid);
-          await resumeTerminalSession(tid);
+          console.log("[Terminal] No terminals or drivers exist in the system. Registration required.");
+          setError("Terminal not registered. Please contact administrator.");
 
       } catch (err: any) {
           console.error("[Terminal] Auto activation sequence failed:", err);
@@ -446,6 +481,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Check shared preferences simulation (localStorage)
   useEffect(() => {
+    // Audit for and remove known demo terminal IDs
+    const currentTid = localStorage.getItem('auto_ads_terminal_id');
+    if (currentTid === 'DEMO-4729') {
+      console.warn("[Terminal] Detected demo terminal ID in storage, clearing...");
+      localStorage.removeItem('auto_ads_terminal_id');
+    }
+
     autoConnectDriver();
 
     const handleConnection = () => setOnline(navigator.onLine);
@@ -471,7 +513,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         if (typeof term.volume === 'number') {
           setTerminalVolume(term.volume);
         }
-        setIsLocked(!!term.isLocked);
+        setIsDeviceLocked(!!term.isLocked);
         setEmergencyBroadcast(term.emergencyBroadcast || null);
         
         // --- Simulated TeamViewer Auto ID Obtain ---
@@ -644,12 +686,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       
       // Auto-start is handled by the video tag having 'autoPlay'
       // If it's a static image, we need a timer.
-      if (!isVideo) {
-        const timer = setTimeout(() => {
-          setCurrentIndex(prev => (prev + 1) % playlist.length);
-        }, 10000); // 10s per static ad as requested
-        return () => clearTimeout(timer);
-      }
+      // If it's a video, we rely on onEnded, but add a fallback timer for safety.
+      
+      const adDuration = (currentAd?.duration || 10) * 1000;
+      const timer = setTimeout(() => {
+        setCurrentIndex(prev => (prev + 1) % playlist.length);
+      }, isVideo ? adDuration + 5000 : adDuration); // 5s extra for video safety
+      
+      return () => clearTimeout(timer);
     }
   }, [isLogged, playlist, currentIndex]);
 
@@ -742,7 +786,25 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none">
       {/* Locked Device Overlay */}
       <AnimatePresence>
-        {isLocked && (
+        {safeRideSession && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/98 backdrop-blur-xl z-[300] flex flex-col items-center justify-center p-8 text-center select-none"
+          >
+            <div className="max-w-md w-full bg-slate-900 border border-amber-500/20 rounded-[2rem] p-8 shadow-2xl space-y-6">
+                <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 animate-pulse border border-amber-500/25 mx-auto">
+                    <Shield size={36} />
+                </div>
+                <h1 className="text-2xl font-black italic uppercase tracking-wider text-amber-500">FAMILY SAFE RIDE ACTIVE</h1>
+                <p className="text-slate-400 text-sm">Ride protected</p>
+                <p className="text-slate-400 text-sm">Emergency support available</p>
+                <div className="text-4xl font-black text-white">{Math.floor(timeRemaining / 60)}:{String(timeRemaining % 60).padStart(2, '0')}</div>
+            </div>
+          </motion.div>
+        )}
+        {isDeviceLocked && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -846,95 +908,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       <div className="absolute inset-0 pointer-events-none z-[101] opacity-[0.02] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
 
       {/* GLOBAL HUD LAYER */}
-      <div className="absolute inset-0 z-[60] pointer-events-none p-4 md:p-10 flex flex-col justify-between">
-        {/* Top Header */}
-        <div className="flex justify-between items-start">
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3 md:gap-4 bg-black/40 backdrop-blur-md p-2 md:p-3 rounded-2xl border border-white/5"
-          >
-            <div className="w-10 h-10 md:w-14 md:h-14 bg-white/5 backdrop-blur-xl rounded-xl md:rounded-2xl flex items-center justify-center border border-white/10 group pointer-events-auto cursor-pointer relative overflow-hidden" onClick={fetchAdsManual}>
-              {driver?.profileImage ? (
-                <img src={driver.profileImage} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Profile" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="text-white text-sm md:text-lg font-black italic">A<span className="text-amber-500">A</span></div>
-              )}
-              <div className={cn("w-1.5 h-1.5 md:w-2 md:h-2 rounded-full absolute top-1.5 right-1.5 md:top-2 md:right-2 z-20 shadow-lg", online ? "bg-green-500 animate-pulse shadow-green-500/50" : "bg-red-500 shadow-red-500/50")} />
-              {loading && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
-                   <RefreshCw className="text-amber-500 animate-spin" size={16} />
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-0.5 md:mb-1">
-                <p className="text-[9px] md:text-[11px] font-black text-white uppercase tracking-[0.1em] md:tracking-[0.2em] leading-none">
-                  {driver?.name?.split(' ')[0] || 'Authorized'}
-                </p>
-                <div className="px-1 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[6px] md:text-[7px] font-black text-green-500 uppercase tracking-normal">
-                  VERIFIED
-                </div>
-              </div>
-              <p className="text-[7px] md:text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                ID: <span className="text-amber-500/80">{driver?.driverCode || 'UNIDENTIFIED'}</span> 
-              </p>
-            </div>
-          </motion.div>
-
-          <motion.div 
-             initial={{ opacity: 0, x: 20 }}
-             animate={{ opacity: 1, x: 0 }}
-             className="flex items-center gap-2 md:gap-4 pointer-events-auto"
-          >
-            {localStorage.getItem('auto_ads_is_terminal') === 'true' && (
-              <button 
-                onClick={handleExitDisplayMode}
-                className="px-3 md:px-5 py-2 md:py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
-                title="Back to Dashboard"
-              >
-                <Smartphone size={12} className="md:w-[14px]" />
-                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden md:inline">Dashboard</span>
-              </button>
-            )}
-            <button 
-              onClick={() => onLogout()}
-              className="px-3 md:px-5 py-2 md:py-2.5 bg-slate-500/10 hover:bg-red-500/20 border border-white/5 text-slate-400 hover:text-red-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
-              title="Sign Out"
-            >
-               <LogOut size={12} className="group-hover:rotate-12 transition-transform md:w-[14px]" />
-               <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden md:inline">Sign Out</span>
-            </button>
-            <div className="flex gap-2">
-               <button 
-                 onClick={() => {
-                   fetchAdsManual();
-                   setStatusLogs(prev => ["CMD: Force check requested", ...prev.slice(0, 5)]);
-                 }}
-                 className="w-9 h-9 md:w-11 md:h-11 bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-all group shadow-lg"
-               >
-                 <RefreshCw size={14} className={cn(loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500')} />
-               </button>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Bottom Footer Info */}
-        <div className="flex justify-between items-end flex-row-reverse pb-2 md:pb-0 pointer-events-auto">
-           <div className="flex items-center gap-3">
-              <button 
-                 onClick={toggleFullscreen}
-                 className="bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-2 hover:bg-white/5 transition-all group"
-              >
-                 <Maximize size={12} className="text-amber-500 group-hover:scale-110 transition-transform" />
-                 <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Kiosk Force</span>
-              </button>
-              <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-3 md:px-5 py-1.5 md:py-2.5 rounded-xl border border-white/5">
-                <div className="w-1 h-1 md:w-1.5 md:h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                <p className="text-[6px] md:text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] md:tracking-[0.3em] font-mono">NODE_ACTIVE // SESSION_SECURE</p>
-              </div>
-           </div>
-        </div>
+      <div className="absolute inset-0 z-[60] pointer-events-none p-4 flex justify-end items-end">
       </div>
 
       {/* CONTENT LAYER */}
@@ -1143,88 +1117,9 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/20 z-10 pointer-events-none" />
 
               {/* Scan to customize overlay - emotional, family-friendly, premium smart mobility design */}
-              <SmartPassengerQR deviceId={activeTerminal?.id || terminalId || "ACTIVE"} />
+              <SmartPassengerQR deviceId={activeTerminal?.id || terminalId || "ACTIVE"} onLogout={onLogout} />
 
-              {/* Dynamic Mode Notification Banners */}
-              {(isSchoolActive || activeRidePref || brightnessProfile || terminalVolume !== undefined) && (
-                <div className="absolute top-12 left-12 z-50 flex flex-col gap-2 pointer-events-none text-left">
-                  {/* School Safe mode timing banner */}
-                  {isSchoolActive && (
-                    <motion.div 
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="px-4 py-2.5 bg-sky-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-sky-400 font-sans"
-                    >
-                      <School size={14} className="animate-bounce" />
-                      <div>
-                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">School Zone Timing Active</p>
-                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Children Safe Mode Automatically Triggered</p>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Active manual overrides banner */}
-                  {activeRidePref && (
-                    <motion.div 
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="px-4 py-2.5 bg-green-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-emerald-400 font-sans"
-                    >
-                      <Shield size={14} />
-                      <div>
-                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
-                          {activeRidePref.driverOverrideMode ? `${activeRidePref.driverOverrideMode.replace('_', ' ')} OVERRIDE ACTIVE` : 'PASSENGER PREFERENCES ACTIVE'}
-                        </p>
-                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Ad feeds filtered dynamically for this ride</p>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Smart Auto Brightness HUD banner */}
-                  {brightnessProfile && (
-                    <motion.div 
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="px-4 py-2.5 bg-slate-950/85 backdrop-blur-md text-white rounded-2xl flex items-center gap-2 shadow-lg border border-white/10 font-sans"
-                    >
-                      <Sun size={14} className={cn("text-amber-400", brightnessProfile.level < 40 ? "animate-pulse" : "")} />
-                      <div>
-                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
-                          Auto-Brightness: <span className="text-amber-400 font-black">{brightnessProfile.level}%</span>
-                        </p>
-                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-400 leading-none mt-0.5 flex items-center gap-1.5 font-mono">
-                          <span>{brightnessProfile.label}</span>
-                          <span className="w-1 h-1 rounded-full bg-slate-600" />
-                          <span>LDR: {brightnessProfile.simulatedLux} LUX</span>
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Volume Level HUD banner */}
-                  {terminalVolume !== undefined && (
-                    <motion.div 
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="px-4 py-2.5 bg-slate-950/85 backdrop-blur-md text-white rounded-2xl flex items-center gap-2 shadow-lg border border-white/10 font-sans"
-                    >
-                      {terminalVolume === 0 ? (
-                        <VolumeX size={14} className="text-red-400" />
-                      ) : (
-                        <Volume2 size={14} className="text-emerald-400" />
-                      )}
-                      <div>
-                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
-                          Terminal Volume: <span className="text-emerald-400 font-black">{terminalVolume}%</span>
-                        </p>
-                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-400 leading-none mt-0.5 flex items-center gap-1.5 font-mono">
-                          <span>{terminalVolume === 0 ? "MUTED" : terminalVolume > 70 ? "HIGH" : terminalVolume > 30 ? "MEDIUM" : "LOW"}</span>
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-                </div>
-              )}
+              {/* Dynamic Mode Notification Banners - REMOVED */}
 
               <div 
                 className={cn(
@@ -1247,22 +1142,15 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                     muted={terminalVolume === 0}
                     loop={playlist.length === 1}
                     playsInline
+                    crossOrigin="anonymous"
                     className="w-full h-full object-cover"
                     src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || ""}
                     onEnded={handleAdComplete}
                     onError={(e) => {
                       const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
                       console.error("[Terminal] Video playback error:", urlToLog);
-                      if (videoRef.current && videoRef.current.src !== '/uploads/1779860520885-1000434856.mp4') {
-                        console.warn("[Terminal] Attempting fallback to sample video...");
-                        videoRef.current.src = '/uploads/1779860520885-1000434856.mp4';
-                        videoRef.current.play().catch(pErr => {
-                          console.error("[Terminal] Fallback also failed or was blocked by gesture requirement:", pErr);
-                          handleAdComplete();
-                        });
-                      } else {
-                        handleAdComplete();
-                      }
+                      // Skip fallback entirely to prevent cascading errors if the sample video itself is invalid
+                      handleAdComplete();
                     }}
                   />
                 ) : (

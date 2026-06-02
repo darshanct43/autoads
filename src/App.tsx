@@ -13,6 +13,7 @@ import SupportPortal from './components/portals/SupportPortal';
 import DevicePortal from './components/portals/DevicePortal';
 import FranchisePortal from './components/portals/FranchisePortal';
 import PassengerPortal from './components/smartAds/PassengerPortal';
+import SafeRideView from './components/public/SafeRideView';
 import PaymentSuccess from './components/common/PaymentSuccess';
 import BootAnimation from './components/common/BootAnimation';
 import BrandIntroduction from './components/common/BrandIntroduction';
@@ -31,6 +32,15 @@ import StrictVerificationSystem from './components/common/StrictVerificationSyst
 import { offlineStorageService } from './services/offlineStorageService';
 
 export default function App() {
+  const [safeRideId, setSafeRideId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+        const path = window.location.pathname;
+        if (path.startsWith('/safe-ride/')) {
+            return path.split('/safe-ride/')[1];
+        }
+    }
+    return null;
+  });
   const [role, setRole] = useState<UserRole | null>(() => {
     // Initial check for device simulator session
     if (typeof window !== 'undefined') {
@@ -105,6 +115,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    firebaseService.getTerminals().then(terminals => console.log("[DEBUG] Real Terminals:", terminals));
     firebaseService.runFranchiseMigration();
 
     const handleHashChange = () => {
@@ -261,65 +272,69 @@ export default function App() {
 
   return (
     <div className="min-h-screen font-sans selection:bg-amber-500/30 overflow-x-hidden">
-      <AnimatePresence mode="wait">
-        {isPassenger ? (
-          <motion.div
-            key="passenger"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <PassengerPortal onClose={() => setIsPassenger(false)} />
-          </motion.div>
-        ) : (
-          <>
-            {systemState === 'BOOT' && (
-              <BootAnimation onComplete={handleBootComplete} />
-            )}
+      {safeRideId ? (
+        <SafeRideView terminalId={safeRideId} />
+      ) : (
+        <AnimatePresence mode="wait">
+          {isPassenger ? (
+            <motion.div
+              key="passenger"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <PassengerPortal onClose={() => setIsPassenger(false)} />
+            </motion.div>
+          ) : (
+            <>
+              {systemState === 'BOOT' && (
+                <BootAnimation onComplete={handleBootComplete} />
+              )}
 
-            {systemState === 'INTRO' && (
-              <BrandIntroduction onComplete={handleIntroComplete} />
-            )}
+              {systemState === 'INTRO' && (
+                <BrandIntroduction onComplete={handleIntroComplete} />
+              )}
 
-            {systemState === 'AUTH' && (
-              <motion.div
-                key="auth"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                <Auth onLogin={handleLogin} />
-              </motion.div>
-            )}
+              {systemState === 'AUTH' && (
+                <motion.div
+                  key="auth"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <Auth onLogin={handleLogin} />
+                </motion.div>
+              )}
 
-            {systemState === 'PORTAL' && role && (
-              <motion.div
-                key="portal"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                className="relative"
-              >
-                <ErrorBoundary componentName={`${role} Portal`}>
-                  {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-                  {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
-                  {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
-                  {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
-                  {(role === 'FRANCHISE_OWNER' || role === 'FRANCHISE_STAFF') && <FranchisePortal onLogout={handleLogout} />}
-                  {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
-                </ErrorBoundary>
-                
-                {/* Brand Popup (Mayaan) */}
-                <BrandPopup />
-              </motion.div>
-            )}
+              {systemState === 'PORTAL' && role && (
+                <motion.div
+                  key="portal"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="relative"
+                >
+                  <ErrorBoundary componentName={`${role} Portal`}>
+                    {role === 'ADMIN' && <AdminPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
+                    {role === 'DRIVER' && <DriverPortal onLogout={handleLogout} />}
+                    {role === 'CUSTOMER' && <CustomerPortal onLogout={handleLogout} />}
+                    {(role === 'STAFF' || role === 'SUPPORT') && <SupportPortal onRoleJump={handleRoleJump} onLogout={handleLogout} />}
+                    {(role === 'FRANCHISE_OWNER' || role === 'FRANCHISE_STAFF') && <FranchisePortal onLogout={handleLogout} />}
+                    {role === 'DEVICE' && <DevicePortal onLogout={handleLogout} />}
+                  </ErrorBoundary>
+                  
+                  {/* Brand Popup (Mayaan) */}
+                  <BrandPopup />
+                </motion.div>
+              )}
 
-            {systemState === 'PAYMENT_SUCCESS' && (
-              <PaymentSuccess />
-            )}
-          </>
-        )}
-      </AnimatePresence>
+              {systemState === 'PAYMENT_SUCCESS' && (
+                <PaymentSuccess />
+              )}
+            </>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }

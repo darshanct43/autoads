@@ -187,7 +187,7 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
             {/* Chat Area */}
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 custom-scrollbar bg-[radial-gradient(circle_at_50%_0%,rgba(245,158,11,0.03),transparent)] scroll-smooth pt-4">
               {messages.map((m, i) => (
-                <div key={i} className={cn(
+                <div key={`${m.role}-${i}`} className={cn(
                   "flex flex-col max-w-[92%]",
                   m.role === "user" ? "ml-auto items-end" : "mr-auto items-start"
                 )}>
@@ -232,7 +232,7 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
                  { label: "New Offers", prompt: "Are there any high-paying campaigns available?" }
                ]).map((action, idx) => (
                  <button
-                   key={idx}
+                   key={action.label}
                    onClick={() => handleQuickAction(action.prompt)}
                    className="whitespace-nowrap px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-[8px] font-black uppercase tracking-widest text-amber-500 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all shadow-xl active:scale-95"
                  >
