@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { dbAdm } from '../../lib/firebase-admin.js';
 
 export default async function handler(req: any, res: any) {
   try {

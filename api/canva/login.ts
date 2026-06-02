@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { dbAdm, isAdminAuthReady } from '../../lib/firebase-admin.js';
+import { s3Service } from '../../src/services/s3Service.js';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -20,21 +20,16 @@ export default async function handler(req: any, res: any) {
     console.log('[PKCE AUDIT] Generated challenge:', code_challenge);
     console.log('[PKCE AUDIT] Length of verifier:', code_verifier.length);
 
-    // Store auth state in Firestore
-    if (isAdminAuthReady) {
-        await dbAdm.collection('canvaPendingAuth').doc(state).set({
+    // Store auth state in S3
+    try {
+        const data = JSON.stringify({
             code_verifier,
             createdAt: Date.now(),
             expiresAt: Date.now() + 3600000
         });
-
-        // Verify write
-        const verifyDoc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
-        if (!verifyDoc.exists || verifyDoc.data()?.code_verifier !== code_verifier) {
-            return res.status(500).json({ error: 'Failed to create pending OAuth session' });
-        }
-    } else {
-        return res.status(500).json({ error: 'Firestore not ready for auth state storage.' });
+        await s3Service.uploadFile(`canva/pendingAuth/${state}.json`, Buffer.from(data), 'application/json');
+    } catch (e) {
+        return res.status(500).json({ error: 'Failed to create pending OAuth session' });
     }
 
     // Create redirect_uri

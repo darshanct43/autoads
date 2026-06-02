@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { dbAdm, isAdminAuthReady } from '../../lib/firebase-admin.js';
+import { s3Service } from '../../src/services/s3Service.js';
 
 
 export default async function handler(req: any, res: any) {
@@ -68,21 +68,15 @@ export default async function handler(req: any, res: any) {
         return renderError('Invalid state format: missing uid.');
     }
 
-    // Look up auth state in Firestore
+    // Look up auth state in S3
     let code_verifier = '';
     
-    if (!isAdminAuthReady) {
-        return renderError('Internal Server Error: Firestore not ready.');
-    }
-    
     try {
-        const doc = await dbAdm.collection('canvaPendingAuth').doc(state).get();
-        if (!doc.exists) {
-            return res.status(400).send('Pending OAuth session not found');
-        }
-        code_verifier = doc.data()?.code_verifier || '';
+        const buffer = await s3Service.getFile(`canva/pendingAuth/${state}.json`);
+        const data = JSON.parse(buffer.toString());
+        code_verifier = data.code_verifier || '';
     } catch (e) {
-        return renderError('Error reading pending OAuth session.');
+        return renderError('Pending OAuth session not found or error reading session.');
     }
 
     if (!code_verifier) {
@@ -184,15 +178,12 @@ export default async function handler(req: any, res: any) {
     const data = await response.json();
     console.log('[CANVA OAUTH] Token exchange successful');
 
-    // Clean up firestore state
-    if (isAdminAuthReady) {
-        await dbAdm.collection('canvaPendingAuth').doc(state).delete();
-    }
+    // Clean up S3 state
+    await s3Service.deleteFile(`canva/pendingAuth/${state}.json`);
 
-    // Store in Firestore gracefully if Admin SDK is authenticated
-    if (isAdminAuthReady) {
-      try {
-        await dbAdm.collection('canvaTokens').doc(uid).set({
+    // Store in S3
+    try {
+        const tokenContent = JSON.stringify({
           uid,
           access_token: data.access_token,
           refresh_token: data.refresh_token || '',
@@ -203,10 +194,10 @@ export default async function handler(req: any, res: any) {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
-        console.log(`[CANVA OAUTH] Backend Admin SDK successfully stored token for uid=${uid}`);
-      } catch (dbError: any) {
-        console.error('[CANVA OAUTH] Failed to store token in Firestore:', dbError);
-      }
+        await s3Service.uploadFile(`canva/tokens/${uid}.json`, Buffer.from(tokenContent), 'application/json');
+        console.log(`[CANVA OAUTH] Successfully stored token for uid=${uid}`);
+    } catch (err: any) {
+        console.error('[CANVA OAUTH] Failed to store token in S3:', err);
     }
 
     // Clear authentication state cookies

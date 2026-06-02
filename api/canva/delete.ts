@@ -1,4 +1,3 @@
-import { dbAdm } from '../../lib/firebase-admin.js';
 import { s3Service } from '../../src/services/s3Service.js';
 
 export default async function handler(req: any, res: any) {
@@ -6,20 +5,19 @@ export default async function handler(req: any, res: any) {
   
   try {
     const { id } = req.body;
-    const mediaRef = dbAdm.collection('mediaAssets').doc(id);
-    const mediaDoc = await mediaRef.get();
     
-    if (!mediaDoc.exists) return res.status(404).json({ error: 'Asset not found' });
+    // Read meta data from S3
+    const buffer = await s3Service.getFile(`canva/mediaAssets/${id}.json`);
+    const data = JSON.parse(buffer.toString());
     
-    const data = mediaDoc.data();
     if (data?.s3Key) {
         await s3Service.deleteFile(data.s3Key);
     }
     
-    await mediaRef.delete();
+    await s3Service.deleteFile(`canva/mediaAssets/${id}.json`);
     
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Asset not found or error deleting' });
   }
 }

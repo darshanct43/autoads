@@ -1,15 +1,13 @@
-import { db } from '../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
-
-// In production, this would be an API call to a backend service that
-// securely handles the Canva OAuth credentials.
-// For now, following the pattern of accessing token data from firestore.
+import { s3Service } from './s3Service';
 
 export const canvaService = {
   async getCanvaToken(uid: string) {
-    const tokenDoc = await getDoc(doc(db, 'canvaTokens', uid));
-    if (!tokenDoc.exists()) throw new Error('Canva not connected');
-    return tokenDoc.data();
+    try {
+      const tokenBuffer = await s3Service.getFile(`canva/tokens/${uid}.json`);
+      return JSON.parse(tokenBuffer.toString());
+    } catch (e) {
+      throw new Error('Canva not connected');
+    }
   },
 
   async listDesigns(token: string) {
