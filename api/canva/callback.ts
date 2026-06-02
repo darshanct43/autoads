@@ -71,11 +71,16 @@ export default async function handler(req: any, res: any) {
     // Look up auth state in S3
     let code_verifier = '';
     
+    console.log(`[CANVA CALLBACK FORENSIC] State: ${JSON.stringify(state)}`);
+    const key = `canva/pendingAuth/${state}.json`;
+    console.log(`[CANVA CALLBACK FORENSIC] Key requested: ${key}`);
+    
     try {
-        const buffer = await s3Service.getFile(`canva/pendingAuth/${state}.json`);
+        const buffer = await s3Service.getFile(key);
         const data = JSON.parse(buffer.toString());
         code_verifier = data.code_verifier || '';
-    } catch (e) {
+    } catch (e: any) {
+        console.log(`[CANVA CALLBACK FORENSIC] AWS Error: ${JSON.stringify(e)}`);
         return renderError('Pending OAuth session not found or error reading session.');
     }
 

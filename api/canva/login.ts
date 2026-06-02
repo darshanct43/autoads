@@ -27,7 +27,8 @@ export default async function handler(req: any, res: any) {
             createdAt: Date.now(),
             expiresAt: Date.now() + 3600000
         });
-        await s3Service.uploadFile(`canva/pendingAuth/${state}.json`, Buffer.from(data), 'application/json');
+        const key = `canva/pendingAuth/${state}.json`;
+        await s3Service.uploadFile(key, Buffer.from(data), 'application/json');
     } catch (e) {
         return res.status(500).json({ error: 'Failed to create pending OAuth session' });
     }
