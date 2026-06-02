@@ -896,6 +896,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             const designerCharge = needDesigner ? 1000 : 0;
             const totalAmount = baseAmount + designerCharge;
 
+            console.log("BEFORE_VERIFY");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -908,6 +909,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 planData: { amount: totalAmount }
               })
             });
+            console.log("AFTER_VERIFY");
             const verifyData = await verifyRes.json();
             console.log("STEP 3");
             console.log("VERIFY RESULT:", verifyData);

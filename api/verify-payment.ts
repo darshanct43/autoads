@@ -36,10 +36,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // CAPTURE PAYMENT
       const razorpay = new Razorpay({ key_id, key_secret });
+      console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
       try {
         await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
       } catch (err: any) {
-        if (err?.message?.includes("This payment has already been captured")) {
+        console.log("ERR RAW:", err);
+        console.log("ERR JSON:", JSON.stringify(err, null, 2));
+        console.log("ERR MESSAGE:", err?.message);
+        console.log("ERR DESCRIPTION:", err?.description);
+        console.log("ERR ERROR:", err?.error);
+        console.log("ERR ERROR DESCRIPTION:", err?.error?.description);
+
+        console.error("[RAZORPAY] Capture failed:", err);
+        
+        // Sometimes the error details are hidden in err.error
+        const errorMessage = (err?.message || err?.error?.description || '').toLowerCase();
+        
+        if (errorMessage.includes("already been captured") || errorMessage.includes("payment has already been captured")) {
+          console.log("ALREADY_CAPTURED_BRANCH_REACHED");
           console.log("[RAZORPAY] Payment already captured, proceeding.");
         } else {
           throw err;
