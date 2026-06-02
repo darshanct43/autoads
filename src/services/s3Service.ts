@@ -2,7 +2,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function getEffectiveBucketName(): string {
-  const bucket = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || 'darshan-autoads-storage';
+  const bucket = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || process.env.AWS_BUCKET_NAME || 'darshan-autoads-storage';
   return bucket;
 }
 
@@ -26,6 +26,7 @@ export const s3Service = {
   async uploadFile(fileName: string, buffer: Buffer, contentType: string) {
     validateAWS();
     const bucket = getEffectiveBucketName();
+    console.log(`[S3 FORENSIC] Uploading to Bucket: ${bucket}, Key: ${fileName}`);
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: fileName,
@@ -40,6 +41,7 @@ export const s3Service = {
   async getFile(fileName: string): Promise<Buffer> {
     validateAWS();
     const bucket = getEffectiveBucketName();
+    console.log(`[S3 FORENSIC] Getting from Bucket: ${bucket}, Key: ${fileName}`);
     const command = new GetObjectCommand({
       Bucket: bucket,
       Key: fileName,

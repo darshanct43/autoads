@@ -10,19 +10,19 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 // For simplicity and since paths are known, we'll manually register them
 // or use a dynamic router.
 
-import healthHandler from '../backend/health';
-import chatHandler from '../backend/chat';
-import createOrderHandler from '../api/create-order';
-import verifyPaymentHandler from '../api/verify-payment';
-import paymentStatusHandler from '../backend/payment-status';
-import uploadHandler from '../backend/upload';
-import otpSendHandler from '../backend/otp/send';
-import otpVerifyHandler from '../backend/otp/verify';
-import demoSetupHandler from '../backend/demo/setup';
-import activateCampaignHandler from '../backend/debug/activate-campaign';
-import canvaLoginHandler from '../api/canva/login';
-import canvaCallbackHandler from '../api/canva/callback';
-import canvaDebugHandler from '../api/canva/debug';
+import healthHandler from './backend/health';
+import chatHandler from './backend/chat';
+import createOrderHandler from './api/create-order';
+import verifyPaymentHandler from './api/verify-payment';
+import paymentStatusHandler from './backend/payment-status';
+import uploadHandler from './backend/upload';
+import otpSendHandler from './backend/otp/send';
+import otpVerifyHandler from './backend/otp/verify';
+import demoSetupHandler from './backend/demo/setup';
+import activateCampaignHandler from './backend/debug/activate-campaign';
+import canvaLoginHandler from './api/canva/login';
+import canvaCallbackHandler from './api/canva/callback';
+import canvaDebugHandler from './api/canva/debug';
 
 async function startServer() {
   const app = express();

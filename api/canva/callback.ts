@@ -3,6 +3,14 @@ import { s3Service } from '../../src/services/s3Service.js';
 
 
 export default async function handler(req: any, res: any) {
+  // FORENSIC ENV PROOF
+  console.log('[FORENSIC ENV] AWS_REGION:', !!process.env.AWS_REGION ? 'PRESENT' : 'MISSING');
+  console.log('[FORENSIC ENV] AWS_ACCESS_KEY_ID:', !!process.env.AWS_ACCESS_KEY_ID ? 'PRESENT' : 'MISSING');
+  console.log('[FORENSIC ENV] AWS_SECRET_ACCESS_KEY:', !!process.env.AWS_SECRET_ACCESS_KEY ? 'PRESENT' : 'MISSING');
+  console.log('[FORENSIC ENV] AWS_BUCKET_NAME:', !!process.env.AWS_BUCKET_NAME ? 'PRESENT' : 'MISSING');
+  console.log('[FORENSIC ENV] AWS_S3_BUCKET:', !!process.env.AWS_S3_BUCKET ? 'PRESENT' : 'MISSING');
+  console.log('[FORENSIC ENV] AWS_S3_BUCKET_NAME:', !!process.env.AWS_S3_BUCKET_NAME ? 'PRESENT' : 'MISSING');
+
   const state = req.query.state as string;
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
