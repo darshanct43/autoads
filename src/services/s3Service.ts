@@ -53,19 +53,25 @@ export const s3Service = {
     validateAWS();
     const bucket = getEffectiveBucketName();
     console.log(`[S3 FORENSIC] Getting from Bucket: ${bucket}, Key: ${fileName}`);
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: fileName,
-    });
-    const response = await s3Client.send(command);
-    const streamToBuffer = (stream: any) =>
-      new Promise<Buffer>((resolve, reject) => {
-        const chunks: any[] = [];
-        stream.on('data', (chunk: any) => chunks.push(chunk));
-        stream.on('error', reject);
-        stream.on('end', () => resolve(Buffer.concat(chunks)));
+    try {
+      const command = new GetObjectCommand({
+        Bucket: bucket,
+        Key: fileName,
       });
-    return await streamToBuffer(response.Body);
+      const response = await s3Client.send(command);
+      console.log(`[S3 FORENSIC] Got response for Key: ${fileName}`);
+      const streamToBuffer = (stream: any) =>
+        new Promise<Buffer>((resolve, reject) => {
+          const chunks: any[] = [];
+          stream.on('data', (chunk: any) => chunks.push(chunk));
+          stream.on('error', reject);
+          stream.on('end', () => resolve(Buffer.concat(chunks)));
+        });
+      return await streamToBuffer(response.Body);
+    } catch (e) {
+      console.error(`[S3 FORENSIC] Error Getting Key: ${fileName}, Error:`, e);
+      throw e;
+    }
   },
 
   async deleteFile(fileName: string) {

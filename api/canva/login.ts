@@ -12,7 +12,8 @@ export default async function handler(req: any, res: any) {
 
     // Generate random secure state and code verifier for PKCE, including uid in state
     const randomPart = crypto.randomBytes(24).toString('hex');
-    const state = `${randomPart}:${uid}`;
+    const originalState = `${randomPart}:${uid}`;
+    const state = Buffer.from(originalState).toString('base64url');
     const code_verifier = crypto.randomBytes(32).toString('base64url');
     const code_challenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 

@@ -11,7 +11,8 @@ export default async function handler(req: any, res: any) {
   console.log("AWS_S3_BUCKET", !!process.env.AWS_S3_BUCKET);
   console.log("AWS_S3_BUCKET_NAME", !!process.env.AWS_S3_BUCKET_NAME);
 
-  const state = req.query.state as string;
+  const stateRaw = req.query.state as string;
+  const state = Buffer.from(stateRaw, 'base64url').toString('utf8');
   const code = req.query.code as string;
   const errorParam = req.query.error as string;
 
