@@ -40,45 +40,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { FieldValue } = admin.firestore;
 
-    try {
-      const paymentRecord = {
-        transactionId: razorpay_payment_id,
-        orderId: razorpay_order_id,
-        amount: planData?.amount || 0,
-        status: 'SUCCESS',
-        paymentMethod: 'razorpay',
-        createdAt: FieldValue.serverTimestamp(),
-        verifiedAt: FieldValue.serverTimestamp(),
-        customerId: uid || 'UNKNOWN',
-        campaignId: finalCampaignId || campaignData?.title || 'PENDING',
-        isWebhookTriggered: false
-      };
-      
-      await dbAdm.collection('payments').add(paymentRecord);
+    // Run Firestore operations with a timeout to avoid hanging the API response
+    const firestorePromise = (async () => {
+      try {
+        const paymentRecord = {
+          transactionId: razorpay_payment_id,
+          orderId: razorpay_order_id,
+          amount: planData?.amount || 0,
+          status: 'SUCCESS',
+          paymentMethod: 'razorpay',
+          createdAt: FieldValue.serverTimestamp(),
+          verifiedAt: FieldValue.serverTimestamp(),
+          customerId: uid || 'UNKNOWN',
+          campaignId: finalCampaignId || campaignData?.title || 'PENDING',
+          isWebhookTriggered: false
+        };
+        
+        await dbAdm.collection('payments').add(paymentRecord);
 
-      if (finalCampaignId) {
-          await dbAdm.collection('campaigns').doc(finalCampaignId).set({
-            status: 'ACTIVE',
-            paymentStatus: 'PAID',
-            paymentReceived: true,
-            updatedAt: FieldValue.serverTimestamp()
-          }, { merge: true });
-      } else if (campaignData) {
-          await dbAdm.collection('campaigns').add({
-            ...campaignData,
-            status: 'ACTIVE',
-            paymentStatus: 'PAID',
-            paymentReceived: true,
-            updatedAt: FieldValue.serverTimestamp()
-          });
+        if (finalCampaignId) {
+            await dbAdm.collection('campaigns').doc(finalCampaignId).set({
+              status: 'ACTIVE',
+              paymentStatus: 'PAID',
+              paymentReceived: true,
+              updatedAt: FieldValue.serverTimestamp()
+            }, { merge: true });
+        } else if (campaignData) {
+            await dbAdm.collection('campaigns').add({
+              ...campaignData,
+              status: 'ACTIVE',
+              paymentStatus: 'PAID',
+              paymentReceived: true,
+              updatedAt: FieldValue.serverTimestamp()
+            });
+        }
+      } catch (dbError: any) {
+        if (dbError?.message?.includes('PERMISSION_DENIED') || !process.env.FIREBASE_SERVICE_ACCOUNT) {
+           // Silently proceed if admin SDK lacks valid credentials
+        } else {
+           console.error("Firestore error during payment verification:", dbError.message);
+        }
       }
-    } catch (dbError: any) {
-      if (dbError?.message?.includes('PERMISSION_DENIED') || !process.env.FIREBASE_SERVICE_ACCOUNT) {
-         // Silently proceed if admin SDK lacks valid credentials
-      } else {
-         console.error("Firestore error during payment verification:", dbError.message);
-      }
-    }
+    })();
+
+    // Timeout Firestore after 5 seconds to ensure API response is fast
+    await Promise.race([
+      firestorePromise,
+      new Promise((resolve) => setTimeout(() => {
+        console.warn("Firestore operations timed out in verify-payment");
+        resolve(null);
+      }, 5000))
+    ]);
 
     res.status(200).json({ success: true, status: "SUCCESS" });
   } catch (error: any) {

@@ -886,10 +886,16 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         // redirect: true, // Removed to prevent interference with handler
         handler: async function (response: any) {
           alert("RAZORPAY CALLBACK FIRED");
+          console.log("STEP 1");
           console.log("RAZORPAY CALLBACK SUCCESS", response);
           localStorage.setItem("payment_pending", currentOrderData.id);
+          console.log("STEP 2");
           setLoading(true);
           try {
+            const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+            const designerCharge = needDesigner ? 1000 : 0;
+            const totalAmount = baseAmount + designerCharge;
+
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -898,10 +904,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               body: JSON.stringify({
                 ...response,
                 uid: user?.uid,
-                campaignId: createdCampaignId
+                campaignId: createdCampaignId,
+                planData: { amount: totalAmount }
               })
             });
             const verifyData = await verifyRes.json();
+            console.log("STEP 3");
             console.log("VERIFY RESULT:", verifyData);
 
             if (verifyData.success) {
