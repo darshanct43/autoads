@@ -908,6 +908,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               localStorage.removeItem("payment_pending");
               setShowPaymentState(false);
               triggerToast("Payment successful!", "success");
+              window.location.hash = 'payment-success';
               dispatch({ type: 'SET_ACTIVE' });
             } else {
               throw new Error(verifyData.error || "Verification failed");
