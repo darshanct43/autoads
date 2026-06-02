@@ -36,7 +36,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // CAPTURE PAYMENT
       const razorpay = new Razorpay({ key_id, key_secret });
-      await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
+      try {
+        await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
+      } catch (err: any) {
+        if (err?.message?.includes("This payment has already been captured")) {
+          console.log("[RAZORPAY] Payment already captured, proceeding.");
+        } else {
+          throw err;
+        }
+      }
 
     const { FieldValue } = admin.firestore;
 
