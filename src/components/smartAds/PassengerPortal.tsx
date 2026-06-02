@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { firebaseService } from '../../services/firebaseService';
-import { Shield, Sparkles, Check, VolumeX, Baby, Users, Ban, Moon, Heart, Clock, RefreshCw } from 'lucide-react';
+import { Shield, Sparkles, Check, VolumeX, Baby, Users, Ban, Moon, Heart, Clock, RefreshCw, School, Book } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface PassengerPortalProps {
@@ -238,6 +238,7 @@ export default function PassengerPortal({ deviceIdFromUrl, onClose }: PassengerP
   const isSchoolSelected = tempSelection === 'SCHOOL' || (tempSelection === null && activeOverrideMode === 'SCHOOL');
   const isFamilySelected = tempSelection === 'FAMILY' || (tempSelection === null && activeOverrideMode === 'FAMILY');
   const isQuietSelected = tempSelection === 'QUIET' || (tempSelection === null && activeOverrideMode === 'SILENT');
+  const isNightSelected = tempSelection === 'NIGHT' || (tempSelection === null && activeOverrideMode === 'NIGHT');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-slate-950 p-4 sm:p-6 justify-between select-none pb-28">

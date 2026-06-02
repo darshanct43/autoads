@@ -530,7 +530,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         assetUrl: finalMediaUrl,
         mediaType: newCampaign.mediaType,
         mediaReceived: true,
-        isKidSafe: newCampaign.isKidSafe,
+        kidsSafe: newCampaign.isKidSafe,
         kidSafeMediaUrl: newCampaign.kidSafeMediaUrl
       });
       showToast("Campaign created and submitted for review", 'success');
