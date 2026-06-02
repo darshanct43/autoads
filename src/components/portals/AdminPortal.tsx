@@ -80,7 +80,6 @@ import { ErrorBoundary } from "../common/ErrorBoundary";
 import NotificationCenter from "../common/NotificationCenter";
 
 import { DashboardTab } from "./tabs/DashboardTab";
-import { AdminStudioConfig } from "../studio/admin/AdminStudioConfig";
 import { RevenueManagementTab } from "./tabs/RevenueManagementTab";
 import { PricingApprovalsTab } from "./tabs/PricingApprovalsTab";
 import { PackagesTab } from "./tabs/PackagesTab";
@@ -90,7 +89,6 @@ import { TerminalHubTab } from "./tabs/TerminalHubTab";
 import { RemoteConnectTab } from "./tabs/RemoteConnectTab";
 import { CampaignsTab } from "./tabs/CampaignsTab";
 import { ReviewsTab } from "./tabs/ReviewsTab";
-import { CanvaAssetLibrary } from "../campaigns/CanvaAssetLibrary";
 import { NoticesTab } from "./tabs/NoticesTab";
 import { MapTab } from "./tabs/MapTab";
 import { DriversTab } from "./tabs/DriversTab";
@@ -457,8 +455,6 @@ export default function AdminPortal({
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const [opFeedback, setOpFeedback] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   const [campaignMediaFile, setCampaignMediaFile] = useState<File | null>(null);
-  const [selectedCanvaAsset, setSelectedCanvaAsset] = useState<any>(null);
-  const [mediaSource, setMediaSource] = useState<'UPLOAD' | 'CANVA'>('UPLOAD');
   const [campaignMediaType, setCampaignMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
   const [campaignUploadProgress, setCampaignUploadProgress] = useState(0);
   const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
@@ -648,32 +644,27 @@ export default function AdminPortal({
       let finalMediaUrl = "";
       let finalMediaType = campaignMediaType;
 
-      if (mediaSource === 'UPLOAD') {
-        if (campaignMediaFile) {
-          setOpFeedback({ message: "Uploading to AWS S3 / CloudFront...", type: 'info' });
-          console.log("[AdminPortal] Initializing AWS upload for:", campaignMediaFile.name);
-          
-          finalMediaUrl = await storageService.uploadFile(
-            campaignMediaFile,
-            (progressInfo) => {
-              setCampaignUploadProgress(progressInfo.progress);
-              if (progressInfo.status === 'ERROR') {
-                console.error("[AdminPortal] AWS Upload Failed:", progressInfo.error);
-              }
+      if (campaignMediaFile) {
+        setOpFeedback({ message: "Uploading to AWS S3 / CloudFront...", type: 'info' });
+        console.log("[AdminPortal] Initializing AWS upload for:", campaignMediaFile.name);
+        
+        finalMediaUrl = await storageService.uploadFile(
+          campaignMediaFile,
+          (progressInfo) => {
+            setCampaignUploadProgress(progressInfo.progress);
+            if (progressInfo.status === 'ERROR') {
+              console.error("[AdminPortal] AWS Upload Failed:", progressInfo.error);
             }
-          );
-          
-          console.log("[AdminPortal] AWS Upload Success. URL:", finalMediaUrl);
-          setOpFeedback({ message: "AWS Cloud Link Secured.", type: 'success' });
-          finalMediaType = campaignMediaFile.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
-        }
-      } else if (mediaSource === 'CANVA' && selectedCanvaAsset) {
-        finalMediaUrl = selectedCanvaAsset.s3Url;
-        finalMediaType = selectedCanvaAsset.fileType === 'video' ? 'VIDEO' : 'IMAGE';
+          }
+        );
+        
+        console.log("[AdminPortal] AWS Upload Success. URL:", finalMediaUrl);
+        setOpFeedback({ message: "AWS Cloud Link Secured.", type: 'success' });
+        finalMediaType = campaignMediaFile.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
       }
 
       if (!finalMediaUrl) {
-        showToast("Please upload a file or select a Canva asset for the campaign.", 'error');
+        showToast("Please upload a file for the campaign.", 'error');
         setIsSubmitting(false);
         return;
       }
@@ -685,8 +676,6 @@ export default function AdminPortal({
         assetUrl: finalMediaUrl,
         mediaUrl: finalMediaUrl,
         mediaType: finalMediaType,
-        mediaSource: mediaSource,
-        mediaAssetId: selectedCanvaAsset?.id || null,
         budget: parseFloat(formData.get("budget") as string),
         targetLat: parseFloat(formData.get("targetLat") as string) || 12.9716,
         targetLng: parseFloat(formData.get("targetLng") as string) || 77.5946,
@@ -1530,8 +1519,7 @@ export default function AdminPortal({
         );
       case "REVENUE":
         return <RevenueManagementTab />;
-      case "STUDIO":
-        return <AdminStudioConfig />;
+
       case "CAMPAIGNS":
         return (
           <CampaignsTab
@@ -1849,7 +1837,6 @@ export default function AdminPortal({
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
             { id: "PACKAGES", icon: Zap, title: "Package Config" },
-            { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1994,7 +1981,6 @@ export default function AdminPortal({
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
                   { id: "PACKAGES", icon: Zap, title: "Package Config" },
-                  { id: "STUDIO", icon: ImageIcon, title: "Canva Studio" },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -2191,7 +2177,6 @@ export default function AdminPortal({
             onClick={() => {
               setShowCampaignModal(false);
               setCampaignMediaFile(null);
-              setSelectedCanvaAsset(null);
               setCampaignUploadProgress(0);
             }}
           ></div>
@@ -2222,61 +2207,43 @@ export default function AdminPortal({
                   <div className="flex bg-slate-100 rounded-xl p-1 mb-2">
                     <button 
                       type="button"
-                      onClick={() => setMediaSource('UPLOAD')}
-                      className={cn("flex-1 py-2 text-[10px] font-bold rounded-lg", mediaSource === 'UPLOAD' ? 'bg-white shadow' : 'text-slate-500')}
-                    >Upload File</button>
-                    <button 
-                      type="button"
-                      onClick={() => setMediaSource('CANVA')}
-                      className={cn("flex-1 py-2 text-[10px] font-bold rounded-lg", mediaSource === 'CANVA' ? 'bg-white shadow' : 'text-slate-500')}
-                    >Canva Library</button>
+                      onClick={() => window.open('https://www.canva.com', '_blank')}
+                      className="flex-1 py-2 text-[10px] font-bold rounded-lg text-slate-500 hover:text-amber-500 transition-colors"
+                    >Edit in Canva</button>
+                    <div className="flex-1 py-2 text-[10px] font-bold text-center text-slate-950">Upload File</div>
                   </div>
 
-                  {mediaSource === 'UPLOAD' ? (
-                    <div className="relative group/upload">
-                      <input
-                        type="file"
-                        accept="image/*,video/*"
-                        onChange={handleCampaignFileChange}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      />
-                      <div className="p-8 border-2 border-dashed border-slate-100 rounded-3xl group-hover/upload:border-amber-500/50 bg-slate-50/50 flex flex-col items-center justify-center gap-3 transition-all">
-                        {campaignMediaFile ? (
-                          <>
-                            <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
-                              {campaignMediaType === 'VIDEO' ? <Play size={24} /> : <ImageIcon size={24} />}
-                            </div>
-                            <div className="text-center">
-                              <p className="text-[10px] font-black uppercase text-slate-900 truncate max-w-[200px]">{campaignMediaFile.name}</p>
-                              <p className="text-[8px] font-bold text-slate-400 uppercase">Size: {(campaignMediaFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300">
-                               <RefreshCw size={24} />
-                            </div>
-                            <div className="text-center">
-                              <p className="text-[10px] font-black uppercase text-slate-900">Click or Drag Upload</p>
-                              <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">MP4, JPG, PNG Supported</p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-4 border rounded-2xl max-h-[300px] overflow-y-auto">
-                      <CanvaAssetLibrary onSelect={(asset) => {
-                        setSelectedCanvaAsset(asset);
-                        setCampaignMediaFile(null); // Clear manual file if Canva asset selected
-                      }} />
-                      {selectedCanvaAsset && (
-                        <div className="bg-green-100 p-2 rounded-xl mt-2 text-[10px]">
-                          Selected: {selectedCanvaAsset.name}
-                        </div>
+                  <div className="relative group/upload">
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={handleCampaignFileChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div className="p-8 border-2 border-dashed border-slate-100 rounded-3xl group-hover/upload:border-amber-500/50 bg-slate-50/50 flex flex-col items-center justify-center gap-3 transition-all">
+                      {campaignMediaFile ? (
+                        <>
+                          <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
+                            {campaignMediaType === 'VIDEO' ? <Play size={24} /> : <ImageIcon size={24} />}
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[10px] font-black uppercase text-slate-900 truncate max-w-[200px]">{campaignMediaFile.name}</p>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase">Size: {(campaignMediaFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300">
+                             <RefreshCw size={24} />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[10px] font-black uppercase text-slate-900">Click or Drag Upload</p>
+                            <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">MP4, JPG, PNG Supported</p>
+                          </div>
+                        </>
                       )}
                     </div>
-                  )}
+                  </div>
 
                   {campaignUploadProgress > 0 && campaignUploadProgress < 100 && (
                     <div className="px-2">

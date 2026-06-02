@@ -9,12 +9,11 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { storageService } from '@/services/storageService';
 import { compressImage } from '@/lib/utils';
+/* ... */
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import ComplianceContent, { CompliancePage } from '../common/ComplianceContent';
 import AdminAssistant from '../common/AdminAssistant';
 import StaticImpactVideos from '../StaticImpactVideos';
-import { SubscriptionManager } from '../subscription/SubscriptionManager';
-import { CanvaStudio } from '../studio/customer/CanvaStudio';
 import NotificationCenter from '../common/NotificationCenter';
 
 declare const Razorpay: any;
@@ -318,7 +317,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [paymentResult, setPaymentResult] = useState<{status: string, txId?: string, orderId?: string, amount?: number, campaignId?: string, error?: string} | null>(null);
   const [currentLegalPage, setCurrentLegalPage] = useState<CompliancePage>('ABOUT');
   const [legalPage, setLegalPage] = useState<CompliancePage>('ABOUT');
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL' | 'IMPACT' | 'SUBSCRIPTIONS' | 'STUDIO'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PREMIUM' | 'CAMPAIGNS' | 'DESIGN_HELP' | 'TICKETS' | 'HISTORY' | 'LEGAL' | 'IMPACT'>('DASHBOARD');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -708,7 +707,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     </div>
   );
 
-  const renderSubscriptionTab = () => <SubscriptionManager />;
+  // Removed renderSubscriptionTab
+
 
   const handlePaymentSuccess = async (txnId?: string) => {
     try {
@@ -1971,12 +1971,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         {/* Removed OFFERS tab as requested - consolidated into DASHBOARD */}
 
         {activeTab === 'HISTORY' && renderHistoryTab()}
-        {activeTab === 'STUDIO' && (
-           <div className="space-y-8 bg-slate-50 min-h-[500px] p-2 md:p-6 lg:p-12 rounded-[2rem] border border-slate-200">
-              <CanvaStudio onClose={() => setActiveTab('DASHBOARD')} userRole="customer" />
-           </div>
-        )}
-        {activeTab === 'SUBSCRIPTIONS' && renderSubscriptionTab()}
+        {/* Removed Studio and Subs tabs */}
+
         
         {activeTab === 'CAMPAIGNS' && (
           <div
