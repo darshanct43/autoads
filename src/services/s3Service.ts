@@ -7,11 +7,9 @@ function getEffectiveBucketName(): string {
 }
 
 function validateAWS() {
-  const bucket = getEffectiveBucketName();
   if (!process.env.AWS_REGION || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
     throw new Error('MISSING_AWS_CREDENTIALS: AWS configuration incomplete');
   }
-  console.log(`[S3] Running with Bucket: ${bucket}, Region: ${process.env.AWS_REGION}`);
 }
 
 const s3Client = new S3Client({
@@ -37,7 +35,6 @@ export const s3Service = {
   async uploadFile(fileName: string, buffer: Buffer, contentType: string) {
     validateAWS();
     const bucket = getEffectiveBucketName();
-    console.log(`[S3 FORENSIC] Uploading to Bucket: ${bucket}, Key: ${fileName}`);
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: fileName,
@@ -52,26 +49,19 @@ export const s3Service = {
   async getFile(fileName: string): Promise<Buffer> {
     validateAWS();
     const bucket = getEffectiveBucketName();
-    console.log(`[S3 FORENSIC] Getting from Bucket: ${bucket}, Key: ${fileName}`);
-    try {
-      const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: fileName,
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: fileName,
+    });
+    const response = await s3Client.send(command);
+    const streamToBuffer = (stream: any) =>
+      new Promise<Buffer>((resolve, reject) => {
+        const chunks: any[] = [];
+        stream.on('data', (chunk: any) => chunks.push(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
       });
-      const response = await s3Client.send(command);
-      console.log(`[S3 FORENSIC] Got response for Key: ${fileName}`);
-      const streamToBuffer = (stream: any) =>
-        new Promise<Buffer>((resolve, reject) => {
-          const chunks: any[] = [];
-          stream.on('data', (chunk: any) => chunks.push(chunk));
-          stream.on('error', reject);
-          stream.on('end', () => resolve(Buffer.concat(chunks)));
-        });
-      return await streamToBuffer(response.Body);
-    } catch (e) {
-      console.error(`[S3 FORENSIC] Error Getting Key: ${fileName}, Error:`, e);
-      throw e;
-    }
+    return await streamToBuffer(response.Body);
   },
 
   async deleteFile(fileName: string) {
