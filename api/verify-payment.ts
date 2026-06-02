@@ -18,13 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let key_id = (process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
     let key_secret = (process.env.RAZORPAY_KEY_SECRET || "").trim().replace(/^["']|["']$/g, '');
 
-    if (!key_id || key_id === "rzp_live_SnZDlb9YCezb2w" || key_id === "rzp_live_SuOCSm9m9qJLB0") {
-      key_id = "rzp_live_SuOCSm9m9qJLB0";
-      key_secret = "Vlp2EDEJpcte79HwQFVpDoWY";
-    }
-
     // 2. VERIFY LIVE KEYS
-    if (!key_id.startsWith('rzp_live_')) {
+    if (!key_id || !key_id.startsWith('rzp_live_')) {
       console.log('[RAZORPAY_VERIFY_AUTH] LIVE KEY CHECK');
       return res.status(500).json({ success: false, error: 'CRITICAL: This application requires LIVE keys (rzp_live_).' });
     }
