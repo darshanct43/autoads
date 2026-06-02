@@ -883,8 +883,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         name: "AutoAds Pro",
         description: "Campaign Payment",
         order_id: currentOrderData.id,
-        redirect: true,
-        callback_url: window.location.origin + "/#payment-success",
+        // redirect: true, // Removed to prevent interference with handler
         handler: async function (response: any) {
           alert("RAZORPAY CALLBACK FIRED");
           console.log("RAZORPAY CALLBACK SUCCESS", response);

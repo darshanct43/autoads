@@ -30,13 +30,11 @@ export default async function handler(
     }
 
     // ENV VARIABLES
-    const key_id_raw = process.env.RAZORPAY_KEY_ID;
+    const key_id_raw = process.env.RAZOR_PAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
     const key_secret_raw = process.env.RAZORPAY_KEY_SECRET;
 
     console.log("RAZORPAY_KEY_ID exists:", !!key_id_raw);
-    console.log("RAZORPAY_KEY_ID safe preview:", key_id_raw?.substring(0, 3) + "..." + key_id_raw?.substring(key_id_raw.length - 3));
     console.log("RAZORPAY_KEY_SECRET exists:", !!key_secret_raw);
-    console.log("RAZORPAY_KEY_SECRET length:", key_secret_raw?.length);
 
     const key_id = key_id_raw?.trim()?.replace(/^["']|["']$/g, '');
     const key_secret = key_secret_raw?.trim()?.replace(/^["']|["']$/g, '');
@@ -75,15 +73,16 @@ export default async function handler(
     });
 
   } catch (error: any) {
-
     console.error("FULL RAZORPAY ERROR:");
-    console.error(error);
+    console.error(JSON.stringify(error, null, 2));
 
     return res.status(500).json({
       success: false,
       message: error?.message || "Unknown error",
       description: error?.error?.description || "",
       full: String(error),
+      code: error.code,
+      statusCode: error.statusCode,
     });
   }
 }

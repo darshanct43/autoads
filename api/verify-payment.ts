@@ -15,7 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
 
-    let key_id = (process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
+    let key_id = (process.env.RAZOR_PAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
     let key_secret = (process.env.RAZORPAY_KEY_SECRET || "").trim().replace(/^["']|["']$/g, '');
 
     // 2. VERIFY LIVE KEYS
