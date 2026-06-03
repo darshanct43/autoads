@@ -78,7 +78,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           isWebhookTriggered: false
         };
         
-        await dbAdm.collection('payments').add(paymentRecord);
+        const paymentRef = await dbAdm.collection('payments').add(paymentRecord);
+        console.log("LOG_FIREBASE_PAYMENT_WRITE_RESULT: Payment record added with ID:", paymentRef.id);
 
         if (finalCampaignId) {
             await dbAdm.collection('campaigns').doc(finalCampaignId).set({
@@ -87,14 +88,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               paymentReceived: true,
               updatedAt: FieldValue.serverTimestamp()
             }, { merge: true });
+            console.log("LOG_FIREBASE_CAMPAIGN_UPDATE_RESULT: Campaign updated with ID:", finalCampaignId);
         } else if (campaignData) {
-            await dbAdm.collection('campaigns').add({
+            const campaignRef = await dbAdm.collection('campaigns').add({
               ...campaignData,
               status: 'ACTIVE',
               paymentStatus: 'PAID',
               paymentReceived: true,
               updatedAt: FieldValue.serverTimestamp()
             });
+            console.log("LOG_FIREBASE_CAMPAIGN_CREATE_RESULT: New campaign created with ID:", campaignRef.id);
         }
       } catch (dbError: any) {
         if (dbError?.message?.includes('PERMISSION_DENIED') || !process.env.FIREBASE_SERVICE_ACCOUNT) {
