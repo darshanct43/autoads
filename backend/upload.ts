@@ -4,16 +4,13 @@ import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import util from 'util';
+import { s3Service } from '../src/services/s3Service';
 
 const execPromise = util.promisify(exec);
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  if (!(global as any).uploadedFiles) {
-    (global as any).uploadedFiles = new Map();
   }
 
   const form = formidable({
@@ -37,7 +34,14 @@ export default async function handler(req: any, res: any) {
 
       const file = Array.isArray(fileField) ? fileField[0] : fileField;
 
-      try {
+       try {
+        console.log("UPLOAD_START");
+        console.log("UPLOAD_FILE_RECEIVED", { 
+          originalName: file.originalFilename, 
+          mimetype: file.mimetype, 
+          size: file.size 
+        });
+        
         let fileBuffer = fs.readFileSync(file.filepath);
         let originalName = file.originalFilename || 'upload.bin';
         let basename = path.basename(originalName, path.extname(originalName));
@@ -57,75 +61,47 @@ export default async function handler(req: any, res: any) {
             
             fs.writeFileSync(tmpInput, fileBuffer);
             
-            // Convert to H264 + AAC MP4
             await execPromise(`ffmpeg -i "${tmpInput}" -c:v libx264 -c:a aac -movflags +faststart -preset fast "${tmpOutput}"`);
             
-            // VALIDATION
             const stat = fs.statSync(tmpOutput);
-            if (stat.size < 1024 * 1024) { // Less than 1MB
-              throw new Error(`Output file size too small: ${stat.size} bytes`);
-            }
-
-            const { stdout: ffprobeOut } = await execPromise(`ffprobe -v error -show_format -show_streams -of json "${tmpOutput}"`);
-            const metadata = JSON.parse(ffprobeOut);
-
-            const hasVideo = metadata.streams?.some((s: any) => s.codec_type === 'video');
-            const hasAudio = metadata.streams?.some((s: any) => s.codec_type === 'audio');
-            const duration = parseFloat(metadata.format?.duration || "0");
-            const formatName = metadata.format?.format_name || "";
-
-            console.log("ffprobe output:", ffprobeOut);
-            console.log("final output path:", tmpOutput);
-            console.log("final file size:", stat.size);
-            console.log("final duration:", duration);
-            
-            const validationResult = {
-               hasVideo, 
-               hasAudio, 
-               validDuration: duration > 0,
-               isMp4: formatName.includes('mp4') || formatName.includes('mov')
-            };
-            console.log("validation result:", validationResult);
-
-            if (!hasVideo || duration <= 0 || !validationResult.isMp4) {
-                throw new Error("Invalid output MP4: missing video stream, zero duration, or missing moov atom");
-            }
+            if (stat.size < 1024 * 1024) throw new Error(`Output file size too small: ${stat.size} bytes`);
 
             fileBuffer = fs.readFileSync(tmpOutput);
-            console.log(`[UPLOAD] FFMPEG conversion successful: ${filename}`);
             
             try { fs.unlinkSync(tmpInput); fs.unlinkSync(tmpOutput); } catch (e) {}
           } catch (ffmpegErr: any) {
-            console.error("[UPLOAD] ffmpeg conversion/validation failed, rejecting upload", ffmpegErr.message);
-            res.status(400).json({ error: 'Video conversion failed. Unsupported codec, corrupted file, or missing streams.' });
+            console.error("[UPLOAD] ffmpeg failed", ffmpegErr.message);
+            res.status(400).json({ error: 'Video conversion failed.' });
             return resolve();
           }
         } else {
           filename = filename + path.extname(originalName);
         }
 
-        (global as any).uploadedFiles.set(filename, {
-          mimetype,
-          buffer: fileBuffer,
+        // Upload to S3 using s3Service
+        console.log("UPLOAD_TO_S3_START");
+        
+        console.log("DEBUG_ENV", {
+          AWS_BUCKET_NAME: !!process.env.AWS_BUCKET_NAME,
+          AWS_REGION: !!process.env.AWS_REGION,
+          AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
+          AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY
         });
 
-        const tmpDir = path.join('/tmp', 'uploads');
-        if (!fs.existsSync(tmpDir)) {
-          fs.mkdirSync(tmpDir, { recursive: true });
-        }
-        fs.writeFileSync(path.join(tmpDir, filename), fileBuffer);
+        const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
 
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-        const host = req.headers.host || 'localhost:3000';
-        const fileUrl = `${protocol}://${host}/uploads/${filename}`;
-
-        console.log(`[UPLOAD_SUCCESS] File uploaded: ${filename} -> Url: ${fileUrl}`);
+        console.log("UPLOAD_TO_S3_SUCCESS");
+        console.log(`[UPLOAD_SUCCESS_S3] File uploaded: ${filename} -> Url: ${fileUrl}`);
 
         res.status(200).json({ url: fileUrl });
+        console.log("UPLOAD_RESPONSE_SENT");
         resolve();
       } catch (writeErr: any) {
-        console.error('[UPLOAD_WRITE_ERROR]', writeErr);
-        res.status(500).json({ error: 'Failed to write uploaded file.' });
+        console.error("UPLOAD_TO_S3_ERROR", writeErr);
+        console.error("UPLOAD_TO_S3_ERROR_RAW", writeErr);
+        console.error("UPLOAD_TO_S3_ERROR_JSON", JSON.stringify(writeErr, null, 2));
+
+        res.status(500).json({ error: 'Failed to write uploaded file to S3.' });
         resolve();
       }
     });

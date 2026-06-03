@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { jsPDF } from 'jspdf';
 import {
   Users,
   Monitor,
@@ -221,6 +222,75 @@ export const getSafeUrl = (url: string | undefined | null) => {
     console.log('FINAL URL', cleaned);
     return cleaned;
   }
+};
+
+const clauses = [
+  { title: "1. Device Ownership", text: "The advertising display device installed in the driver’s vehicle remains the sole property of MAYYAN AutoAds at all times." },
+  { title: "2. Battery Usage Consent", text: "The driver agrees that the advertising device may utilize the vehicle battery for operating and displaying advertisements." },
+  { title: "3. Battery Liability Limitation", text: "MAYYAN AutoAds shall not be responsible for normal battery wear, reduced battery performance, or battery-related issues arising from regular usage of the advertising system." },
+  { title: "4. Device Safety Responsibility", text: "The driver is fully responsible for maintaining the physical safety and protection of the installed advertising device." },
+  { title: "5. Advertisement Acceptance", text: "The driver agrees to display campaigns assigned by MAYYAN AutoAds, including commercial, promotional, awareness, and legally permitted political advertisements unless prohibited by applicable law." },
+  { title: "6. Refusal of Ads", text: "If the driver refuses to display approved advertisements without valid reason, MAYYAN AutoAds reserves the right to suspend or terminate the partnership." },
+  { title: "7. Device Return Policy", text: "Upon resignation, inactivity, termination, or agreement cancellation, the driver must return the device within 15 days." },
+  { title: "8. Device Recovery & Compensation", text: "If the driver intentionally damages, withholds, sells, refuses to return, or misuses the device, the driver agrees to compensate MAYYAN AutoAds up to the device value (approximately INR 10,000)." },
+  { title: "9. Legal Recovery Rights", text: "MAYYAN AutoAds reserves the lawful right to recover company-owned devices when necessary." },
+  { title: "10. Loan / Seizure Protection Clause", text: "The advertising device shall not be treated as the personal property of the driver in situations involving vehicle seizure, loan recovery, financial disputes, or third-party claims." },
+  { title: "11. Jurisdiction Clause", text: "Any disputes arising from this agreement shall fall under the jurisdiction of competent courts located in Karnataka, India." },
+  { title: "12. Driver Consent Declaration", text: "The driver confirms that they have carefully read, understood, and voluntarily accepted all terms and conditions before digitally signing." },
+];
+
+const generateMissingPDF = async (driverData: any) => {
+  const doc = new jsPDF();
+  doc.setFontSize(20);
+  doc.text("MAYYAN AutoAds Driver Agreement", 20, 20);
+  doc.setFontSize(10);
+  doc.text(`Agreement Date: ${new Date().toLocaleDateString()}`, 20, 30);
+  doc.text(`Driver ID: ${driverData.id}`, 20, 35);
+  
+  let y = 50;
+  clauses.forEach((c) => {
+    doc.setFont("helvetica", "bold");
+    doc.text(c.title, 20, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    const lines = doc.splitTextToSize(c.text, 170);
+    doc.text(lines, 20, y);
+    y += (lines.length * 5) + 5;
+    if (y > 270) {
+      doc.addPage();
+      y = 20;
+    }
+  });
+
+  doc.addPage();
+  doc.setFontSize(14);
+  doc.text("Digital Verification", 20, 20);
+
+  const addImage = async (url: string, label: string, yPos: number) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        doc.text(label, 20, yPos);
+        doc.addImage(img, 'PNG', 20, yPos + 5, 60, 30);
+        resolve(true);
+      };
+      img.onerror = () => {
+         doc.text(`${label} (failed to load)`, 20, yPos);
+         resolve(false);
+      };
+      img.src = url;
+    });
+  };
+
+  if (driverData._agreementData?.signatureUrl) {
+    await addImage(driverData._agreementData.signatureUrl, "Digital Signature:", 40);
+  }
+  if (driverData._agreementData?.selfieUrl) {
+    await addImage(driverData._agreementData.selfieUrl, "Verification Selfie:", 90);
+  }
+  
+  window.open(doc.output('bloburl'), '_blank');
 };
 
 const getCampaignExpiration = (campaign: any) => {
@@ -3310,7 +3380,7 @@ export default function AdminPortal({
                                    if (selectedDriverForAgreement._agreementData?.agreementPdfUrl) {
                                        window.open(getSafeUrl(selectedDriverForAgreement._agreementData.agreementPdfUrl), '_blank');
                                    } else {
-                                       showToast('PDF not generated for initial quick provisions.', 'info');
+                                       generateMissingPDF(selectedDriverForAgreement);
                                    }
                                 }}>
                               <div className="flex items-center gap-3">

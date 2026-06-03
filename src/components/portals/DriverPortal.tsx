@@ -1119,12 +1119,13 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
       <AnimatePresence>
         {showAgreement && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" />
-             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl">
+          <div className="fixed inset-0 z-[200] overflow-y-auto flex items-start sm:items-center justify-center p-4 py-8">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAgreement(false)} className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" />
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative w-full max-w-lg my-auto">
                 <DriverDigitalAgreement 
                   driverId={user?.uid!} 
-                  onSigned={() => setShowAgreement(false)} 
+                  onSigned={() => setShowAgreement(false)}
+                  onCancel={() => setShowAgreement(false)} 
                 />
              </motion.div>
           </div>

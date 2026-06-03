@@ -20,6 +20,7 @@ import otpSendHandler from './backend/otp/send';
 import otpVerifyHandler from './backend/otp/verify';
 import demoSetupHandler from './backend/demo/setup';
 import activateCampaignHandler from './backend/debug/activate-campaign';
+import adminAiHandler from './backend/admin-ai';
 
 
 async function startServer() {
@@ -251,6 +252,7 @@ async function startServer() {
       else if (apiPath === 'otp/verify') handler = otpVerifyHandler;
       else if (apiPath === 'demo/setup') handler = demoSetupHandler;
       else if (apiPath === 'debug/activate-campaign') handler = activateCampaignHandler;
+      else if (apiPath === 'admin-ai') handler = adminAiHandler;
 
 
       if (handler) {

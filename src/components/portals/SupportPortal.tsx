@@ -532,7 +532,7 @@ export default function SupportPortal({ onLogout, onRoleJump }: SupportPortalPro
         mediaReceived: true,
         kidsSafe: newCampaign.isKidSafe,
         kidSafeMediaUrl: newCampaign.kidSafeMediaUrl
-      });
+      } as any);
       showToast("Campaign created and submitted for review", 'success');
       setNewCampaign({ 
         title: '', 

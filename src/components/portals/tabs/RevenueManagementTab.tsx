@@ -15,9 +15,9 @@ export const RevenueManagementTab = () => {
         return () => unsub();
     }, []);
 
-    const totalRevenue = ledger.reduce((acc, curr) => acc + (curr.grossRevenue || 0), 0);
+    const totalRevenue = ledger.reduce((acc, curr) => acc + (curr.amount || 0), 0);
     const hqRevenue = ledger.reduce((acc, curr) => acc + (curr.platformRevenue || 0), 0);
-    const franchiseRevenue = ledger.reduce((acc, curr) => acc + (curr.franchiseRevenue || 0), 0);
+    const franchiseRevenue = ledger.reduce((acc, curr) => acc + (curr.franchiseAmount || 0), 0);
 
     const handleSettlement = async (id: string, ref: string) => {
         await firebaseService.updateRevenueSettlement(id, {
@@ -68,8 +68,8 @@ export const RevenueManagementTab = () => {
                                 <tr key={item.id} className="border-t border-slate-800">
                                     <td className="py-4 font-semibold text-white">{item.campaignName}</td>
                                     <td className="py-4">{item.source}</td>
-                                    <td className="py-4">₹{item.grossRevenue.toLocaleString()}</td>
-                                    <td className="py-4 text-emerald-400">₹{item.franchiseRevenue.toLocaleString()}</td>
+                                    <td className="py-4">₹{(item.amount || 0).toLocaleString()}</td>
+                                    <td className="py-4 text-emerald-400">₹{(item.franchiseAmount || 0).toLocaleString()}</td>
                                     <td className="py-4">
                                         {item.status === 'PAID' ? <span className="text-emerald-500 flex items-center gap-1"><CheckCircle size={12}/> Paid</span> : <span className="text-amber-500 flex items-center gap-1"><Clock size={12}/> Pending</span>}
                                     </td>

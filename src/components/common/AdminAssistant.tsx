@@ -9,6 +9,7 @@ import {
   Sparkles,
   RefreshCw,
   AlertCircle,
+  ChevronLeft,
   ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -73,20 +74,13 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
 
     try {
       // Use the server-side proxy to keep API keys secure and follow project rules
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/admin-ai', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           message: userMessage,
-          history: messages.map(m => ({
-            role: m.role,
-            parts: [{ text: m.content }]
-          })),
-          language: 'English',
-          role: role, // Pass role to server for correct system instructions
-          systemContext: systemContext // Pass context to AI for data-aware responses
         }),
       });
 
@@ -98,9 +92,16 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
       const data = await response.json();
       const aiText = data.text || "I encountered a processing interrupt. Please retry.";
       setMessages(prev => [...prev, { role: "assistant", content: aiText }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Assistant Error:", error);
-      setMessages(prev => [...prev, { role: "assistant", content: "Communication uplink failed. Please check your network connection." }]);
+      const errorMsg = error?.message || "";
+      let userFriendlyMsg = "Communication uplink failed. Please check your network connection.";
+      if (errorMsg.includes("Neither OPENAI_API_KEY nor GEMINI_API_KEY")) {
+        userFriendlyMsg = "AI Secretary is offline. Please configure your GEMINI_API_KEY in the Settings menu to activate the AI assistant!";
+      } else if (errorMsg.includes("API key")) {
+        userFriendlyMsg = "Invalid API key. Please check your GEMINI_API_KEY in the Settings menu.";
+      }
+      setMessages(prev => [...prev, { role: "assistant", content: userFriendlyMsg }]);
     } finally {
       setIsLoading(false);
     }
@@ -125,27 +126,25 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
             initial={{ opacity: 0, y: 100, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 100, scale: 0.9 }}
-            className="fixed bottom-4 right-4 md:bottom-28 md:right-8 z-[1001] w-[calc(100%-2rem)] md:w-full max-w-[400px] h-[50vh] md:h-[450px] bg-slate-950 border border-slate-800 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+            className="fixed inset-0 md:inset-auto md:bottom-28 md:right-8 z-[1001] w-full md:w-[400px] h-[100dvh] md:h-[520px] bg-slate-950 border-t md:border border-slate-800 rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Header */}
-            <div className="p-4 md:p-6 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  {view === 'CHAT' && (
-                    <button 
-                      onClick={() => setView('HOME')}
-                      className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-all mr-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
-                    >
-                      <ChevronRight size={14} className="rotate-180" />
-                      Back
-                    </button>
-                  )}
+            <div className="pt-10 pb-3 px-4 md:p-5 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 animate-fadeIn">
+                <div className="flex items-center gap-2.5 md:gap-3 min-w-0">
+                  <button 
+                    onClick={() => setIsOpen(false)}
+                    className="p-1.5 md:p-2 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-all flex items-center justify-center shrink-0"
+                    aria-label="Back to Portal"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
                   <div className="w-8 h-8 md:w-10 md:h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)] shrink-0">
-                    <Terminal size={18} className="md:hidden" />
+                    <Terminal size={16} className="md:hidden" />
                     <Terminal size={20} className="hidden md:block" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-[10px] md:text-xs font-black text-white uppercase tracking-widest italic leading-none truncate">{assistantName}</h3>
-                    <div className="flex items-center gap-1.5 mt-1.5">
+                    <h3 className="text-[11px] md:text-sm font-black text-white uppercase tracking-widest italic leading-none truncate">{assistantName}</h3>
+                    <div className="flex items-center gap-1 mt-1">
                       <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
                       <span className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest">{assistantBadge}</span>
                     </div>
@@ -153,14 +152,14 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
                 </div>
                 <button 
                   onClick={() => setIsOpen(false)}
-                  className="p-2 md:px-4 md:py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
+                  className="hidden md:flex p-1.5 px-3 md:px-4 md:py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 items-center gap-1.5 shrink-0"
                 >
-                  <span className="hidden md:inline">Close</span> <X size={14} />
+                  <span>Close</span> <X size={14} />
                 </button>
             </div>
 
             {/* System Status Banner */}
-            <div className="px-6 py-3 bg-amber-500/5 flex items-center justify-between border-b border-slate-800/50">
+            <div className="px-5 py-2.5 bg-amber-500/5 flex items-center justify-between border-b border-slate-800/50 shrink-0">
                <div className="flex items-center gap-2">
                  <RefreshCw size={10} className="text-amber-500 animate-spin [animation-duration:3s]" />
                  <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest leading-none">Scanning Network</span>
@@ -192,21 +191,21 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
                   m.role === "user" ? "ml-auto items-end" : "mr-auto items-start"
                 )}>
                   <div className={cn(
-                    "p-4 rounded-[1.5rem] text-[11px] leading-relaxed font-medium transition-all shadow-lg",
+                    "p-3.5 md:p-4 rounded-[1.5rem] text-xs sm:text-[13px] md:text-sm leading-relaxed font-medium transition-all shadow-lg",
                     m.role === "user" 
                       ? "bg-amber-500 text-slate-950 rounded-br-none shadow-amber-500/10" 
                       : "bg-slate-900 text-slate-200 rounded-bl-none border border-slate-800/50 shadow-black/20"
                   )}>
                     {m.content}
                   </div>
-                  <span className="text-[7px] font-black uppercase text-slate-600 mt-2 tracking-[0.2em] px-2 opacity-60">
+                  <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-600 mt-2 tracking-[0.2em] px-2 opacity-60">
                     {m.role === "user" ? "Primary Administrator" : "AI Secretary Agent"}
                   </span>
                 </div>
               ))}
               {isLoading && (
                 <div className="flex flex-col items-start gap-2 max-w-[85%]">
-                  <div className="bg-slate-900 p-5 rounded-2xl rounded-bl-none border border-slate-800/50 flex gap-1.5 shadow-xl">
+                  <div className="bg-slate-900 p-4 rounded-xl rounded-bl-none border border-slate-800/50 flex gap-1.5 shadow-xl">
                     <div className="w-1 h-1 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
                     <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
                     <div className="w-1 h-1 bg-amber-500 rounded-full animate-bounce" />
@@ -217,7 +216,7 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
             </div>
 
             {/* Quick Actions */}
-            <div className="px-6 py-4 flex gap-2 overflow-x-auto no-scrollbar scroll-smooth bg-slate-900/30 border-t border-slate-800/30">
+            <div className="px-4 py-2 flex gap-2 overflow-x-auto no-scrollbar scroll-smooth bg-slate-900/30 border-t border-slate-800/30 shrink-0">
                {(role === 'admin' ? [
                  { label: "Fleet Report", prompt: "Extract latest fleet data and revenue report." },
                  { label: "History", prompt: "Show latest 5 transactions and pending payouts." },
@@ -231,23 +230,23 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
                  { label: "History", prompt: "Show my recent payment history." },
                  { label: "New Offers", prompt: "Are there any high-paying campaigns available?" }
                ]).map((action, idx) => (
-                 <button
-                   key={action.label}
-                   onClick={() => handleQuickAction(action.prompt)}
-                   className="whitespace-nowrap px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-[8px] font-black uppercase tracking-widest text-amber-500 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all shadow-xl active:scale-95"
-                 >
-                   {action.label}
-                 </button>
+                  <button
+                    key={action.label}
+                    onClick={() => handleQuickAction(action.prompt)}
+                    className="whitespace-nowrap px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-[8px] font-black uppercase tracking-widest text-amber-500 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 transition-all shadow-xl active:scale-95"
+                  >
+                    {action.label}
+                  </button>
                ))}
             </div>
 
             {/* Input */}
-            <div className="p-6 bg-slate-900 border-t border-slate-800">
+            <div className="p-3 md:p-5 bg-slate-900 border-t border-slate-800 shrink-0">
               <div className="relative group/input">
                 <input
                   type="text"
                   placeholder="Query system protocols..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-[11px] text-white focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none pr-14 font-medium transition-all group-hover/input:border-slate-700 shadow-inner"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 md:px-6 md:py-4 text-xs md:text-sm text-white focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none pr-12 md:pr-14 font-medium transition-all group-hover/input:border-slate-700 shadow-inner"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSend()}
@@ -255,12 +254,13 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
                 <button
                   onClick={() => handleSend()}
                   disabled={!input.trim() || isLoading}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-amber-500 text-slate-950 rounded-xl flex items-center justify-center hover:bg-amber-400 transition-all disabled:opacity-30 disabled:grayscale active:scale-90 shadow-lg shadow-amber-500/10"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 md:w-10 md:h-10 bg-amber-500 text-slate-950 rounded-xl flex items-center justify-center hover:bg-amber-400 transition-all disabled:opacity-30 disabled:grayscale active:scale-90 shadow-lg shadow-amber-500/10"
                 >
-                  <Send size={16} />
+                  <Send size={14} className="md:hidden" />
+                  <Send size={16} className="hidden md:block" />
                 </button>
               </div>
-              <p className="text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] mt-5 text-center opacity-40">
+              <p className="hidden md:block text-[7px] text-slate-600 font-black uppercase tracking-[0.3em] mt-4 text-center opacity-40">
                 Neural Network Interface • Powered by Gemini
               </p>
             </div>

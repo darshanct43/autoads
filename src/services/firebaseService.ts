@@ -1,3 +1,4 @@
+import { storageService } from './storageService';
 import { 
   collection, 
   addDoc, 
@@ -18,8 +19,8 @@ import {
   or,
   arrayUnion
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { compressImage } from '../lib/utils';
 import { INITIAL_CITIES, INITIAL_FRANCHISES } from '../modules/cityManagement/cities';
 
@@ -1797,22 +1798,12 @@ export const firebaseService = {
         if (blobToUpload.size === 0) throw new Error('Blob is empty');
         
         const fileName = `${type.toLowerCase()}_${Date.now()}.jpg`;
-        const storageRef = ref(storage, `${DRIVERS_COLLECTION}/${uid}/documents/${fileName}`);
         
-        const metadata = {
-          contentType: 'image/jpeg',
-          cacheControl: 'public,max-age=31536000',
-          customMetadata: {
-            'type': type,
-            'uid': uid,
-            'uploadedVia': 'atomic_v1'
-          }
-        };
-
-        console.log(`[FirebaseService] Launching Direct Upload for ${type} (${(blobToUpload.size/1024).toFixed(1)}KB). Online: ${navigator.onLine}`);
+        console.log(`[FirebaseService] Launching Direct Upload (S3) for ${type} (${(blobToUpload.size/1024).toFixed(1)}KB). Online: ${navigator.onLine}`);
         
-        const uploadSnapshot = await uploadBytes(storageRef, blobToUpload, metadata);
-        const url = await getDownloadURL(uploadSnapshot.ref);
+        const url = await storageService.uploadFile(blobToUpload, (p) => {
+          if (onProgress) onProgress(p.progress || 0);
+        }, fileName, `drivers/${uid}/documents`);
         
         const fieldMap: Record<string, string> = {
           RC: 'rcPhoto',
@@ -1882,10 +1873,14 @@ export const firebaseService = {
 
   async updateDriverAgreement(driverId: string, agreementData: any) {
     try {
-      await setDoc(doc(db, 'drivers', driverId, 'agreement', 'current'), {
-        ...agreementData,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      const batch = writeBatch(db);
+      const subRef = doc(db, 'drivers', driverId, 'agreement', 'current');
+      const driverRef = doc(db, 'drivers', driverId);
+
+      batch.set(subRef, { ...agreementData, updatedAt: serverTimestamp() }, { merge: true });
+      batch.update(driverRef, { _agreementData: agreementData });
+
+      await batch.commit();
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `drivers/${driverId}/agreement`);
       throw e;

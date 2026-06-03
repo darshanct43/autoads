@@ -10,8 +10,7 @@ import {
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager,
+  memoryLocalCache,
   doc, 
   getDocFromServer, 
   getFirestore,
@@ -43,17 +42,12 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || firebaseAppletConfig.firestoreDatabaseId || '(default)');
 
-let dbInstance: Firestore;
-try {
-  dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-  }, firestoreDbId === '(default)' ? undefined : firestoreDbId);
-} catch (e) {
-  dbInstance = getFirestore(app, firestoreDbId === '(default)' ? undefined : firestoreDbId);
-}
+const dbInstance: Firestore = initializeFirestore(app, {
+  localCache: memoryLocalCache()
+}, firestoreDbId === '(default)' ? undefined : firestoreDbId);
 
 export const db: Firestore = dbInstance;
-console.log("[Firebase] Firestore initialized. Database ID:", firestoreDbId);
+console.log("[Firebase] Firestore initialized with memory cache. Database ID:", firestoreDbId);
 
 // Verify connectivity
 getDocs(collection(db, 'drivers')).then(snap => {
