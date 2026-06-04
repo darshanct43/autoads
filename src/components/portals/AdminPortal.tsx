@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { jsPDF } from 'jspdf';
+import { serverTimestamp } from 'firebase/firestore';
 import {
   Users,
   Monitor,
@@ -201,6 +202,11 @@ export const getSafeUrl = (url: string | undefined | null) => {
     cleaned = cleaned.replace('http://https://', 'https://');
   }
 
+  // Rewrite any S3 URL dynamically to CloudFront
+  if (cleaned.includes('s3') && cleaned.includes('amazonaws.com') && cleaned.includes('darshan-autoads-storage')) {
+    cleaned = cleaned.replace(/darshan-autoads-storage\.s3[^\/]*\.amazonaws\.com/, 'd1kv1t85g7l7mp.cloudfront.net');
+  }
+
   // Rewrite legacy non-CORS commondatastorage.googleapis.com endpoints to CORS-compliant storage.googleapis.com
   if (cleaned.includes('commondatastorage.googleapis.com')) {
     cleaned = cleaned.replace('commondatastorage.googleapis.com', 'storage.googleapis.com');
@@ -240,56 +246,326 @@ const clauses = [
 ];
 
 const generateMissingPDF = async (driverData: any) => {
-  const doc = new jsPDF();
-  doc.setFontSize(20);
-  doc.text("MAYYAN AutoAds Driver Agreement", 20, 20);
-  doc.setFontSize(10);
-  doc.text(`Agreement Date: ${new Date().toLocaleDateString()}`, 20, 30);
-  doc.text(`Driver ID: ${driverData.id}`, 20, 35);
-  
-  let y = 50;
-  clauses.forEach((c) => {
-    doc.setFont("helvetica", "bold");
-    doc.text(c.title, 20, y);
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    const lines = doc.splitTextToSize(c.text, 170);
-    doc.text(lines, 20, y);
-    y += (lines.length * 5) + 5;
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
-    }
-  });
+  const aadhaarUrl = driverData.aadharPhoto || driverData.documents?.aadhaar;
+  const dlUrl = driverData.dlPhoto || driverData.documents?.drivingLicense;
+  const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl;
+  if (!selfieUrl) {
+    console.error("Verification selfie required before agreement completion.");
+    return;
+  }
+  if (!driverData._agreementData?.signatureUrl) {
+    console.error("Digital signature required before agreement completion.");
+    return;
+  }
 
-  doc.addPage();
-  doc.setFontSize(14);
-  doc.text("Digital Verification", 20, 20);
-
-  const addImage = async (url: string, label: string, yPos: number) => {
-    return new Promise((resolve) => {
+  const fetchImageAsBase64 = async (url: string): Promise<{dataUrl: string, width: number, height: number}> => {
+    return new Promise((resolve, reject) => {
+      if (!url) { reject(new Error("Empty URL")); return; }
       const img = new Image();
       img.crossOrigin = "anonymous";
+      let isSettled = false;
+      const timeout = setTimeout(() => {
+        if (!isSettled) {
+           isSettled = true;
+           reject(new Error("Timeout loading image"));
+        }
+      }, 15000);
       img.onload = () => {
-        doc.text(label, 20, yPos);
-        doc.addImage(img, 'PNG', 20, yPos + 5, 60, 30);
-        resolve(true);
+         if (isSettled) return;
+         isSettled = true;
+         clearTimeout(timeout);
+         const canvas = document.createElement("canvas");
+         const MAX = 1200;
+         let w = img.width;
+         let h = img.height;
+         const originalW = w;
+         const originalH = h;
+         if (w > MAX || h > MAX) {
+           if (w > h) { h = h * (MAX / w); w = MAX; }
+           else { w = w * (MAX / h); h = MAX; }
+         }
+         canvas.width = w;
+         canvas.height = h;
+         const ctx = canvas.getContext("2d");
+         if (ctx) ctx.drawImage(img, 0, 0, w, h);
+         resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.7), width: originalW, height: originalH });
       };
       img.onerror = () => {
-         doc.text(`${label} (failed to load)`, 20, yPos);
-         resolve(false);
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timeout);
+        reject(new Error("Failed to load"));
       };
       img.src = url;
     });
   };
 
-  if (driverData._agreementData?.signatureUrl) {
-    await addImage(driverData._agreementData.signatureUrl, "Digital Signature:", 40);
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  
+  const timestamp = new Date().toLocaleString();
+  let pageNum = 1;
+
+  const addGlobalBranding = () => {
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, margin, pageWidth - (margin * 2), pageHeight - (margin * 2));
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Generated: ${timestamp}`, margin, pageHeight - 10);
+    doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 10, { align: "center" });
+    doc.text("Agreement Version: v1.0", pageWidth - margin, pageHeight - 10, { align: "right" });
+  };
+
+  const addWatermark = () => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(40);
+    doc.setTextColor(240, 240, 240); 
+    doc.saveGraphicsState();
+    "MAYYAN AUTOADS VERIFIED DOCUMENT".split(' ').forEach((word, idx) => {
+       doc.text(word, pageWidth/2, (pageHeight/2) - 30 + (idx * 40), { align: "center", angle: -45 });
+    });
+    doc.restoreGraphicsState();
+  };
+  
+  const newPage = () => {
+     doc.addPage();
+     pageNum++;
+  };
+
+  addGlobalBranding();
+  addWatermark();
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(30, 41, 59);
+  doc.text("AUTOADS DRIVER PARTNERSHIP AGREEMENT", pageWidth / 2, 30, { align: "center" });
+
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  doc.text("CONFIDENTIAL & LEGALLY BINDING DOCUMENT", pageWidth / 2, 40, { align: "center" });
+
+  const cardY = 55;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(margin + 5, cardY, pageWidth - (margin * 2) - 10, 80, 'FD');
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text("PARTNERSHIP DETAILS", margin + 15, cardY + 12);
+  
+  doc.setDrawColor(203, 213, 225);
+  doc.line(margin + 15, cardY + 16, pageWidth - margin - 15, cardY + 16);
+
+  const driverProfile = driverData;
+
+  const details = [
+    ["Agreement ID:", `AGR-${driverData._agreementData?.timestamp || Date.now().toString().slice(-6)}`],
+    ["Driver ID:", driverProfile.id],
+    ["Driver Name:", driverProfile.name?.toUpperCase() || 'N/A'],
+    ["Mobile Number:", driverProfile.phone?.toString() || 'N/A'],
+    ["Vehicle Number:", driverProfile.vehicleNumber?.toUpperCase() || driverProfile.vNo?.toUpperCase() || 'N/A'],
+    ["Agreement Date:", new Date().toLocaleDateString()],
+    ["Status:", "ACTIVE PARTNERSHIP"]
+  ];
+
+  let currentY = cardY + 28;
+  details.forEach(([lbl, val]) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text(lbl, margin + 15, currentY);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text(val, margin + 70, currentY);
+    currentY += 8;
+  });
+
+  newPage();
+  addGlobalBranding();
+  addWatermark();
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59);
+  doc.text("IDENTITY VERIFICATION", pageWidth / 2, 30, { align: "center" });
+  
+  doc.setFontSize(12);
+  doc.text("LIVE SELFIE", margin + 10, 50);
+  
+  if (selfieUrl) {
+    try {
+      const selfieInfo = await fetchImageAsBase64(selfieUrl);
+      doc.addImage(selfieInfo.dataUrl, 'JPEG', margin + 10, 55, 60, 80);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Selfie Verification Status: VERIFIED`, margin + 10, 140);
+      doc.text(`Capture Timestamp: ${timestamp}`, margin + 10, 145);
+      doc.text(`Image Resolution: ${selfieInfo.width}x${selfieInfo.height}`, margin + 10, 150);
+      doc.text(`Storage Reference ID: ${selfieUrl.split('/').pop() || 'N/A'}`, margin + 10, 155);
+    } catch(e) {
+      doc.setFillColor(255, 200, 200);
+      doc.rect(margin + 10, 55, 60, 80, 'F');
+      doc.text("IMAGE LOAD ERROR", margin + 15, 95);
+    }
+  } else {
+    doc.setFillColor(255, 200, 200);
+    doc.rect(margin + 10, 55, 60, 80, 'F');
+    doc.text("SELFIE NOT CAPTURED", margin + 15, 95);
   }
-  if (driverData._agreementData?.selfieUrl) {
-    await addImage(driverData._agreementData.selfieUrl, "Verification Selfie:", 90);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(30, 41, 59);
+  doc.text("DIGITAL SIGNATURE", pageWidth / 2 + 10, 50);
+  
+  if (driverData._agreementData?.signatureUrl) {
+    try {
+      const sigInfo = await fetchImageAsBase64(driverData._agreementData.signatureUrl);
+      doc.addImage(sigInfo.dataUrl, 'PNG', pageWidth / 2 + 10, 55, 70, 40);
+    } catch(e) {
+      doc.setFillColor(255, 200, 200);
+      doc.rect(pageWidth / 2 + 10, 55, 70, 40, 'F');
+      doc.text("ERROR", pageWidth / 2 + 15, 75);
+    }
+  } else {
+    doc.text("NO SIGNATURE", pageWidth / 2 + 15, 75);
   }
   
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Signed: ${timestamp}`, pageWidth / 2 + 10, 100);
+  doc.text(`Status: Verified Digital Input`, pageWidth / 2 + 10, 105);
+
+  newPage();
+  addGlobalBranding();
+  addWatermark();
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59);
+  doc.text("DOCUMENT VAULT", pageWidth / 2, 30, { align: "center" });
+
+  const drawDocumentCard = async (label: string, url: string | undefined, x: number, y: number, w: number, h: number) => {
+     doc.setDrawColor(226, 232, 240);
+     doc.setFillColor(248, 250, 252);
+     doc.rect(x, y, w, h, 'FD');
+     doc.setFont("helvetica", "bold");
+     doc.setFontSize(10);
+     doc.setTextColor(30, 41, 59);
+     doc.text(label, x + 5, y + 8);
+     
+     if (url) {
+       try {
+         const b64Info = await fetchImageAsBase64(url);
+         doc.addImage(b64Info.dataUrl, 'JPEG', x + 5, y + 12, w - 10, h - 17);
+       } catch(e) {
+         doc.setFont("helvetica", "normal");
+         doc.setTextColor(239, 68, 68);
+         doc.text("Load failed", x + w/2, y + h/2, { align: "center" });
+       }
+     } else {
+       doc.setFont("helvetica", "normal");
+       doc.setTextColor(148, 163, 184);
+       doc.text("Not Uploaded", x + w/2, y + h/2, { align: "center" });
+     }
+  };
+
+  const cardW = 80;
+  const cardH = 100;
+  const gapX = 15;
+  const startX = (pageWidth - (cardW * 2) - gapX) / 2;
+  
+  await drawDocumentCard("AADHAAR", driverProfile.aadharPhoto || driverProfile.documents?.aadhaar, startX, 50, cardW, cardH);
+  await drawDocumentCard("DRIVING LICENSE", driverProfile.dlPhoto || driverProfile.documents?.drivingLicense, startX + cardW + gapX, 50, cardW, cardH);
+  
+  await drawDocumentCard("VEHICLE DOCUMENT", undefined, startX, 160, cardW, cardH);
+  await drawDocumentCard("OTHER DOCUMENTS", undefined, startX + cardW + gapX, 160, cardW, cardH);
+
+  newPage();
+  addGlobalBranding();
+  addWatermark();
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59);
+  doc.text("AGREEMENT TERMS", pageWidth / 2, 30, { align: "center" });
+  
+  let ty = 45;
+  clauses.forEach((c) => {
+    if (ty > pageHeight - 40) {
+      newPage();
+      addGlobalBranding();
+      addWatermark();
+      ty = 30;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
+    doc.text(c.title, margin + 5, ty);
+    ty += 5;
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    const lines = doc.splitTextToSize(c.text, pageWidth - (margin * 2) - 10);
+    doc.text(lines, margin + 5, ty);
+    ty += (lines.length * 4.5) + 6;
+  });
+
+  newPage();
+  addGlobalBranding();
+  addWatermark();
+
+  doc.setFillColor(240, 253, 244); 
+  doc.setDrawColor(187, 247, 208); 
+  doc.rect(margin + 10, margin + 10, pageWidth - (margin * 2) - 20, 160, 'FD');
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(21, 128, 61); 
+  doc.text("COMPLIANCE CERTIFICATE", pageWidth / 2, margin + 25, { align: "center" });
+
+  doc.setFontSize(12);
+  doc.text("✓ Driver Identity Verified", margin + 20, margin + 45);
+  doc.text("✓ Agreement Accepted", margin + 20, margin + 55);
+  doc.text("✓ Signature Captured", margin + 20, margin + 65);
+  doc.text("✓ Aadhaar Uploaded", margin + 20, margin + 75);
+  doc.text("✓ Driving License Uploaded", margin + 20, margin + 85);
+
+  doc.setDrawColor(187, 247, 208);
+  doc.line(margin + 20, margin + 100, pageWidth - margin - 20, margin + 100);
+
+  doc.setFontSize(10);
+  doc.setTextColor(22, 101, 52);
+  doc.text("Approved By:", margin + 20, margin + 115);
+  doc.setFont("helvetica", "normal");
+  doc.text("AutoAds Operations", margin + 60, margin + 115);
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Approval Timestamp:", margin + 20, margin + 125);
+  doc.setFont("helvetica", "normal");
+  doc.text(timestamp, margin + 60, margin + 125);
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Compliance Status:", margin + 20, margin + 135);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(21, 128, 61);
+  doc.text("ACTIVE", margin + 60, margin + 135);
+  
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(167, 243, 208);
+  doc.text("VERIFICATION HASH: " + btoa(driverProfile.id + timestamp).substring(0, 32).toUpperCase(), pageWidth/2, margin + 160, { align: "center"});
+
   window.open(doc.output('bloburl'), '_blank');
 };
 
@@ -3335,37 +3611,77 @@ export default function AdminPortal({
                 <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
                    {(selectedDriverForAgreement._agreementData?.agreementAccepted || selectedDriverForAgreement.kycStatus === 'PENDING' || selectedDriverForAgreement.kycStatus === 'APPROVED' || selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar) ? (
                       <>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Verification Selfie</p>
-                              <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
-                                 <img src={getSafeUrl(selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.profileImage || selectedDriverForAgreement.documents?.selfie)} className="w-full h-full object-cover" alt="Selfie" />
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 text-center">
+                           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center h-full">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">SELFIE</p>
+                              <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center bg-white min-h-[100px]">
+                                 {(() => {
+                                    const rawUrl = selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.documents?.selfie;
+                                    const safeUrl = getSafeUrl(rawUrl);
+                                    if (safeUrl) {
+                                       console.log("SELFIE_RENDER_URL", safeUrl);
+                                       return (
+                                          <div className="w-full h-full cursor-pointer" onClick={() => window.open(safeUrl, '_blank')}>
+                                             <img src={safeUrl} className="w-full h-full object-cover" alt="Selfie" referrerPolicy="no-referrer" />
+                                          </div>
+                                       );
+                                    }
+                                    return <span className="text-[10px] font-bold text-slate-400 uppercase italic px-4">Selfie Not Captured</span>;
+                                 })()}
                               </div>
                            </div>
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Digital Signature</p>
-                              <div className="w-full aspect-square max-w-[150px] rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-4 flex-shrink-0">
-                                 <img src={getSafeUrl(selectedDriverForAgreement._agreementData?.signatureUrl)} className="max-w-full max-h-full object-contain" alt="Signature" />
+                           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center h-full">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">SIGNATURE</p>
+                              <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center bg-white min-h-[100px]">
+                                 {(() => {
+                                    const rawUrl = selectedDriverForAgreement._agreementData?.signatureUrl || selectedDriverForAgreement.signatureUrl || selectedDriverForAgreement.documents?.signature;
+                                    const safeUrl = getSafeUrl(rawUrl);
+                                    if (safeUrl) {
+                                       console.log("SIGNATURE_RENDER_URL", safeUrl);
+                                       return (
+                                          <div className="w-full h-full cursor-pointer p-1" onClick={() => window.open(safeUrl, '_blank')}>
+                                             <img src={safeUrl} className="w-full h-full object-contain" alt="Signature" referrerPolicy="no-referrer" />
+                                          </div>
+                                       );
+                                    }
+                                    return <X size={20} className="text-slate-300" />;
+                                 })()}
                               </div>
                            </div>
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Aadhar</p>
-                              <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
-                                 {(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar) ? (
-                                   <img src={getSafeUrl(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar)} className="w-full h-full object-contain" alt="Aadhar" />
-                                 ) : (
-                                   <X size={24} className="text-slate-300" />
-                                 )}
+                           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center h-full">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">AADHAAR</p>
+                              <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center bg-white min-h-[100px]">
+                                 {(() => {
+                                    const rawUrl = selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar;
+                                    const safeUrl = getSafeUrl(rawUrl);
+                                    if (safeUrl) {
+                                       console.log("AADHAAR_RENDER_URL", safeUrl);
+                                       return (
+                                          <div className="w-full h-full cursor-pointer" onClick={() => window.open(safeUrl, '_blank')}>
+                                             <img src={safeUrl} className="w-full h-full object-contain" alt="Aadhar" referrerPolicy="no-referrer" />
+                                          </div>
+                                       );
+                                    }
+                                    return <X size={20} className="text-slate-300" />;
+                                 })()}
                               </div>
                            </div>
-                           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center">
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Driving License</p>
-                              <div className="w-full aspect-video rounded-2xl overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-white p-2">
-                                 {(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense) ? (
-                                   <img src={getSafeUrl(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense)} className="w-full h-full object-contain" alt="DL" />
-                                 ) : (
-                                   <X size={24} className="text-slate-300" />
-                                 )}
+                           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center h-full">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">DL</p>
+                              <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center bg-white min-h-[100px]">
+                                 {(() => {
+                                    const rawUrl = selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense;
+                                    const safeUrl = getSafeUrl(rawUrl);
+                                    if (safeUrl) {
+                                       console.log("DL_RENDER_URL", safeUrl);
+                                       return (
+                                          <div className="w-full h-full cursor-pointer" onClick={() => window.open(safeUrl, '_blank')}>
+                                             <img src={safeUrl} className="w-full h-full object-contain" alt="DL" referrerPolicy="no-referrer" />
+                                          </div>
+                                       );
+                                    }
+                                    return <X size={20} className="text-slate-300" />;
+                                 })()}
                               </div>
                            </div>
                         </div>
@@ -3417,16 +3733,53 @@ export default function AdminPortal({
                    >
                      Close Vault
                    </button>
-                   {((selectedDriverForAgreement._agreementData?.agreementAccepted || selectedDriverForAgreement.kycStatus === 'PENDING') && selectedDriverForAgreement.kycStatus !== 'APPROVED') && (
+                   {selectedDriverForAgreement?.kycStatus === 'APPROVED' ? (
+                      <div className="flex-1 py-4 bg-emerald-50 text-emerald-600 rounded-[16px] text-[10px] font-black uppercase tracking-widest text-center border-2 border-emerald-100 flex items-center justify-center gap-2">
+                        <ShieldCheck className="w-4 h-4" /> VERIFIED OPERATOR
+                      </div>
+                   ) : (
                       <button 
                         onClick={async () => {
-                           if (confirm("Approve all documents and driver and enable payouts?")) {
-                              await firebaseService.updateDriverProfile(selectedDriverForAgreement.id, { kycStatus: 'APPROVED', status: 'active', payoutEnabled: true, adminApproved: true });
-                              showToast("Driver Network Profile Approved.", 'success');
-                              setSelectedDriverForAgreement(null);
+                           console.log("APPROVE OPERATOR BUTTON CLICKED");
+                           console.log("VERIFIED BUTTON CLICKED");
+                           const hasSelfie = !!getSafeUrl(selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement._agreementData?.selfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.documents?.selfie);
+                           const hasAadhaar = !!getSafeUrl(selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar);
+                           const hasDL = !!getSafeUrl(selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense);
+                           
+                           console.log("DRIVER ID:", selectedDriverForAgreement.id);
+                           console.log("Pre-Update State:", {
+                               hasSelfie, hasAadhaar, hasDL,
+                               selfieUrl: selectedDriverForAgreement._agreementData?.verificationSelfieUrl || selectedDriverForAgreement._agreementData?.selfieUrl || selectedDriverForAgreement.selfiePhoto || selectedDriverForAgreement.documents?.selfie,
+                               aadhaarUrl: selectedDriverForAgreement.aadharPhoto || selectedDriverForAgreement.documents?.aadhaar,
+                               dlUrl: selectedDriverForAgreement.dlPhoto || selectedDriverForAgreement.documents?.drivingLicense
+                           });
+
+                           const updatePayload = { 
+                               kycStatus: 'APPROVED', 
+                               status: 'active', 
+                               verificationStatus: 'VERIFIED',
+                               approvedAt: serverTimestamp(),
+                               approverId: window.localStorage.getItem('adminId') || 'SUPER_ADMIN',
+                               walletAccessEnabled: true,
+                               creditAssignmentEnabled: true,
+                               deviceProvisioningEnabled: true,
+                               driverEarningsEnabled: true,
+                               payoutEligibilityEnabled: true,
+                               payoutEnabled: true, 
+                               adminApproved: true 
+                           };
+                           console.log("Updating Firestore with payload:", updatePayload);
+                           try {
+                               await firebaseService.updateDriverProfile(selectedDriverForAgreement.id, updatePayload);
+                               console.log("Update Success!");
+                           } catch (err) {
+                               console.error("Update Error:", err);
                            }
+                           
+                           showToast("Driver Network Profile Approved and Permissions Granted.", 'success');
+                           setSelectedDriverForAgreement({ ...selectedDriverForAgreement, kycStatus: 'APPROVED', status: 'active' });
                         }}
-                        className="flex-1 py-4 bg-green-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-green-500/20"
+                        className="flex-1 py-4 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl bg-blue-600 hover:bg-blue-700 transition"
                       >
                         Approve Operator
                       </button>

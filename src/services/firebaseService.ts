@@ -2738,11 +2738,11 @@ export const firebaseService = {
 
   async getShowcaseVideos(): Promise<Record<string, string>> {
      const keysMap = {
-       qr: 'qr_showcase.mp4',
-       couples: 'couples_showcase.mp4',
-       food: 'food_showcase.mp4',
-       awareness: 'awareness_showcase.mp4',
-       film: 'film_showcase.mp4'
+       qr: 'showcase_qr_showcase.mp4',
+       couples: 'showcase_couples_showcase.mp4',
+       food: 'showcase_food_showcase.mp4',
+       awareness: 'showcase_awareness_showcase.mp4',
+       film: 'showcase_film_showcase.mp4'
      };
 
      const results: Record<string, string> = {};

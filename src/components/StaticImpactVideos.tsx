@@ -1,47 +1,18 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Film, Utensils, AlertTriangle, Heart, QrCode } from 'lucide-react';
-import { firebaseService } from '@/services/firebaseService';
 
 export default function StaticImpactVideos() {
   const [urls, setUrls] = useState<Record<string, string>>({
-    qr: "/uploads/showcase_qr_showcase.mp4",
-    couples: "/uploads/showcase_couples_showcase.mp4",
-    food: "/uploads/showcase_food_showcase.mp4",
-    awareness: "/uploads/showcase_awareness_showcase.mp4",
-    film: "/uploads/showcase_film_showcase.mp4"
+    qr: "https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/qr_showcase.mp4",
+    couples: "https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/couples_showcase.mp4",
+    food: "https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/food_showcase.mp4",
+    awareness: "https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/awareness_showcase.mp4",
+    film: "https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/film_showcase.mp4"
   });
   const [activeTab, setActiveTab] = useState<string>('qr');
   const [isNoteExpanded, setIsNoteExpanded] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastErrorTimeRef = useRef<number>(0);
-
-  // Sync back-end URLs in the background to ensure consistency
-  useEffect(() => {
-    let active = true;
-    const fetchVideos = async () => {
-      try {
-        const data = await firebaseService.getShowcaseVideos();
-        if (active && data) {
-          const updatedUrls = { ...urls };
-          let changed = false;
-          for (const key of Object.keys(urls)) {
-            if (data[key] && data[key] !== urls[key]) {
-              updatedUrls[key] = data[key];
-              changed = true;
-            }
-          }
-          if (changed) {
-            setUrls(updatedUrls);
-            console.log("[StaticImpactVideos] Sync Showcase URLs:", updatedUrls);
-          }
-        }
-      } catch (err) {
-        console.error("[StaticImpactVideos] Background sync failed", err);
-      }
-    };
-    fetchVideos();
-    return () => { active = false; };
-  }, []);
 
   const impactCategories = useMemo(() => [
     {
@@ -79,7 +50,7 @@ export default function StaticImpactVideos() {
   const currentVideo = useMemo(() => {
     const matchedCategory = impactCategories.find(c => c.id === activeTab);
     return {
-      url: urls[activeTab] || `/uploads/${activeTab}_showcase.mp4`,
+      url: urls[activeTab] || `https://d1kv1t85g7l7mp.cloudfront.net/campaigns/showcase/video/${activeTab}_showcase.mp4`,
       title: matchedCategory?.title || activeTab
     };
   }, [activeTab, urls, impactCategories]);
@@ -123,43 +94,31 @@ export default function StaticImpactVideos() {
 
   // Robust play execution on active item change
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !currentVideo.url) return;
+    // We defer the play call slightly to allow React to mount the new video element (due to the `key` change).
+    const timer = setTimeout(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      
+      const playVideo = async () => {
+        try {
+          video.muted = true;
+          // When React remounts, the `<video>` element auto-reloads.
+          // We imperatively start it.
+          await video.play();
+        } catch (error) {
+          console.log("[StaticImpactVideos] Autoplay blocked:", error);
+        }
+      };
+      
+      playVideo();
+    }, 100);
 
-    let isSubscribed = true;
-
-    const startPlayback = async () => {
-      if (!isSubscribed) return;
-      try {
-        video.muted = true;
-        await video.play();
-      } catch (error) {
-        console.log("[StaticImpactVideos] Autoplay action delayed or blocked. Ready on user interaction.", error);
-      }
-    };
-
-    video.addEventListener('canplay', startPlayback, { once: true });
-
-    // Force src switch and reload
-    video.src = currentVideo.url;
-    video.load();
-
-    return () => {
-      isSubscribed = false;
-      video.removeEventListener('canplay', startPlayback);
-    };
+    return () => clearTimeout(timer);
   }, [currentVideo.url]);
 
   return (
     <section className="bg-black text-white py-6 md:py-12 px-2 sm:px-4 md:px-8 flex flex-col items-center justify-center w-full min-h-[80vh] relative overflow-hidden">
       
-      {/* Background preloader stream to cache all showcase videos globally in browser engine */}
-      <div className="hidden" aria-hidden="true">
-        {Object.entries(urls).map(([key, url]) => (
-          url ? <video key={key} src={url} preload="auto" muted style={{ display: 'none' }} /> : null
-        ))}
-      </div>
-
       <div className="max-w-7xl w-full flex flex-col items-center justify-center text-center z-10 relative">
         <h2 className="text-2xl md:text-5xl lg:text-5xl font-black uppercase tracking-tight mb-2 md:mb-4 text-white">
           AUTO ADS IMPACT
@@ -217,6 +176,7 @@ export default function StaticImpactVideos() {
               {/* Precise 16:9 Active Video Screen Block with minimized vertical padding to boost display area */}
               <div className="w-full h-full pt-3 md:pt-6 pb-3 md:pb-6 bg-[#010101] flex items-center justify-center relative">
                 <video
+                  key={currentVideo.url}
                   ref={videoRef}
                   controls
                   autoPlay
@@ -226,8 +186,14 @@ export default function StaticImpactVideos() {
                   className="w-full h-full object-contain"
                   style={{ background: "#000" }}
                   onEnded={handleEnded}
-                  onError={handleError}
-                />
+                  onError={(e) => {
+                    console.error("Video Playback Error: ", e.nativeEvent);
+                    handleError();
+                  }}
+                >
+                  <source src={currentVideo.url} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
               </div>
 
               {/* Bottom Bezel: Hardware Brand Label */}

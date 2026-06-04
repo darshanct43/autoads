@@ -29,36 +29,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
 
-      if (generated_signature !== razorpay_signature) {
-        console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed.');
-        return res.status(400).json({ success: false, error: "Invalid signature" });
-      }
+    if (generated_signature !== razorpay_signature) {
+      console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed.');
+      return res.status(400).json({ success: false, error: "Invalid signature" });
+    }
 
-      // CAPTURE PAYMENT
-      const razorpay = new Razorpay({ key_id, key_secret });
-      console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
-      try {
-        await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
-      } catch (err: any) {
-        console.log("ERR RAW:", err);
-        console.log("ERR JSON:", JSON.stringify(err, null, 2));
-        console.log("ERR MESSAGE:", err?.message);
-        console.log("ERR DESCRIPTION:", err?.description);
-        console.log("ERR ERROR:", err?.error);
-        console.log("ERR ERROR DESCRIPTION:", err?.error?.description);
+    // CAPTURE PAYMENT
+    const razorpay = new Razorpay({ key_id, key_secret });
+    console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
+    try {
+      await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
+    } catch (err: any) {
+      console.log("ERR RAW:", err);
+      console.log("ERR JSON:", JSON.stringify(err, null, 2));
+      console.log("ERR MESSAGE:", err?.message);
+      console.log("ERR DESCRIPTION:", err?.description);
+      console.log("ERR ERROR:", err?.error);
+      console.log("ERR ERROR DESCRIPTION:", err?.error?.description);
 
-        console.error("[RAZORPAY] Capture failed:", err);
-        
-        // Sometimes the error details are hidden in err.error
-        const errorMessage = (err?.message || err?.error?.description || '').toLowerCase();
-        
-        if (errorMessage.includes("already been captured") || errorMessage.includes("payment has already been captured")) {
-          console.log("ALREADY_CAPTURED_BRANCH_REACHED");
-          console.log("[RAZORPAY] Payment already captured, proceeding.");
-        } else {
-          throw err;
-        }
+      console.error("[RAZORPAY] Capture failed:", err);
+      
+      // Sometimes the error details are hidden in err.error
+      const errorMessage = (err?.message || err?.error?.description || '').toLowerCase();
+      
+      if (errorMessage.includes("already been captured") || errorMessage.includes("payment has already been captured")) {
+        console.log("ALREADY_CAPTURED_BRANCH_REACHED");
+        console.log("[RAZORPAY] Payment already captured, proceeding.");
+      } else {
+        throw err;
       }
+    }
 
     const { FieldValue } = admin.firestore;
 
@@ -103,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (dbError?.message?.includes('PERMISSION_DENIED') || !process.env.FIREBASE_SERVICE_ACCOUNT) {
            // Silently proceed if admin SDK lacks valid credentials
         } else {
-           console.error("Firestore error during payment verification:", dbError.message);
+           console.error("Firestore error during payment verification:", dbError?.message || dbError);
         }
       }
     })();
@@ -120,8 +120,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ success: true, status: "SUCCESS" });
   } catch (error: any) {
     console.error("[RAZORPAY] Verify error:", error);
-    let errorMsg = error.message || "Credential mismatch";
-    if (errorMsg.toLowerCase().includes("authentication") || errorMsg.toLowerCase().includes("auth")) {
+    let errorMsg = error?.message || "Credential mismatch";
+    if (errorMsg.toString().toLowerCase().includes("authentication") || errorMsg.toString().toLowerCase().includes("auth")) {
       errorMsg = 'Razorpay credentials mismatch: The provided secret or ID is invalid.';
     }
     res.status(500).json({ success: false, error: errorMsg });

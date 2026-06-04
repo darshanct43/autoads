@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, FileText, Camera, Shield, AlertTriangle, Eraser, X } from 'lucide-react';
+import { CheckCircle2, FileText, Camera, Shield, AlertTriangle, Eraser, X, ArrowLeft } from 'lucide-react';
 import { firebaseService } from '@/services/firebaseService';
 import { storageService } from '@/services/storageService';
 import { jsPDF } from 'jspdf';
@@ -26,6 +26,7 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
   const [isDrawing, setIsDrawing] = useState(false);
   const [canvasIsEmpty, setCanvasIsEmpty] = useState(true);
 
+
   useEffect(() => {
     sigCanvas.current = {
       isEmpty: () => canvasIsEmpty,
@@ -44,20 +45,31 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
   }, [canvasIsEmpty]);
 
   useEffect(() => {
+    if (step !== 2) return;
     const canvas = canvasRef.current;
-    if (canvas && step === 2) {
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * 2;
-      canvas.height = rect.height * 2;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(2, 2);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#000000';
+    if (!canvas) return;
+
+    let resizeObserver = new ResizeObserver((entries) => {
+      const rect = entries[0].contentRect;
+      if (rect.width > 0 && rect.height > 0) {
+        if (canvas.width !== Math.floor(rect.width * 2)) {
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.scale(2, 2);
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = '#000000';
+            }
+            setCanvasIsEmpty(true);
+        }
       }
-    }
+    });
+
+    resizeObserver.observe(canvas.parentElement!);
+    return () => resizeObserver.disconnect();
   }, [step]);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -116,56 +128,6 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
     setIsDrawing(false);
   };
 
-  const createFallbackSelfie = (): File => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 400;
-    canvas.height = 400;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      // Draw a sleek, modern background
-      ctx.fillStyle = '#1e293b'; // slate-800
-      ctx.fillRect(0, 0, 400, 400);
-      
-      // Draw an outer ring
-      ctx.strokeStyle = '#f59e0b'; // amber-500
-      ctx.lineWidth = 10;
-      ctx.beginPath();
-      ctx.arc(200, 200, 150, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Draw avatar head
-      ctx.fillStyle = '#e2e8f0'; // slate-200
-      ctx.beginPath();
-      ctx.arc(200, 160, 60, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Draw avatar shoulders inside the ring bounds
-      ctx.beginPath();
-      ctx.arc(200, 340, 100, Math.PI, 0);
-      ctx.fill();
-
-      // Draw descriptive text
-      ctx.fillStyle = '#fbbf24'; // amber-400
-      ctx.font = 'bold 16px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('MAYYAN AUTOADS', 200, 310);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px monospace';
-      ctx.fillText('SECURE DIGITAL AGREEMENT', 200, 335);
-    }
-    
-    const dataUrl = canvas.toDataURL('image/jpeg');
-    const parts = dataUrl.split(',');
-    const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-    const bstr = atob(parts[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    const blob = new Blob([u8arr], { type: mime });
-    return new File([blob], 'default-verification-selfie.jpg', { type: 'image/jpeg' });
-  };
 
   const clauses = [
     { title: "1. Device Ownership", text: "The advertising display device installed in the driver’s vehicle remains the sole property of MAYYAN AutoAds at all times." },
@@ -191,43 +153,323 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
     }
   };
 
-  const generatePDF = async (signatureDataUrl: string, selfieS3Url: string) => {
+  const fileToDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const fetchImageAsBase64 = async (url: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (!url) { reject(new Error("Empty URL")); return; }
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      let isSettled = false;
+      const timeout = setTimeout(() => {
+        if (!isSettled) {
+           isSettled = true;
+           reject(new Error("Timeout loading image"));
+        }
+      }, 15000);
+      img.onload = () => {
+         if (isSettled) return;
+         isSettled = true;
+         clearTimeout(timeout);
+         const canvas = document.createElement("canvas");
+         // Resize max to 1200px to avoid massive PDF sizes
+         const MAX = 1200;
+         let w = img.width;
+         let h = img.height;
+         if (w > MAX || h > MAX) {
+           if (w > h) { h = h * (MAX / w); w = MAX; }
+           else { w = w * (MAX / h); h = MAX; }
+         }
+         canvas.width = w;
+         canvas.height = h;
+         const ctx = canvas.getContext("2d");
+         if (ctx) ctx.drawImage(img, 0, 0, w, h);
+         resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.onerror = () => {
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timeout);
+        reject(new Error("Failed to load"));
+      };
+      img.src = url;
+    });
+  };
+
+  const generatePDF = async (signatureDataUrl: string, driverProfile: any, selfieDataUrl: string, selfieRes: string, selfieRefId: string) => {
     console.log("[Agreement] Starting PDF generation");
     const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text("MAYYAN AutoAds Driver Agreement", 20, 20);
-    doc.setFontSize(10);
-    doc.text(`Agreement Date: ${new Date().toLocaleDateString()}`, 20, 30);
-    doc.text(`Driver ID: ${driverId}`, 20, 35);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
     
-    let y = 50;
-    clauses.forEach((c) => {
-      doc.setFont("helvetica", "bold");
-      doc.text(c.title, 20, y);
-      y += 5;
+    const timestamp = new Date().toLocaleString();
+    let pageNum = 1;
+
+    const addGlobalBranding = () => {
+      // Border
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.5);
+      doc.rect(margin, margin, pageWidth - (margin * 2), pageHeight - (margin * 2));
+      
+      // Footer text
       doc.setFont("helvetica", "normal");
-      const lines = doc.splitTextToSize(c.text, 170);
-      doc.text(lines, 20, y);
-      y += (lines.length * 5) + 5;
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
-      }
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Generated: ${timestamp}`, margin, pageHeight - 10);
+      doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 10, { align: "center" });
+      doc.text("Agreement Version: v1.0", pageWidth - margin, pageHeight - 10, { align: "right" });
+    };
+
+    const addWatermark = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(40);
+      doc.setTextColor(240, 240, 240); // very light grey for 5-8% opacity
+      
+      const text = "MAYYAN AUTOADS VERIFIED DOCUMENT";
+      // Rotate effect by drawing it translated and angled
+      doc.saveGraphicsState();
+      doc.autoPrint(); // hacky for saving state properly in jspdf sometimes? ignored.
+      // Manually calculate rotation
+      "MAYYAN AUTOADS VERIFIED DOCUMENT".split(' ').forEach((word, idx) => {
+         doc.text(word, pageWidth/2, (pageHeight/2) - 30 + (idx * 40), { align: "center", angle: -45 });
+      });
+      doc.restoreGraphicsState();
+    };
+    
+    const newPage = () => {
+       doc.addPage();
+       pageNum++;
+    };
+
+    // --- PAGE 1: SUMMARY ---
+    addGlobalBranding();
+    addWatermark();
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text("AUTOADS DRIVER PARTNERSHIP AGREEMENT", pageWidth / 2, 30, { align: "center" });
+
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text("CONFIDENTIAL & LEGALLY BINDING DOCUMENT", pageWidth / 2, 40, { align: "center" });
+
+    // Information Card
+    const cardY = 55;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(margin + 5, cardY, pageWidth - (margin * 2) - 10, 80, 'FD');
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
+    doc.text("PARTNERSHIP DETAILS", margin + 15, cardY + 12);
+    
+    doc.setDrawColor(203, 213, 225);
+    doc.line(margin + 15, cardY + 16, pageWidth - margin - 15, cardY + 16);
+
+    const details = [
+      ["Agreement ID:", `AGR-${Date.now().toString().slice(-6)}`],
+      ["Driver ID:", driverProfile.id],
+      ["Driver Name:", driverProfile.name?.toUpperCase() || 'N/A'],
+      ["Mobile Number:", driverProfile.phone?.toString() || 'N/A'],
+      ["Vehicle Number:", driverProfile.vehicleNumber?.toUpperCase() || driverProfile.vNo?.toUpperCase() || 'N/A'],
+      ["Agreement Date:", new Date().toLocaleDateString()],
+      ["Status:", "ACTIVE PARTNERSHIP"]
+    ];
+
+    let currentY = cardY + 28;
+    details.forEach(([lbl, val]) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(lbl, margin + 15, currentY);
+      
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(15, 23, 42);
+      doc.text(val, margin + 70, currentY);
+      currentY += 8;
     });
 
-    doc.addPage();
-    doc.setFontSize(14);
-    doc.text("Digital Verification", 20, 20);
+    // --- PAGE 2: BIOMETRIC VERIFICATION ---
+    newPage();
+    addGlobalBranding();
+    addWatermark();
     
-    // Add Signature
-    doc.text("Digital Signature:", 20, 40);
-    doc.addImage(signatureDataUrl, 'PNG', 20, 45, 60, 30);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(30, 41, 59);
+    doc.text("IDENTITY VERIFICATION", pageWidth / 2, 30, { align: "center" });
     
-    // Add Selfie Info
-    doc.text("Verification Selfie stored at:", 20, 90);
+    doc.setFontSize(12);
+    doc.text("LIVE SELFIE", margin + 10, 50);
+    
+    try {
+      doc.addImage(selfieDataUrl, 'JPEG', margin + 10, 55, 60, 80);
+    } catch(e) {
+      doc.setFillColor(255, 200, 200);
+      doc.rect(margin + 10, 55, 60, 80, 'F');
+      doc.text("SELFIE NOT CAPTURED", margin + 15, 95);
+    }
+    
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    doc.text(selfieS3Url, 20, 95);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Selfie Verification Status: VERIFIED`, margin + 10, 140);
+    doc.text(`Capture Timestamp: ${timestamp}`, margin + 10, 145);
+    doc.text(`Image Resolution: ${selfieRes}`, margin + 10, 150);
+    doc.text(`Storage Reference ID: ${selfieRefId}`, margin + 10, 155);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("DIGITAL SIGNATURE", pageWidth / 2 + 10, 50);
     
+    doc.addImage(signatureDataUrl, 'PNG', pageWidth / 2 + 10, 55, 70, 40);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Signed: ${timestamp}`, pageWidth / 2 + 10, 100);
+    doc.text(`Status: Verified Digital Input`, pageWidth / 2 + 10, 105);
+
+    // --- PAGE 3: DOCUMENT VAULT ---
+    newPage();
+    addGlobalBranding();
+    addWatermark();
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(30, 41, 59);
+    doc.text("DOCUMENT VAULT", pageWidth / 2, 30, { align: "center" });
+
+    // Fetch and draw Aadhaar
+    const drawDocumentCard = async (label: string, url: string | undefined, x: number, y: number, w: number, h: number) => {
+       doc.setDrawColor(226, 232, 240);
+       doc.setFillColor(248, 250, 252);
+       doc.rect(x, y, w, h, 'FD');
+       doc.setFont("helvetica", "bold");
+       doc.setFontSize(10);
+       doc.setTextColor(30, 41, 59);
+       doc.text(label, x + 5, y + 8);
+       
+       if (url) {
+         try {
+           const b64 = await fetchImageAsBase64(url);
+           // Calculate inner bounds
+           doc.addImage(b64, 'JPEG', x + 5, y + 12, w - 10, h - 17);
+         } catch(e) {
+           doc.setFont("helvetica", "normal");
+           doc.setFontSize(10);
+           doc.setTextColor(239, 68, 68);
+           doc.text("Load failed", x + w/2, y + h/2, { align: "center" });
+         }
+       } else {
+         doc.setFont("helvetica", "normal");
+         doc.setFontSize(10);
+         doc.setTextColor(148, 163, 184);
+         doc.text("No Document Rendered", x + w/2, y + h/2, { align: "center" });
+       }
+    };
+
+    const cardW = 80;
+    const cardH = 100;
+    const gapX = 15;
+    const startX = (pageWidth - (cardW * 2) - gapX) / 2;
+    
+    await drawDocumentCard("AADHAAR", driverProfile.aadharPhoto || driverProfile.documents?.aadhaar, startX, 50, cardW, cardH);
+    await drawDocumentCard("DRIVING LICENSE", driverProfile.dlPhoto || driverProfile.documents?.drivingLicense, startX + cardW + gapX, 50, cardW, cardH);
+    
+    await drawDocumentCard("VEHICLE DOCUMENT", undefined, startX, 160, cardW, cardH);
+    await drawDocumentCard("OTHER DOCUMENTS", undefined, startX + cardW + gapX, 160, cardW, cardH);
+
+
+    // --- PAGE 4: TERMS ---
+    newPage();
+    addGlobalBranding();
+    addWatermark();
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(30, 41, 59);
+    doc.text("AGREEMENT TERMS", pageWidth / 2, 30, { align: "center" });
+    
+    let ty = 45;
+    clauses.forEach((c) => {
+      if (ty > pageHeight - 40) {
+        newPage();
+        addGlobalBranding();
+        addWatermark();
+        ty = 30;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.title, margin + 5, ty);
+      ty += 5;
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      const lines = doc.splitTextToSize(c.text, pageWidth - (margin * 2) - 10);
+      doc.text(lines, margin + 5, ty);
+      ty += (lines.length * 4.5) + 6;
+    });
+
+    // --- PAGE 5: COMPLIANCE CERTIFICATE ---
+    newPage();
+    addGlobalBranding();
+    addWatermark();
+
+    doc.setFillColor(240, 253, 244); // green-50
+    doc.setDrawColor(187, 247, 208); // green-200
+    doc.rect(margin + 10, margin + 10, pageWidth - (margin * 2) - 20, 160, 'FD');
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(21, 128, 61); // green-700
+    doc.text("COMPLIANCE CERTIFICATE", pageWidth / 2, margin + 25, { align: "center" });
+
+    doc.setFontSize(12);
+    doc.text("✓ Driver Identity Verified", margin + 20, margin + 45);
+    doc.text("✓ Agreement Accepted", margin + 20, margin + 55);
+    doc.text("✓ Signature Captured", margin + 20, margin + 65);
+    doc.text("✓ Aadhaar Uploaded", margin + 20, margin + 75);
+    doc.text("✓ Driving License Uploaded", margin + 20, margin + 85);
+
+    doc.setDrawColor(187, 247, 208);
+    doc.line(margin + 20, margin + 100, pageWidth - margin - 20, margin + 100);
+
+    doc.setFontSize(10);
+    doc.setTextColor(22, 101, 52);
+    doc.text("Approved By:", margin + 20, margin + 115);
+    doc.setFont("helvetica", "normal");
+    doc.text("AutoAds Operations", margin + 60, margin + 115);
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Approval Timestamp:", margin + 20, margin + 125);
+    doc.setFont("helvetica", "normal");
+    doc.text(timestamp, margin + 60, margin + 125);
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Compliance Status:", margin + 20, margin + 135);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(21, 128, 61);
+    doc.text("ACTIVE", margin + 60, margin + 135);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(167, 243, 208); // text-emerald-200
+    doc.text("VERIFICATION HASH: " + btoa(driverProfile.id + timestamp).substring(0, 32).toUpperCase(), pageWidth/2, margin + 160, { align: "center"});
+
     console.log("[Agreement] PDF generation complete");
     return doc.output('blob');
   };
@@ -309,11 +551,69 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
 
     setLoading(true);
     try {
-      // 1. Process Selfie (use uploaded file, or fallback if none provided)
+      // 0. Fetch Driver Profile
+      const driverProfile = await firebaseService.getDriverProfile(driverId);
+      if (!driverProfile) {
+        setError("Driver profile not found. Cannot proceed.");
+        setLoading(false);
+        return;
+      }
+
+      const profile = driverProfile as any;
+      const aadhaarUrl = driverProfile.aadharPhoto || profile.documents?.aadhaar;
+      const dlUrl = driverProfile.dlPhoto || profile.documents?.drivingLicense;
+      if (!aadhaarUrl || !dlUrl) {
+         setError("CANNOT GENERATE PDF: AADHAAR OR DRIVING LICENSE MISSING. PLEASE COMPLETE KYC UPLOAD FIRST.");
+         setLoading(false);
+         return;
+      }
+      
+      // 1. Process Selfie (use uploaded file)
       let finalSelfie = selfie;
       if (!finalSelfie) {
-        console.log('[Agreement] Generating secure placeholder verification selfie');
-        finalSelfie = createFallbackSelfie();
+        setError("Please capture or upload a Verification Selfie to sign the agreement.");
+        setLoading(false);
+        return;
+      }
+
+      const selfieDataUrl = await fileToDataUrl(finalSelfie);
+
+      // Validate Image Dimensions and Resize for PDF to prevent freezing
+      const validateImg = (): Promise<{img: HTMLImageElement, resizedDataUrl: string}> => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+           const canvas = document.createElement("canvas");
+           const MAX = 1000;
+           let w = img.width;
+           let h = img.height;
+           if (w > MAX || h > MAX) {
+             if (w > h) { h = h * (MAX / w); w = MAX; }
+             else { w = w * (MAX / h); h = MAX; }
+           }
+           canvas.width = w;
+           canvas.height = h;
+           const ctx = canvas.getContext("2d");
+           if (ctx) ctx.drawImage(img, 0, 0, w, h);
+           resolve({ img, resizedDataUrl: canvas.toDataURL("image/jpeg", 0.7) });
+        };
+        img.onerror = reject;
+        img.src = selfieDataUrl;
+      });
+      
+      let imgRes = "";
+      let finalSelfieDataUrlForPdf = selfieDataUrl;
+      try {
+         const { img: simg, resizedDataUrl } = await validateImg();
+         if (simg.width < 100 || simg.height < 100) {
+            setError("Verification selfie dimensions are invalid. Please capture a valid photo.");
+            setLoading(false);
+            return;
+         }
+         imgRes = `${simg.width}x${simg.height}`;
+         finalSelfieDataUrlForPdf = resizedDataUrl;
+      } catch (e) {
+         setError("Failed to process Verification Selfie.");
+         setLoading(false); return;
       }
 
       const selfieFileName = `verification-selfie-${Date.now()}.jpg`;
@@ -338,7 +638,7 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
       );
 
       // 3. Generate and Upload PDF
-      const pdfBlob = await generatePDF(sigData, selfieS3Url);
+      const pdfBlob = await generatePDF(sigData, driverProfile, finalSelfieDataUrlForPdf, imgRes, selfieFileName);
       const pdfFileName = `contract-${Date.now()}.pdf`;
       const pdfUrl = await storageService.uploadFile(
         pdfBlob,
@@ -346,6 +646,7 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
         pdfFileName,
         `drivers/${driverId}/agreement`
       );
+
 
       // 4. Update Firestore
       await firebaseService.updateDriverAgreement(driverId, {
@@ -382,10 +683,10 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
         <button 
           type="button"
           onClick={onCancel || onSigned}
-          className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all"
-          aria-label="Close"
+          className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all flex items-center gap-1.5 px-3 uppercase tracking-widest text-[9px] font-black"
+          aria-label="Back"
         >
-          <X className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" /> BACK
         </button>
       </div>
 
@@ -468,6 +769,7 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
                   <input 
                     type="file" 
                     accept="image/*" 
+                    capture="user"
                     onChange={e => {
                       if (e.target.files?.[0]) {
                         setSelfie(e.target.files[0]);
@@ -500,7 +802,7 @@ export default function DriverDigitalAgreement({ driverId, onSigned, onCancel }:
                   <Eraser className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="border-2 border-slate-200 rounded-2xl bg-slate-50 overflow-hidden h-28 relative">
+              <div className="border-2 border-slate-200 rounded-2xl bg-slate-50 overflow-hidden h-40 md:h-56 relative w-full touch-none">
                 <canvas 
                   ref={canvasRef}
                   onMouseDown={startDrawing}

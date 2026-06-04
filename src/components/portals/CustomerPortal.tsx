@@ -861,16 +861,17 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     if (isPreparingOrder || paymentProcessedRef.current) return;
     console.log("[PAYMENT_SYSTEM] Payment button clicked");
     console.log("[PAYMENT_SYSTEM] Opening Modal from:", new Error().stack);
-    let currentOrderData = orderData;
-    if (!currentOrderData) {
-      currentOrderData = await prepareOrder(createdCampaignId || localStorage.getItem('last_created_campaign') || undefined);
-    }
-    
-    if (!currentOrderData) return;
-    
-    const razorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
     
     try {
+      let currentOrderData = orderData;
+      if (!currentOrderData) {
+        currentOrderData = await prepareOrder(createdCampaignId || localStorage.getItem('last_created_campaign') || undefined);
+      }
+      
+      if (!currentOrderData) return;
+      
+      const razorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      
       if (!(window as any).Razorpay) {
         console.error("Razorpay SDK not loaded");
         throw new Error("Razorpay SDK not loaded");
@@ -1381,9 +1382,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               { id: 'CAMPAIGNS', label: 'Campaigns', icon: Target },
               { id: 'HISTORY', label: 'History', icon: History },
               { id: 'TICKETS', label: 'Support', icon: MessageSquare },
-              { id: 'STUDIO', label: 'Studio', icon: Palette },
-              { id: 'DESIGN_HELP', label: 'Experts', icon: Sparkles },
-              { id: 'SUBSCRIPTIONS', label: 'Plans', icon: Zap }
+              { id: 'DESIGN_HELP', label: 'Experts', icon: Sparkles }
             ].map((tab) => (
               <button 
                 key={tab.id}
@@ -2846,9 +2845,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         {[
           { id: 'DASHBOARD', icon: Activity, label: 'Home' },
           { id: 'CAMPAIGNS', icon: Monitor, label: 'Ads' },
-          { id: 'STUDIO', icon: Palette, label: 'Studio' },
           { id: 'TICKETS', icon: MessageSquare, label: 'Help' },
-          { id: 'DESIGN_HELP', icon: Sparkles, label: 'Studio' }
+          { id: 'DESIGN_HELP', icon: Sparkles, label: 'Experts' }
         ].map((tab) => (
           <button
             key={tab.id}
@@ -2903,8 +2901,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                   { id: 'IMPACT', icon: PlayCircle, label: 'Impact' },
                   { id: 'CAMPAIGNS', icon: Monitor, label: 'Campaigns' },
                   { id: 'HISTORY', icon: Wallet, label: 'Billing' },
-                  { id: 'STUDIO', icon: Palette, label: 'Studio' },
-                  { id: 'SUBSCRIPTIONS', icon: Zap, label: 'Plans' },
                   { id: 'TICKETS', icon: MessageSquare, label: 'Support' },
                   { id: 'DESIGN_HELP', icon: Sparkles, label: 'Experts' },
                   { id: 'LEGAL', icon: ShieldCheck, label: 'Legal' },

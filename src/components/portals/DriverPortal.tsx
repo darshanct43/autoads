@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity, CloudUpload, Baby, Users, VolumeX, School, Sun, Moon, Zap } from 'lucide-react';
+import { IndianRupee, MapPin, Settings, AlertTriangle, Globe, ChevronRight, BarChart2, Bell, Wallet, ArrowDownCircle, Info, X, Landmark, Smartphone, ShieldCheck, CheckCircle2, MessageSquare, Send, LogOut, Eye, Shield, FileText, RefreshCw, Contact, Coins, Activity, CloudUpload, Baby, Users, VolumeX, School, Sun, Moon, Zap, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -213,8 +213,6 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
             setAgreement(agr);
             if (agr && agr.agreementAccepted) {
                 setShowAgreement(false);
-            } else {
-                setShowAgreement(true);
             }
         });
 
@@ -381,7 +379,11 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       return;
     }
     if (driverProfile?.kycStatus !== 'APPROVED') {
-      showToast("Please complete KYC by uploading required documents under Settings to withdraw funds.", "info");
+      if (driverProfile?.kycStatus === 'PENDING' || driverProfile?.kycStatus === 'UNDER_REVIEW') {
+        showToast("Your KYC is currently under review. Please wait for approval to withdraw funds.", "info");
+      } else {
+        showToast("Please complete KYC by uploading required documents under Settings to withdraw funds.", "info");
+      }
       return;
     }
     if (amount <= 0) {
@@ -433,7 +435,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   };
 
   const renderContent = () => {
-    if (showKYC) return <DriverKYC driverId={user?.uid!} onSuccess={() => setShowKYC(false)} />;
+    if (showKYC) return <DriverKYC driverId={user?.uid!} onSuccess={() => setShowKYC(false)} onCancel={() => setShowKYC(false)} />;
     switch (activeTab) {
       case 'SETTINGS':
         return (
@@ -443,7 +445,13 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
             className="space-y-6 pb-24"
           >
              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-xl space-y-8">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 border-b border-slate-100 pb-6">
+                   <button 
+                     onClick={() => setActiveTab('EARNINGS')} 
+                     className="p-2 sm:p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-slate-100 active:scale-95 transition-all text-slate-400 border border-slate-100 lg:hidden"
+                   >
+                     <ArrowLeft size={24} />
+                   </button>
                    <div>
                       <h2 className="text-2xl font-black italic uppercase text-slate-900 leading-none tracking-tight">Settings Hub</h2>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Compliance & Support</p>
@@ -463,7 +471,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                         key={item.id}
                         onClick={() => {
                           if (item.id === 'KYC') {
-                            if (driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'APPROVED') {
+                            if (driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'APPROVED' || driverProfile?.kycStatus === 'PENDING') {
                               return;
                             }
                             setShowKYC(true);
@@ -478,7 +486,18 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                            <div className={cn("w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform", item.color)}>
                               <item.icon size={20} />
                             </div>
-                           <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">{item.label}</span>
+                           <div className="flex items-center gap-3">
+                              <span className="text-[11px] font-black text-slate-900 uppercase tracking-widest">{item.label}</span>
+                              {item.id === 'KYC' && driverProfile?.kycStatus && (
+                                <span className={cn("px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest", 
+                                  driverProfile.kycStatus === 'APPROVED' ? "bg-emerald-100 text-emerald-600" :
+                                  (driverProfile.kycStatus === 'PENDING' || driverProfile.kycStatus === 'UNDER_REVIEW') ? "bg-amber-100 text-amber-600" :
+                                  "bg-rose-100 text-rose-600"
+                                )}>
+                                  {driverProfile.kycStatus}
+                                </span>
+                              )}
+                           </div>
                         </div>
                         <ChevronRight size={16} className="text-slate-400" />
                      </button>
@@ -540,7 +559,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide leading-relaxed">
                           {!agreement?.agreementAccepted 
                             ? "Please sign your Digital Partnership Agreement first." 
-                            : driverProfile?.kycStatus === 'UNDER_REVIEW'
+                            : (driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'PENDING')
                               ? "Your KYC documentation is currently under manual audit by our verification team."
                               : driverProfile?.kycStatus === 'REJECTED'
                                 ? "Your KYC documentation has been rejected. Please re-upload verified documents."
@@ -1096,7 +1115,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
 
       {/* Global Floating Back Button - Visible only in sub-views and not when verification is active */}
       <AnimatePresence>
-        {(activeTab === 'WITHDRAW' || showWithdraw || showSupport) && (
+        {(activeTab === 'WITHDRAW' || showWithdraw || showSupport || showKYC) && (
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -1104,11 +1123,12 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
             onClick={() => {
               if (showWithdraw) setShowWithdraw(false);
               else if (showSupport) setShowSupport(false);
+              else if (showKYC) setShowKYC(false);
               else setActiveTab('EARNINGS');
             }}
-            className="fixed top-20 left-6 z-[80] w-12 h-12 bg-white/80 backdrop-blur-md rounded-full shadow-lg border border-slate-200 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-95"
+            className="fixed top-20 left-6 z-[80] w-12 h-12 bg-white/80 backdrop-blur-md rounded-full shadow-lg border border-slate-200 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-95 lg:hidden"
           >
-            <ChevronRight size={24} className="rotate-180" />
+            <ArrowLeft size={24} />
           </motion.button>
         )}
       </AnimatePresence>
@@ -1136,43 +1156,43 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
         {showWithdraw && (
           <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowWithdraw(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" />
-             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] p-8 shadow-2xl space-y-8">
+             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="relative w-full max-w-md bg-white rounded-t-[2rem] sm:rounded-[2rem] p-5 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
                 <div className="flex justify-between items-start">
                    <div className="flex flex-col">
-                      <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tighter">Withdraw Funds</h3>
+                      <h3 className="text-xl font-black italic text-slate-900 uppercase tracking-tighter">Withdraw Funds</h3>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 italic">Enter Payout Credentials</p>
                    </div>
-                   <button onClick={() => setShowWithdraw(false)} className="p-3 bg-slate-100 rounded-2xl text-slate-400 hover:bg-slate-200 transition-colors"><X size={20} /></button>
+                   <button onClick={() => setShowWithdraw(false)} className="p-2 bg-slate-100 rounded-xl text-slate-400 hover:bg-slate-200 transition-colors"><X size={18} /></button>
                 </div>
-                <div className="space-y-6">
-                   <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
+                <div className="space-y-4">
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
                       <div>
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Available for Payout</p>
-                        <p className="text-xl font-black text-slate-900 italic">₹{availableBalance.toLocaleString()}</p>
+                        <p className="text-lg font-black text-slate-900 italic">₹{availableBalance.toLocaleString()}</p>
                       </div>
-                      <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center text-green-500">
-                        <CheckCircle2 size={24} />
+                      <div className="w-8 h-8 bg-green-50 rounded-full flex items-center justify-center text-green-500">
+                        <CheckCircle2 size={20} />
                       </div>
                    </div>
                    <div className="space-y-4">
                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Transfer Amount</label>
+                        <label className="text-[10px]/snug font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Transfer Amount</label>
                         <div className="relative">
-                          <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">₹</span>
-                          <input id="withdraw-amount" type="number" defaultValue={availableBalance} className="w-full bg-white border-2 border-slate-100 rounded-2xl py-5 pl-12 pr-6 font-black text-xl focus:border-amber-500 focus:outline-none transition-all shadow-sm" />
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-base">₹</span>
+                          <input id="withdraw-amount" type="number" defaultValue={availableBalance} className="w-full bg-white border-2 border-slate-100 rounded-xl py-3 pl-10 pr-4 font-black text-lg focus:border-amber-500 focus:outline-none transition-all shadow-sm" />
                         </div>
                      </div>
                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Your UPI ID (Permanent Store)</label>
+                        <label className="text-[10px]/snug font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Your UPI ID (Permanent Store)</label>
                         <input 
                           value={withdrawUpiId || driverProfile?.upiId || ''}
                           onChange={(e) => setWithdrawUpiId(e.target.value)}
                           placeholder="e.g. phone-number@ybl" 
-                          className="w-full bg-white border-2 border-slate-100 rounded-2xl py-5 px-6 font-black text-sm focus:border-amber-500 focus:outline-none transition-all shadow-sm" 
+                          className="w-full bg-white border-2 border-slate-100 rounded-xl py-3 px-4 font-bold text-sm focus:border-amber-500 focus:outline-none transition-all shadow-sm" 
                         />
                      </div>
                    </div>
-                   <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 flex items-start gap-3">
+                   <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 flex items-start gap-2 text-left">
                       <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
                       <p className="text-[9px] font-bold uppercase text-amber-900 leading-relaxed tracking-wide">
                         The entered UPI ID will be saved to your profile and used for all future payouts. Funds typically arrive within 48 hours.
@@ -1185,7 +1205,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                       const upiToUse = withdrawUpiId || driverProfile?.upiId || '';
                       if (amt > 0) handleWithdrawAction(amt, upiToUse);
                     }}
-                    className="w-full py-6 bg-slate-950 text-amber-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 active:scale-95 transition-all"
+                    className="w-full py-4.5 bg-slate-950 text-amber-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all"
                    >
                      Initialize Secure Payout
                    </button>

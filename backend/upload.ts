@@ -9,6 +9,7 @@ import { s3Service } from '../src/services/s3Service';
 const execPromise = util.promisify(exec);
 
 export default async function handler(req: any, res: any) {
+  console.log("UPLOAD_ROUTE_ENTERED");
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -53,55 +54,37 @@ export default async function handler(req: any, res: any) {
         if (isVideo) {
           filename = filename + '.mp4';
           mimetype = 'video/mp4';
-          
-          try {
-            console.log(`[UPLOAD] Starting FFMPEG conversion for ${filename}...`);
-            const tmpInput = path.join('/tmp', `input-${filename}`);
-            const tmpOutput = path.join('/tmp', `output-${filename}`);
-            
-            fs.writeFileSync(tmpInput, fileBuffer);
-            
-            await execPromise(`ffmpeg -i "${tmpInput}" -c:v libx264 -c:a aac -movflags +faststart -preset fast "${tmpOutput}"`);
-            
-            const stat = fs.statSync(tmpOutput);
-            if (stat.size < 1024 * 1024) throw new Error(`Output file size too small: ${stat.size} bytes`);
-
-            fileBuffer = fs.readFileSync(tmpOutput);
-            
-            try { fs.unlinkSync(tmpInput); fs.unlinkSync(tmpOutput); } catch (e) {}
-          } catch (ffmpegErr: any) {
-            console.error("[UPLOAD] ffmpeg failed", ffmpegErr.message);
-            res.status(400).json({ error: 'Video conversion failed.' });
-            return resolve();
-          }
+          console.log(`[UPLOAD] Bypassing FFMPEG conversion for ${filename}...`);
+          // Simply pass through the uploaded file without conversion to prevent timeout
+          // fileBuffer remains as originally read from temporary upload filePath
         } else {
           filename = filename + path.extname(originalName);
         }
 
-        // Upload to S3 using s3Service
-        console.log("UPLOAD_TO_S3_START");
-        
-        console.log("DEBUG_ENV", {
-          AWS_BUCKET_NAME: !!process.env.AWS_BUCKET_NAME,
-          AWS_REGION: !!process.env.AWS_REGION,
-          AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
-          AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY
+        // S3 parameters log
+        console.log("S3_UPLOAD_PARAMS", {
+          filename,
+          mimetype,
+          bucket: process.env.AWS_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || 'undefined',
+          region: process.env.AWS_REGION || 'undefined'
         });
 
+        // Upload to S3 using s3Service
+        console.log("S3_UPLOAD_START");
         const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
+        console.log("S3_UPLOAD_SUCCESS");
 
-        console.log("UPLOAD_TO_S3_SUCCESS");
-        console.log(`[UPLOAD_SUCCESS_S3] File uploaded: ${filename} -> Url: ${fileUrl}`);
-
-        res.status(200).json({ url: fileUrl });
-        console.log("UPLOAD_RESPONSE_SENT");
+        const successResponse = { url: fileUrl };
+        console.log("RESPONSE_SENT", { status: 200, body: successResponse });
+        res.status(200).json(successResponse);
         resolve();
       } catch (writeErr: any) {
-        console.error("UPLOAD_TO_S3_ERROR", writeErr);
-        console.error("UPLOAD_TO_S3_ERROR_RAW", writeErr);
-        console.error("UPLOAD_TO_S3_ERROR_JSON", JSON.stringify(writeErr, null, 2));
+        console.log("S3_UPLOAD_ERROR");
+        console.error("FULL ERROR:", writeErr);
 
-        res.status(500).json({ error: 'Failed to write uploaded file to S3.' });
+        const errorResponse = { error: 'Failed to write uploaded file to S3.' };
+        console.log("RESPONSE_SENT", { status: 500, body: errorResponse });
+        res.status(500).json(errorResponse);
         resolve();
       }
     });

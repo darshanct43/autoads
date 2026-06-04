@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useRef } from "react";
 import { Radio, AlertTriangle, AlertCircle, Activity, X, MapPin, Truck, Check } from "lucide-react";
 import { motion } from "motion/react";

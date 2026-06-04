@@ -73,13 +73,15 @@ export default async function handler(
     });
 
   } catch (error: any) {
+    const description = error?.error?.description || "";
+    
     console.error("FULL RAZORPAY ERROR:");
     console.error(JSON.stringify(error, null, 2));
 
     return res.status(500).json({
       success: false,
       message: error?.message || "Unknown error",
-      description: error?.error?.description || "",
+      description: description,
       full: String(error),
       code: error.code,
       statusCode: error.statusCode,

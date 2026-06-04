@@ -7,7 +7,8 @@ function getEffectiveBucketName(): string {
 }
 
 function validateAWS() {
-  if (!process.env.AWS_REGION || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+  const accessKeyId = process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
+  if (!process.env.AWS_REGION || !accessKeyId || !process.env.AWS_SECRET_ACCESS_KEY) {
     throw new Error('MISSING_AWS_CREDENTIALS: AWS configuration incomplete');
   }
 }
@@ -15,7 +16,7 @@ function validateAWS() {
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    accessKeyId: (process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID)!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
 });
@@ -42,6 +43,12 @@ export const s3Service = {
       ContentType: contentType,
     });
     await s3Client.send(command);
+    
+    const cloudFrontDomain = process.env.AWS_CLOUDFRONT_DOMAIN;
+    if (cloudFrontDomain) {
+      const cleanDomain = cloudFrontDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      return `https://${cleanDomain}/${encodeURI(fileName)}`;
+    }
     
     return `https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
   },
