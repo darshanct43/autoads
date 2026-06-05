@@ -161,6 +161,23 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [paymentConfirmed, setPaymentConfirmed] = useState<boolean>(false);
   const [successDismissed, setSuccessDismissed] = useState<boolean>(false);
   const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
+  const [paymentGatewayConfig, setPaymentGatewayConfig] = useState<any>(null);
+
+  const fetchPaymentConfig = async () => {
+    try {
+      const res = await fetch('/api/payment-config');
+      const data = await res.json();
+      setPaymentGatewayConfig(data);
+      if (data.gateway) setSelectedGateway(data.gateway);
+    } catch (e) {
+      console.warn('Failed to fetch payment config', e);
+      setPaymentGatewayConfig({ gateway: 'razorpay' }); // Default fallback
+    }
+  };
+
+  useEffect(() => {
+    fetchPaymentConfig();
+  }, []);
 
   const setShowPayment = (value: boolean) => {
     if (value) {
@@ -804,7 +821,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     setLoading(true);
     
     try {
-      const response = await fetch('/api/create-order', {
+      const endpoint = '/api/create-order';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -815,7 +834,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
              customerId: user.uid,
              title: campaignDetails.title,
              campaignId: campaignId || ''
-          }
+          },
+          gateway: 'razorpay'
         })
       });
 
@@ -826,8 +846,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
       if (!response.ok) {
         throw new Error(
-          data?.description ||
           data?.message ||
+          data?.description ||
           "Payment failed"
         );
       }
@@ -839,13 +859,16 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         key_id: keyId
       };
       
-      console.log(finalOrderData.id);
+      console.log('Order ID details:', finalOrderData.id, finalOrderData.order_id);
       
-      if (finalOrderData.amount < 100) {
+      const orderAmount = finalOrderData.amount || finalOrderData.order_amount;
+      const minAmount = 100; // Razorpay uses paise
+      
+      if (orderAmount < minAmount) {
         throw new Error("Invalid order amount. Minimum charge not met.");
       }
       setOrderData(finalOrderData);
-      setActiveOrderId(finalOrderData.id);
+      setActiveOrderId(finalOrderData.id || finalOrderData.order_id);
       return finalOrderData;
     } catch (e: any) {
       console.error(`Server initialization failed: ${e.message}`);
@@ -956,7 +979,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       triggerToast(`Modal Error: ${e.message}`, "error");
     }
   };
-
 
   useEffect(() => {
     firebaseService.getPlans().then(setDbPlans).catch(console.error);

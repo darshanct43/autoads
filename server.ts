@@ -22,6 +22,13 @@ async function startServer() {
   app.post('/api/create-order', createOrderHandler as any);
   app.post('/api/verify-payment', verifyPaymentHandler as any);
 
+  app.get('/api/payment-config', (req, res) => {
+    // Determine configured gateway: favor database/environment
+    res.json({
+      gateway: 'razorpay'
+    });
+  });
+
   app.get('/api/stats', async (req, res) => {
     try {
       const data = await getSystemData();
