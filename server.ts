@@ -5,7 +5,7 @@ import adminAiHandler, { getSystemData } from './backend/admin-ai.js';
 import uploadHandler from './lib/upload.js';
 import chatHandler from './backend/chat.js';
 import createOrderHandler from './api/create-order.js';
-import verifyPaymentHandler from './backend/verify-payment.js';
+import verifyPaymentHandler from './api/verify-payment.js';
 
 dotenv.config({ override: true });
 
