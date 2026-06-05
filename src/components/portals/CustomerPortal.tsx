@@ -818,14 +818,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     
     console.log("FRONTEND AMOUNT:", amount);
 
-    // Skip create-order API completely if in Link payment mode
-    const savedMode = localStorage.getItem('PAYMENT_MODE') || 'LINK';
-    if (savedMode === 'LINK') {
-      setIsPreparingOrder(false);
-      setLoading(false);
-      return null;
-    }
-
+    // Explicitly using API mode as the singular payment flow
     setIsPreparingOrder(true);
     setLoading(true);
     
