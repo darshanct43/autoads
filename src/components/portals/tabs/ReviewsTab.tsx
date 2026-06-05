@@ -127,11 +127,11 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
       </div>
 
       <div className="space-y-4 pt-8">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === "PENDING").length})</h3>
+        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT")).length})</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 font-sans">
-          {campaigns.filter((c) => c.status === "PENDING").length > 0 ? (
+          {campaigns.filter((c) => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT")).length > 0 ? (
             campaigns
-              .filter((c) => c.status === "PENDING")
+              .filter((c) => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT"))
               .map((c) => (
                 <motion.div
                   key={c.id}
@@ -159,6 +159,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
                     <div className="absolute top-6 right-6 flex flex-col items-end gap-2">
                       <span className="bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-500 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-2xl">
                         {(() => {
+                          if (c.paymentStatus === 'PAYMENT_LINK_SENT') return "Payment Link Sent";
                           if (!c.paymentReceived) return "Awaiting Payment";
                           if ((c as any).needDesigner && !(c as any).designerApproved) return "Waiting for Designer/User Satisfaction";
                           if (c.mediaReceived || c.mediaUrl || c.assetUrl) return "Admin: Recv Payment & Media Ready";

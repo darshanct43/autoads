@@ -168,7 +168,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       const res = await fetch('/api/payment-config');
       const data = await res.json();
       setPaymentGatewayConfig(data);
-      if (data.gateway) setSelectedGateway(data.gateway);
     } catch (e) {
       console.warn('Failed to fetch payment config', e);
       setPaymentGatewayConfig({ gateway: 'razorpay' }); // Default fallback
@@ -450,6 +449,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   });
 
   const workflowState = machineState.workflowState;
+
+  const paymentMode = 'API';
 
   // Realtime Firestore Campaign Status listener (Engine 1)
   useEffect(() => {
@@ -817,6 +818,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     
     console.log("FRONTEND AMOUNT:", amount);
 
+    // Skip create-order API completely if in Link payment mode
+    const savedMode = localStorage.getItem('PAYMENT_MODE') || 'LINK';
+    if (savedMode === 'LINK') {
+      setIsPreparingOrder(false);
+      setLoading(false);
+      return null;
+    }
+
     setIsPreparingOrder(true);
     setLoading(true);
     
@@ -881,7 +890,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   const handlePaymentAndSubmit = async () => {
     console.log("[PAYMENT_SYSTEM] Payment button clicked debug");
-    if (isPreparingOrder || paymentProcessedRef.current) return;
+    if (paymentProcessedRef.current) return;
+
+    if (isPreparingOrder) return;
     console.log("[PAYMENT_SYSTEM] Payment button clicked");
     console.log("[PAYMENT_SYSTEM] Opening Modal from:", new Error().stack);
     
@@ -1887,10 +1898,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             <div className="flex items-center gap-2">
                               <div className={cn("px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
                                 ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500" :
+                                ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "bg-blue-50 text-blue-600 border border-blue-100 animate-pulse" :
                                 ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "bg-amber-50 text-amber-600 border border-amber-100 animate-pulse" :
                                 "bg-slate-100 text-slate-400"
                               )}>
-                                {ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "Awaiting Payment" : ad.status}
+                                {ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "Waiting For Payment Confirmation" : 
+                                 (ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "Awaiting Payment" : ad.status)}
                               </div>
                               {!ad.paymentReceived && (
                                 <button 
@@ -2085,13 +2098,15 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               <td className="px-8 py-6">
                                  <div className="flex flex-col gap-2">
                                    <span className={cn("text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest border w-fit", 
+                                      ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "bg-blue-50 text-blue-600 border-blue-100 animate-pulse" :
                                       !ad.paymentReceived && ad.status === 'PENDING' ? "bg-red-50 text-red-600 border-red-100 animate-pulse" :
                                       ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                       ad.status === 'APPROVED' ? "bg-green-50 text-green-600 border-green-100" :
                                       ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-lg" :
                                       "bg-red-50 text-red-600 border-red-100"
                                    )}>
-                                      {!ad.paymentReceived && (ad.status === 'PENDING' || ad.status === 'AWAITING_PAYPORTAL') ? "PAYMENT FAILED / INCOMPLETE" :
+                                      {ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "Waiting For Payment Confirmation" :
+                                      !ad.paymentReceived && (ad.status === 'PENDING' || ad.status === 'AWAITING_PAYPORTAL') ? "PAYMENT FAILED / INCOMPLETE" :
                                        ad.paymentReceived && !ad.mediaReceived && !ad.needDesigner && ad.status === 'PENDING' ? "WAITING FOR MEDIA" : 
                                        ad.paymentReceived && ad.needDesigner && ad.status === 'PENDING' ? "DESIGNER ASSIGNED" :
                                        ad.paymentReceived && (ad.mediaReceived || ad.mediaUrl || ad.assetUrl) && (ad.status === 'PENDING' || ad.status === 'PENDING_VERIFICATION') ? "PENDING TEAM APPROVAL" :

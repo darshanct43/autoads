@@ -11,6 +11,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
+  const secrets_candidates: { name: string; value: string }[] = [];
+
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
@@ -20,11 +22,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2. VERIFY KEYS
     if (!key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_'))) {
       console.log('[RAZORPAY_VERIFY_AUTH] VALiD KEY CHECK');
-      return res.status(500).json({ success: false, error: 'CRITICAL: Invalid Razorpay Key ID format. Must start with rzp_live_ or rzp_test_.' });
+      return res.status(500).json({ 
+        success: false, 
+        error: `CRITICAL: Invalid Razorpay Key ID format (Loaded ID: "${key_id ? key_id.substring(0, 12) + "..." : "none"}"). Must start with rzp_live_ or rzp_test_.` 
+      });
     }
 
     // Collect all unique candidate secrets
-    const secrets_candidates: { name: string; value: string }[] = [];
     const addCandidate = (name: string, raw: string | undefined) => {
       if (!raw) return;
       const clean = raw.trim().replace(/^["']|["']$/g, '');
@@ -154,6 +158,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (errorMsg.toString().toLowerCase().includes("authentication") || errorMsg.toString().toLowerCase().includes("auth")) {
       errorMsg = 'Razorpay credentials mismatch: The provided secret or ID is invalid.';
     }
-    res.status(500).json({ success: false, error: errorMsg });
+    res.status(500).json({ 
+      success: false, 
+      error: errorMsg,
+      loadedKeyId: (process.env.RAZOR_PAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").substring(0, 12) + "...",
+      candidateSecretsCount: secrets_candidates.length,
+      candidateSecretsSources: secrets_candidates.map(s => s.name)
+    });
   }
 }

@@ -63,6 +63,7 @@ export interface AdCampaign {
   kidsSafe?: boolean;
   mediaSource?: 'UPLOAD' | 'CANVA';
   mediaAssetId?: string;
+  paymentStatus?: string;
 }
 
 export interface AutoDevice {

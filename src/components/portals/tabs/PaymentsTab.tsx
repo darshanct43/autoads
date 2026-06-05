@@ -305,7 +305,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-[9px] font-black uppercase text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-100">
-                              <Clock size={12} /> {p.status || "Pending"}
+                              <Clock size={12} /> {p.status === 'PAYMENT_LINK_SENT' ? 'Payment Link Sent' : (p.status || "Pending")}
                             </span>
                           )}
                         </div>

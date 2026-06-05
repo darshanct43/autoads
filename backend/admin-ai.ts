@@ -3,7 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { dbAdm } from '../lib/firebase-admin.js';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const MOCK_DRIVERS = [
   {

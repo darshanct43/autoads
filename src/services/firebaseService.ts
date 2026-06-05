@@ -88,6 +88,7 @@ export interface AdCampaign {
   type?: string;
   videoThumbnail?: string;
   paymentReceived?: boolean;
+  paymentStatus?: string;
   mediaReceived?: boolean;
   assetUrl?: string;
   updatedAt?: any;

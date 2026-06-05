@@ -14,6 +14,9 @@ export default async function handler(
     });
   }
 
+  let key_id = "";
+  let key_secret = "";
+
   try {
     const { amount } = req.body;
 
@@ -26,8 +29,8 @@ export default async function handler(
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
-    const key_id = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim().replace(/^["']|["']$/g, '');
-    const key_secret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || '').trim().replace(/^["']|["']$/g, '');
+    key_id = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim().replace(/^["']|["']$/g, '');
+    key_secret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || '').trim().replace(/^["']|["']$/g, '');
 
     if (!key_id || !key_secret) {
       return res.status(500).json({
@@ -62,7 +65,7 @@ export default async function handler(
                         error?.statusCode === 401;
 
     const userFriendlyMessage = isAuthError
-      ? "Razorpay Keys Invalid: The credentials configured in your environment are rejected. Please check them in the settings menu."
+      ? `Razorpay Keys Invalid (Loaded ID: ${key_id ? key_id.substring(0, 12) + "..." : "none"}). Please verify your credentials in your .env file and restart the server.`
       : (error?.message || "Unknown error");
 
     return res.status(500).json({
@@ -72,6 +75,9 @@ export default async function handler(
       full: String(error),
       code: error.code,
       statusCode: error.statusCode,
+      loadedKeyId: key_id ? key_id.substring(0, 12) + "..." : "none",
+      loadedSecretPrefix: key_secret ? key_secret.substring(0, 4) + "..." : "none",
+      loadedSecretLen: key_secret ? key_secret.length : 0,
     });
   }
 }

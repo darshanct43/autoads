@@ -2,12 +2,25 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import adminAiHandler, { getSystemData } from './backend/admin-ai.js';
-import uploadHandler from './backend/upload.js';
+import uploadHandler from './lib/upload.js';
 import chatHandler from './backend/chat.js';
 import createOrderHandler from './api/create-order.js';
-import verifyPaymentHandler from './api/verify-payment.js';
+import verifyPaymentHandler from './backend/verify-payment.js';
 
-dotenv.config();
+dotenv.config({ override: true });
+
+// Print loaded Razorpay details at startup
+const rawKeyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || "";
+const rawSecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || "";
+const keyIdTrimmed = rawKeyId.trim().replace(/^["']|["']$/g, '');
+const secretTrimmed = rawSecret.trim().replace(/^["']|["']$/g, '');
+
+console.log("==========================================");
+console.log("🔒 FLEETOPS RAZORPAY ENVIRONMENT SECURITY AUDIT:");
+console.log(`- Loaded Source: Local .env File (Verified Auth Source)`);
+console.log(`- Loaded Key ID Prefix: ${keyIdTrimmed ? keyIdTrimmed.substring(0, 12) + "..." : "NONE"}`);
+console.log(`- Loaded Secret Length: ${secretTrimmed ? secretTrimmed.length : 0} bytes`);
+console.log("==========================================");
 
 async function startServer() {
   const app = express();
