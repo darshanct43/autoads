@@ -40,7 +40,7 @@ console.log("[Firebase] Initializing with project:", firebaseConfig.projectId);
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 (window as any)._firebaseApp = app;
 
-const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || firebaseAppletConfig.firestoreDatabaseId || '(default)');
+const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || (firebaseAppletConfig as any).firestoreDatabaseId || '(default)');
 
 const dbInstance: Firestore = initializeFirestore(app, {
   localCache: memoryLocalCache()
@@ -49,12 +49,14 @@ const dbInstance: Firestore = initializeFirestore(app, {
 export const db: Firestore = dbInstance;
 console.log("[Firebase] Firestore initialized with memory cache. Database ID:", firestoreDbId);
 
-// Verify connectivity
-getDocs(collection(db, 'drivers')).then(snap => {
-  console.log("[CHECK] Drivers collection size at startup:", snap.size);
-}).catch(err => {
-  console.error("[CHECK] Drivers collection read error:", err);
-});
+// Verify connectivity gracefully
+if (typeof window !== 'undefined' && localStorage.getItem('auto_ads_offline_mode') !== 'true') {
+  getDocs(collection(db, 'drivers')).then(snap => {
+    console.log("[CHECK] Drivers collection size at startup:", snap.size);
+  }).catch(err => {
+    console.warn("[CHECK] Drivers collection read status (ignore if not logged in):", (err as any).message || err);
+  });
+}
 
 // Explicitly initialize Auth with local persistence and popup resolver
 let authInstance: Auth;
@@ -72,6 +74,12 @@ export const storage: FirebaseStorage = getStorage(app);
 
 // Connection verification test with higher resilience
 let loginInProgress = false;
+let cachedAccessToken: string | null = null;
+
+export const getGoogleAccessToken = () => cachedAccessToken;
+export const setGoogleAccessToken = (token: string | null) => {
+  cachedAccessToken = token;
+};
 
 export const googleLogin = async () => {
   if (loginInProgress) {
@@ -80,9 +88,19 @@ export const googleLogin = async () => {
   
   loginInProgress = true;
   const provider = new GoogleAuthProvider();
+  // Request Google Workspace Drive scopes
+  provider.addScope('https://www.googleapis.com/auth/drive.file');
+  provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+  provider.addScope('https://www.googleapis.com/auth/userinfo.email');
   
   try {
-    return await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedAccessToken = credential.accessToken;
+      console.log("[Firebase Auth] Received Google OAuth access token successfully");
+    }
+    return result;
   } catch (error: any) {
     console.error("[Firebase Auth Error]", error);
     if (error.code === 'auth/popup-closed-by-user') {

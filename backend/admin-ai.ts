@@ -1,9 +1,34 @@
 import { OpenAI } from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import { dbAdm } from '../lib/firebase-admin.js';
+import { dbAdm, admin } from '../lib/firebase-admin.js';
 
 dotenv.config({ override: true });
+
+async function trackAiMetric(engine: 'gemini' | 'openai', state: 'request' | 'failure') {
+  try {
+    const docRef = dbAdm.collection('systemMetrics').doc('live');
+    const updateData: any = {};
+    if (engine === 'gemini') {
+      if (state === 'request') {
+        updateData.geminiRequestsToday = admin.firestore.FieldValue.increment(1);
+      } else {
+        updateData.geminiFailures = admin.firestore.FieldValue.increment(1);
+      }
+    } else {
+      if (state === 'request') {
+        updateData.openaiRequestsToday = admin.firestore.FieldValue.increment(1);
+      } else {
+        updateData.openaiFailures = admin.firestore.FieldValue.increment(1);
+      }
+    }
+    // Track write operation too
+    updateData.firestoreWrites = admin.firestore.FieldValue.increment(1);
+    await docRef.set(updateData, { merge: true });
+  } catch (err: any) {
+    console.warn("[Telemetry Sync Warning] Failed to track AI request counters:", err.message);
+  }
+}
 
 const MOCK_DRIVERS = [
   {
@@ -147,30 +172,11 @@ export default async function handler(req: any, res: any) {
     const data = await getSystemData();
     const systemPrompt = `You are AutoAds AI Admin Assistant. You have access to the following raw fleet/campaign data: ${JSON.stringify(data)}. Answer user questions concisely, accurately, and beautifully based on this data. If the user asks for driver statistics or active campaigns, use the details provided. For any query, keep your response direct and human-friendly.`;
 
-    let openAiError: any = null;
+    let geminiError: any = null;
 
-    // 1. Attempt OpenAI API if key is present
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        console.log("[AI Assistant] Accessing OpenAI GPT-4o backend...");
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message }
-          ],
-        });
-        const text = completion.choices[0].message.content;
-        return res.status(200).json({ text, provider: 'openai' });
-      } catch (err: any) {
-        openAiError = err;
-        console.warn("[AI Assistant Warning] OpenAI failed (rate limit/quota/config), trying Gemini fallback...", err.message);
-      }
-    }
-
-    // 2. Fallback or direct use of @google/genai (Gemini 3.5 Flash)
+    // 1. Attempt Gemini 3.5 Flash first if key is present (standard build integrations)
     if (process.env.GEMINI_API_KEY) {
+      await trackAiMetric('gemini', 'request');
       try {
         console.log("[AI Assistant] Accessing Gemini-3.5-Flash backend...");
         const ai = new GoogleGenAI({
@@ -190,12 +196,36 @@ export default async function handler(req: any, res: any) {
         });
         return res.status(200).json({
           text: response.text,
-          provider: 'gemini',
-          warning: openAiError ? `OpenAI quota exceeded, fell back to Gemini 3.5 Flash` : undefined
+          provider: 'gemini'
         });
-      } catch (geminiError: any) {
-        console.error("[AI Assistant Error] Gemini failed too.", geminiError.message);
-        throw new Error(`AI Engines failed. OpenAI Error: ${openAiError?.message || 'not set'}. Gemini Error: ${geminiError.message}`);
+      } catch (err: any) {
+        geminiError = err;
+        await trackAiMetric('gemini', 'failure');
+        console.log("[AI Assistant] Gemini query failed, trying OpenAI as fallback...", err.message);
+      }
+    }
+
+    // 2. Fallback to OpenAI if key is present
+    if (process.env.OPENAI_API_KEY) {
+      await trackAiMetric('openai', 'request');
+      try {
+        console.log("[AI Assistant] Accessing OpenAI GPT-4o backend...");
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+          ],
+        });
+        const text = completion.choices[0].message.content;
+        return res.status(200).json({ text, provider: 'openai' });
+      } catch (err: any) {
+        await trackAiMetric('openai', 'failure');
+        console.log("[AI Assistant] OpenAI query failed too.", err.message);
+        if (geminiError) {
+          throw new Error(`AI Engines failed. Gemini Error: ${geminiError.message}. OpenAI Error: ${err.message}`);
+        }
       }
     }
 

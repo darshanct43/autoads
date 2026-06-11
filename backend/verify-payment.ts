@@ -72,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const razorpay = new Razorpay({ key_id, key_secret: matchingSecret });
     console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount, "using secret source:", matchingSecretName);
     try {
-      await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
+      await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
     } catch (err: any) {
       console.log("ERR RAW:", err);
       console.log("ERR JSON:", JSON.stringify(err, null, 2));

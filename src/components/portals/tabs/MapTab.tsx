@@ -14,7 +14,6 @@ import {
   Polyline,
   useMap,
 } from "react-leaflet";
-import MarkerClusterGroup from "react-leaflet-markercluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
@@ -278,8 +277,7 @@ export const MapTab: React.FC<MapTabProps> = ({
                   </Marker>
                 ))}
 
-            <MarkerClusterGroup maxClusterRadius={20} disableClusteringAtZoom={15}>
-              {driverLocations
+            {driverLocations
                 .filter(
                   (loc) =>
                     typeof loc.lat === "number" &&
@@ -410,7 +408,6 @@ export const MapTab: React.FC<MapTabProps> = ({
                     </Marker>
                   );
                 })}
-            </MarkerClusterGroup>
 
             {driverLocations.filter((loc) => loc.isOnline && (!loc.lat || loc.lat === 0)).length > 0 && (
               <div className="absolute bottom-6 right-6 z-[1000] bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest animate-bounce shadow-2xl flex items-center gap-2">

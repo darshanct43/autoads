@@ -72,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const razorpay = new Razorpay({ key_id, key_secret: matchingSecret });
     console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount, "using secret source:", matchingSecretName);
     try {
-      await razorpay.payments.capture(razorpay_payment_id, planData?.amount || 0, "INR");
+      await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
     } catch (err: any) {
       console.log("ERR RAW:", err);
       console.log("ERR JSON:", JSON.stringify(err, null, 2));
@@ -115,7 +115,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const paymentRef = await dbAdm.collection('payments').add(paymentRecord);
         console.log("LOG_FIREBASE_PAYMENT_WRITE_RESULT: Payment record added with ID:", paymentRef.id);
 
+        let resolvedCampaignId = finalCampaignId;
+        let campaignName = campaignData?.title || 'Unknown Campaign';
+        let campaignFranchiseId = campaignData?.franchiseId || null;
+        let campaignCreatedBy = campaignData?.createdBy || uid || 'UNKNOWN';
+
         if (finalCampaignId) {
+            try {
+              const campaignDoc = await dbAdm.collection('campaigns').doc(finalCampaignId).get();
+              if (campaignDoc.exists) {
+                const data = campaignDoc.data();
+                if (data) {
+                  if (data.title) campaignName = data.title;
+                  if (data.franchiseId) campaignFranchiseId = data.franchiseId;
+                  if (data.createdBy) campaignCreatedBy = data.createdBy;
+                }
+              }
+            } catch (fetchErr) {
+              console.error("Error fetching campaign data:", fetchErr);
+            }
+
             await dbAdm.collection('campaigns').doc(finalCampaignId).set({
               status: 'ACTIVE',
               paymentStatus: 'PAID',
@@ -124,15 +143,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }, { merge: true });
             console.log("LOG_FIREBASE_CAMPAIGN_UPDATE_RESULT: Campaign updated with ID:", finalCampaignId);
         } else if (campaignData) {
-            const campaignRef = await dbAdm.collection('campaigns').add({
+            const campaignDataToSave = {
               ...campaignData,
               status: 'ACTIVE',
               paymentStatus: 'PAID',
               paymentReceived: true,
               updatedAt: FieldValue.serverTimestamp()
-            });
+            };
+            const campaignRef = await dbAdm.collection('campaigns').add(campaignDataToSave);
+            resolvedCampaignId = campaignRef.id;
             console.log("LOG_FIREBASE_CAMPAIGN_CREATE_RESULT: New campaign created with ID:", campaignRef.id);
         }
+
+        const amount = planData?.amount || 0;
+        const isFranchiseCampaign = campaignFranchiseId && campaignFranchiseId !== 'HQ' && campaignFranchiseId !== 'global' && campaignFranchiseId !== 'UNASSIGNED';
+        const source = isFranchiseCampaign ? 'FRANCHISE' : 'HQ';
+        
+        let franchiseRevenue = 0;
+        let platformRevenue = amount;
+        
+        if (source === 'FRANCHISE') {
+          franchiseRevenue = amount * 0.70;
+          platformRevenue = amount * 0.30;
+        }
+
+        const ledgerRecord = {
+          paymentId: paymentRef.id,
+          campaignId: resolvedCampaignId || 'PENDING',
+          campaignName: campaignName,
+          customerId: uid || 'UNKNOWN',
+          amount: amount,
+          grossRevenue: amount,
+          platformRevenue: platformRevenue,
+          franchiseAmount: franchiseRevenue,
+          franchiseRevenue: franchiseRevenue,
+          source: source,
+          franchiseId: campaignFranchiseId || null,
+          status: 'PENDING_SETTLEMENT',
+          createdAt: FieldValue.serverTimestamp()
+        };
+
+        const ledgerRef = await dbAdm.collection('revenueLedger').add(ledgerRecord);
+        console.log("LOG_FIREBASE_REVENUE_LEDGER_WRITE_RESULT: Revenue ledger record added with ID:", ledgerRef.id);
+
       } catch (dbError: any) {
         if (dbError?.message?.includes('PERMISSION_DENIED') || !process.env.FIREBASE_SERVICE_ACCOUNT) {
            // Silently proceed if admin SDK lacks valid credentials

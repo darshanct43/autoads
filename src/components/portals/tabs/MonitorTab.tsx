@@ -28,7 +28,6 @@ interface MonitorTabProps {
   setViewingUnit: (unit: any) => void;
   setNetworkConfigTarget: (terminalId: string | null) => void;
   startTVSession: (terminal: any) => void;
-  handleCaptureFrame: (terminal: any) => void;
   handleRemoteCommand: (terminalId: string, cmd: string, params?: any) => void;
 }
 
@@ -40,7 +39,6 @@ export const MonitorTab: React.FC<MonitorTabProps> = ({
   setViewingUnit,
   setNetworkConfigTarget,
   startTVSession,
-  handleCaptureFrame,
   handleRemoteCommand,
 }) => {
   // Determine online helper

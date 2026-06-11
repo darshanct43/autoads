@@ -14,6 +14,8 @@ export interface AuditLog {
   performedBy: string; // user id or user email
   performedByName?: string;
   targetId: string;
+  stateId?: string;
+  territoryId?: string;
   cityId?: string;
   franchiseId?: string;
   timestamp: any;
@@ -26,6 +28,8 @@ export interface AuditLog {
 export async function writeAuditLog(
   action: string, 
   targetId: string, 
+  stateId?: string,
+  territoryId?: string,
   cityId?: string, 
   franchiseId?: string,
   details?: string
@@ -37,8 +41,10 @@ export async function writeAuditLog(
       performedBy: user?.uid || 'SYSTEM',
       performedByName: user?.email || 'System Daemon',
       targetId,
-      cityId: cityId || 'global',
-      franchiseId: franchiseId || 'global',
+      stateId: stateId || 'KA',
+      territoryId: territoryId || 'T-UNASSIGNED',
+      cityId: cityId || 'UNASSIGNED',
+      franchiseId: franchiseId || null,
       timestamp: serverTimestamp(),
       details
     };
@@ -63,6 +69,8 @@ export async function approveDriverProfile(
       adminApproved: true,
       kycStatus: 'APPROVED',
       status: 'ACTIVE',
+      stateId: 'KA',
+      territoryId: 'T-UNASSIGNED',
       cityId,
       franchiseId,
       approvedBy: auth.currentUser?.email || auth.currentUser?.uid || 'UNKNOWN'
@@ -73,6 +81,8 @@ export async function approveDriverProfile(
       await updateDoc(userRef, {
         role: 'DRIVER',
         status: 'ACTIVE',
+        stateId: 'KA',
+        territoryId: 'T-UNASSIGNED',
         cityId,
         franchiseId
       });
@@ -81,6 +91,8 @@ export async function approveDriverProfile(
       await setDoc(userRef, {
         role: 'DRIVER',
         status: 'ACTIVE',
+        stateId: 'KA',
+        territoryId: 'T-UNASSIGNED',
         cityId,
         franchiseId,
         email: driverId + '@autoads.in'
@@ -90,6 +102,8 @@ export async function approveDriverProfile(
     await writeAuditLog(
       'approved_driver', 
       driverId, 
+      'KA',
+      'HQ',
       cityId, 
       franchiseId, 
       `Driver approved under ${cityId} / ${franchiseId} by ${approvingAgentRole}`
@@ -116,6 +130,8 @@ export async function approveCampaignWithMetadata(
     const campaignRef = doc(db, 'campaigns', campaignId);
     await updateDoc(campaignRef, {
       status: 'APPROVED',
+      stateId: 'KA',
+      territoryId: 'T-UNASSIGNED',
       cityId,
       franchiseId,
       categoryTags: tags,
@@ -127,6 +143,8 @@ export async function approveCampaignWithMetadata(
     await writeAuditLog(
       'approved_campaign',
       campaignId,
+      'KA',
+      'HQ',
       cityId,
       franchiseId,
       `Campaign moderation approved. Tags: ${tags.join(', ')}. SafeContent: ${safeContent}, KidsSafe: ${kidsSafe}`
@@ -156,6 +174,8 @@ export async function approveAndMapDevice(
       await updateDoc(deviceRef, {
         status: 'ACTIVE',
         driverId,
+        stateId: 'KA',
+        territoryId: 'T-UNASSIGNED',
         cityId,
         franchiseId,
         approvedBy: auth.currentUser?.email || auth.currentUser?.uid || 'UNKNOWN'
@@ -164,6 +184,8 @@ export async function approveAndMapDevice(
       await setDoc(deviceRef, {
         id: deviceId,
         driverId,
+        stateId: 'KA',
+        territoryId: 'T-UNASSIGNED',
         cityId,
         franchiseId,
         location: { lat: 12.9716, lng: 77.5946 }, // Default (Bangalore center)
@@ -177,6 +199,8 @@ export async function approveAndMapDevice(
     await writeAuditLog(
       'approved_device',
       deviceId,
+      'KA',
+      'HQ',
       cityId,
       franchiseId,
       `Activated Terminal Device and scoped to city ${cityId} mapped to driver ${driverId}`

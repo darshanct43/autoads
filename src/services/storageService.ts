@@ -125,19 +125,39 @@ export const storageService = {
           formData.append('folder', folder);
         }
 
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData
-        });
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
 
-        if (!response.ok) {
-          throw new Error('Upload failed');
-        }
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            if (onProgress) {
+              onProgress({ progress: pct, status: 'UPLOADING' });
+            }
+          }
+        };
 
-        const data = await response.json();
-        
-        if (onProgress) onProgress({ progress: 100, status: 'SUCCESS', url: data.url });
-        resolve(data.url);
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (onProgress) {
+                onProgress({ progress: 100, status: 'SUCCESS', url: data.url });
+              }
+              resolve(data.url);
+            } catch (jsonErr) {
+              reject(new Error("Invalid JSON response from upload API"));
+            }
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error("Network error during upload"));
+        };
+
+        xhr.send(formData);
       } catch (err: any) {
         if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: err.message });
         reject(err);

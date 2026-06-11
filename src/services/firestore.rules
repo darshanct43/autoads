@@ -32,13 +32,13 @@ service cloud.firestore {
     function isStaff() {
       return isSignedIn() && (
         isAdmin() ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['STAFF', 'SUPPORT']
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['STAFF', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM']
       );
     }
     function isSupport() {
       return isSignedIn() && (
         isAdmin() ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPORT'
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM']
       );
     }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
@@ -69,19 +69,23 @@ service cloud.firestore {
     function isValidUser(u) {
       return u.uid == request.auth.uid &&
              u.phone is string &&
-             u.role in ['DRIVER', 'CUSTOMER', 'STAFF', 'SUPPORT', 'ADMIN'];
+             u.role in ['DRIVER', 'CUSTOMER', 'STAFF', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM', 'ADMIN'];
     }
 
     function isValidSupportTicket(t) {
-      return t.driverId == request.auth.uid &&
-             t.title is string && t.title.size() < 200 &&
-             t.status == 'open' &&
-             t.createdAt == request.time;
+      return (
+        (('driverId' in t && t.driverId == request.auth.uid) || 
+         ('customerId' in t && t.customerId == request.auth.uid)) &&
+        t.title is string && t.title.size() < 200 &&
+        (t.status == 'OPEN' || t.status == 'open') &&
+        t.createdAt == request.time
+      );
     }
 
     function isValidChatMessage(m) {
       return m.senderId == request.auth.uid &&
-             m.text is string && m.text.size() > 0 && m.text.size() < 1000 &&
+             (('text' in m && m.text is string && m.text.size() > 0) || 
+              ('content' in m && m.content is string && m.content.size() > 0)) &&
              m.timestamp == request.time;
     }
 
@@ -238,15 +242,15 @@ service cloud.firestore {
 
     // Support Tickets
     match /supportTickets/{ticketId} {
-      allow read: if isStaff() || (isSignedIn() && existing().driverId == request.auth.uid);
+      allow read: if isStaff() || (isSignedIn() && (resource.data.driverId == request.auth.uid || resource.data.customerId == request.auth.uid));
       allow create: if isSignedIn() && isValidSupportTicket(incoming());
-      allow update: if isStaff() || (isSignedIn() && existing().driverId == request.auth.uid && (
+      allow update: if isStaff() || (isSignedIn() && (resource.data.driverId == request.auth.uid || resource.data.customerId == request.auth.uid) && (
         incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'unreadCount', 'status'])
       ));
 
       match /messages/{messageId} {
-        allow read: if isStaff() || (isSignedIn() && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid);
-        allow create: if (isStaff() || (isSignedIn() && get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid)) && isValidChatMessage(incoming());
+        allow read: if isStaff() || (isSignedIn() && (get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.customerId == request.auth.uid));
+        allow create: if (isStaff() || (isSignedIn() && (get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.customerId == request.auth.uid))) && isValidChatMessage(incoming());
       }
     }
   }

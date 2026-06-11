@@ -6,6 +6,8 @@ import uploadHandler from './lib/upload.js';
 import chatHandler from './backend/chat.js';
 import createOrderHandler from './api/create-order.js';
 import verifyPaymentHandler from './api/verify-payment.js';
+import backupEnvHandler from './api/backup-env.js';
+import systemMetricsHandler from './api/system-metrics.js';
 
 dotenv.config({ override: true });
 
@@ -34,6 +36,8 @@ async function startServer() {
   app.post('/api/chat', chatHandler as any);
   app.post('/api/create-order', createOrderHandler as any);
   app.post('/api/verify-payment', verifyPaymentHandler as any);
+  app.post('/api/backup-env', backupEnvHandler as any);
+  app.get('/api/system-metrics', systemMetricsHandler as any);
 
   app.get('/api/payment-config', (req, res) => {
     // Determine configured gateway: favor database/environment
@@ -69,8 +73,12 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    console.log(`[Server] Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
+    app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+    app.use('/videos', express.static(path.join(process.cwd(), 'videos')));
     app.get('*', (req, res) => {
+      console.log(`[Server] Serving index.html for request: ${req.url}`);
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

@@ -67,7 +67,7 @@ export const DeviceHealthCenterTab: React.FC = () => {
           >
             <div className="flex justify-between items-start">
               <h3 className="font-mono font-bold truncate">ID: {d.id}</h3>
-              <div className={cn("w-1.5 h-1.5 rounded-full", d.status === 'ONLINE' ? 'bg-green-500' : 'bg-red-500')} />
+              <div className={cn("w-1.5 h-1.5 rounded-full", d.status === 'ACTIVE' ? 'bg-green-500' : 'bg-red-500')} />
             </div>
             
             <div className="space-y-0.5 text-slate-500">

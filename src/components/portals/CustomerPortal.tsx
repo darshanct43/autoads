@@ -337,8 +337,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  const activeTicket = useMemo(() => {
+    const ticket = tickets.find(t => t.id === activeTicketId) || null;
+    console.log("[DEBUG] activeTicket memo:", { activeTicketId, ticketsLength: tickets.length, ticket });
+    return ticket;
+  }, [tickets, activeTicketId]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [isCreateTicketOpen, setIsCreateTicketOpen] = useState(false);
   const [ticketForm, setTicketForm] = useState({
     title: '',
@@ -493,7 +498,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     return () => {
       unsubscribe();
     };
-  }, [createdCampaignId, user?.uid, showPayment]);
+  }, [createdCampaignId, user?.uid]);
 
   // Handle auto-destruction of payment modal and stopping loaders upon finding ACTIVE state
   useEffect(() => {
@@ -532,8 +537,20 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     (window as any)._handleSuccessTransition = handleSuccessTransition;
   }, []);
 
-  const updatePlanPrice = (planId: string, newPrice: string) => {
-    // Editing disabled in Customer Portal
+  const updatePlanPrice = async (planId: string, newPrice: string) => {
+    try {
+      await firebaseService.proposePlanChange({
+        planId,
+        currentPrice: 0,
+        proposedPrice: parseInt(newPrice) || 0,
+        reason: 'Requested via Customer Portal',
+        type: 'price'
+      });
+      // showToast("Proposed plan price update", "success");
+    } catch (e) {
+      console.error(e);
+      // showToast("Failed to propose update", "error");
+    }
   };
 
   const [selectedPlan, setSelectedPlan] = useState<any>(plans[1]);
@@ -550,6 +567,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [loading, setLoading] = useState(false);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadingCampaignId, setUploadingCampaignId] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
   const [uploadTimeLeft, setUploadTimeLeft] = useState(120);
   const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -985,7 +1003,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   useEffect(() => {
-    firebaseService.getPlans().then(setDbPlans).catch(console.error);
+    const unsubPlans = firebaseService.subscribeToPlans(setDbPlans);
 
     // Pre-load Razorpay script
     if (typeof (window as any).Razorpay === 'undefined') {
@@ -1002,7 +1020,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       }
       setLoading(false);
     });
-    return () => unsubscribeAuth();
+    return () => {
+      unsubPlans();
+      unsubscribeAuth();
+    };
   }, []);
 
   useEffect(() => {
@@ -1023,11 +1044,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     
     const unsubscribeCampaigns = firebaseService.subscribeToCampaigns((campaigns) => {
       setMyCampaigns(campaigns);
-    }, user.uid);
+    }, undefined, false, user.uid, phone);
 
     const unsubscribePayments = firebaseService.subscribeToPayments((payDocs) => {
       setPayments(payDocs);
-    }, user.uid, phone);
+    }, undefined, false, user.uid, phone);
 
     const unsubscribeDevices = firebaseService.subscribeToDevices((devs) => {
       setDevices(devs);
@@ -1041,7 +1062,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       setLiveStatus(statuses || []);
     });
 
-    const unsubscribeTickets = firebaseService.subscribeToCustomerTickets(user.uid, setTickets);
+    const unsubscribeTickets = firebaseService.subscribeToSupportTickets(setTickets, { userId: user.uid });
 
     return () => {
       unsubscribeNotices();
@@ -1055,13 +1076,36 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   }, [user?.uid, phone]);
 
   useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      console.error("[GLOBAL_ERROR_HANDLER]", event.error, event.message);
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      console.error("[GLOBAL_REJECTION_HANDLER]", event.reason);
+    };
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     if (activeTicketId) {
-      const unsubscribeChat = firebaseService.subscribeToMessages(activeTicketId, setChatMessages);
-      return () => unsubscribeChat();
+      console.log("[DEBUG] subscribeToMessages:", { activeTicketId });
+      const unsubscribeChat = firebaseService.subscribeToMessages(activeTicketId, (msgs) => {
+        console.log("[DEBUG] subscribeToMessages callback:", { activeTicketId, msgsLength: msgs.length });
+        setChatMessages(msgs);
+      });
+      return () => {
+        console.log("[DEBUG] unsubscribeMessages:", { activeTicketId });
+        unsubscribeChat();
+      };
     }
   }, [activeTicketId]);
 
   const handleCreateTicketSubmit = async (e: React.FormEvent) => {
+    console.log("[DEBUG] handleCreateTicketSubmit called", { ticketForm });
     e.preventDefault();
     if (!user) return;
     if (!ticketForm.title.trim() || !ticketForm.description.trim()) {
@@ -1072,14 +1116,16 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     setLoading(true);
     try {
       const ticketId = await firebaseService.createSupportTicket({
-        customerId: user.uid,
+        userId: user.uid,
         customerName: userProfile?.name || user.displayName || user.email || 'Customer',
         title: ticketForm.title,
+        message: ticketForm.description,
         description: ticketForm.description,
         priority: ticketForm.priority,
         category: ticketForm.category,
         type: 'CUSTOMER'
       });
+      console.log("[DEBUG] createSupportTicket success", { ticketId });
       
       setIsCreateTicketOpen(false);
       setTicketForm({
@@ -1090,9 +1136,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       });
       setActiveTicketId(ticketId);
       setActiveTab('TICKETS');
+      console.log("[DEBUG] setActiveTicketId called", { ticketId });
       triggerToast("Support ticket raised successfully! Connecting to Help Desk chat...", "success");
     } catch (err: any) {
-      console.error(err);
+      console.error("[DEBUG] createSupportTicket failed", err);
       alert("Failed to create ticket: " + err.message);
     } finally {
       setLoading(false);
@@ -1102,7 +1149,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !activeTicketId || !user) return;
     try {
-      await firebaseService.sendChatMessage(activeTicketId, {
+      await firebaseService.sendTicketChatMessage(activeTicketId, {
         content: newMessage,
         senderId: user.uid,
         senderName: userProfile?.name || user.displayName || 'Customer'
@@ -1230,6 +1277,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const handleUploadMediaToCampaign = async (campaignId: string, file: File) => {
     if (!user) return;
     try {
+      setUploadingCampaignId(campaignId);
       setIsUploadingMedia(true);
       setUploadProgress(0);
       
@@ -1255,6 +1303,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       alert("Upload failed: " + err.message);
     } finally {
       setIsUploadingMedia(false);
+      setUploadingCampaignId(null);
       setUploadProgress(0);
     }
   };
@@ -1314,6 +1363,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-[#f8fafc] flex flex-col relative overflow-x-hidden">
       {/* Immersive Animated Background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0 bg-[#f8fafc]">
@@ -1514,239 +1564,252 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           <StaticImpactVideos />
         )}
 
-        {activeTab === 'TICKETS' && (
-          <div 
-            className={cn("flex bg-white/50 backdrop-blur-xl border border-slate-200/50 rounded-[3rem] overflow-hidden shadow-2xl relative", activeTab === 'TICKETS' ? "h-[calc(100vh-200px)] md:h-[calc(100vh-250px)] min-h-[400px]" : "h-0")}
-          >
-            {/* Background elements for chat */}
-            <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 blur-[100px] pointer-events-none rounded-full" />
-            <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-500/5 blur-[100px] pointer-events-none rounded-full" />
-            
-            {/* Sidebar */}
-            <div className={cn(
-              "w-80 border-r border-slate-100 flex flex-col bg-white/50 backdrop-blur-md transition-all duration-300 relative z-10",
-              activeTicketId ? "hidden md:flex" : "flex w-full md:w-80"
-            )}>
-               <div className="p-8 border-b border-slate-100 bg-white flex justify-between items-center">
-                  <div>
-                     <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Your Help Desk</h3>
-                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">Chat with our Team</p>
-                  </div>
-                  <button
-                    onClick={() => setIsCreateTicketOpen(true)}
-                    className="p-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center group"
-                    title="Create Support Ticket"
-                  >
-                    <Plus size={16} className="group-hover:rotate-90 transition-transform duration-300" />
-                  </button>
-               </div>
-               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {tickets.map((t) => (
+        <ErrorBoundary componentName="TICKETS_TAB">
+            <div 
+              className={cn(
+                  "flex bg-white/50 backdrop-blur-xl border border-slate-200/50 rounded-[3rem] overflow-hidden shadow-2xl relative", 
+                  (activeTab === 'TICKETS' || activeTicketId) ? "h-[calc(100vh-200px)] md:h-[calc(100vh-250px)] min-h-[400px]" : "h-0 opacity-0 hidden"
+              )}
+            >
+              {/* Background elements for chat */}
+              <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 blur-[100px] pointer-events-none rounded-full" />
+              <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-500/5 blur-[100px] pointer-events-none rounded-full" />
+              
+              {/* Sidebar */}
+              <div className={cn(
+                "w-80 border-r border-slate-100 flex flex-col bg-white/50 backdrop-blur-md transition-all duration-300 relative z-10",
+                activeTicketId ? "hidden md:flex" : "flex w-full md:w-80"
+              )}>
+                 <div className="p-8 border-b border-slate-100 bg-white flex justify-between items-center">
+                    <div>
+                       <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Your Help Desk</h3>
+                       <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">Chat with our Team</p>
+                    </div>
                     <button
-                      key={t.id}
-                      onClick={() => setActiveTicketId(t.id!)}
-                      className={cn(
-                        "w-full p-6 rounded-3xl border transition-all text-left relative group",
-                        activeTicketId === t.id 
-                          ? "bg-slate-900 border-slate-900 text-white shadow-xl md:translate-x-2" 
-                          : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
-                      )}
+                      onClick={() => setIsCreateTicketOpen(true)}
+                      className="p-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center group"
+                      title="Create Support Ticket"
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border", 
-                          t.status?.toLowerCase() === 'open' ? "bg-amber-100 border-amber-200 text-amber-600" :
-                          t.status?.toLowerCase() === 'resolved' ? "bg-green-100 border-green-200 text-green-600" :
-                          "bg-blue-100 border-blue-200 text-blue-600"
-                        )}>
-                          {t.status}
-                        </span>
-                        {t.priority === 'HIGH' && <AlertCircle size={12} className="text-red-500 animate-pulse" />}
-                      </div>
-                      <p className="text-[10px] font-black uppercase tracking-tight line-clamp-1 mb-1">{t.title}</p>
-                      <p className="text-[8px] font-bold opacity-60 line-clamp-1 italic">{t.description}</p>
+                      <Plus size={16} className="group-hover:rotate-90 transition-transform duration-300" />
                     </button>
-                  ))}
-                  {tickets.length === 0 && (
-                    <div className="py-20 text-center px-4">
-                       <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <MessageSquare className="text-slate-200" size={32} />
-                       </div>
-                       <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-4">No support chats started</p>
-                       <button
-                         onClick={() => setIsCreateTicketOpen(true)}
-                         className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 transition-all inline-flex items-center gap-2"
-                       >
-                         <Plus size={12} /> Start Ticket
-                       </button>
-                    </div>
-                  )}
-               </div>
-            </div>
-
-            {/* Chat Area */}
-            <div className={cn(
-              "flex-1 flex flex-col bg-transparent relative z-10 transition-all duration-300",
-              !activeTicketId && "hidden md:flex"
-            )}>
-               {activeTicketId ? (
-                 <>
-                   <div className="h-20 border-b border-slate-100 px-4 md:px-8 flex items-center justify-between bg-white/60 backdrop-blur-md">
-                      <div className="flex items-center gap-2 md:gap-4">
-                         <button 
-                           onClick={() => setActiveTicketId(null)}
-                           className="p-2.5 bg-slate-900 border border-slate-800 text-amber-500 rounded-xl transition-all shadow-xl hover:bg-slate-800 active:scale-95 flex items-center justify-center group"
-                           title="Back to Tickets"
-                         >
-                           <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
-                         </button>
-                         <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 shadow-md">
-                            <User size={18} />
-                         </div>
-                         <div>
-                            <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight italic">
-                              {tickets.find(t => t.id === activeTicketId)?.title}
-                            </h4>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Support Conversation</p>
-                         </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                         {tickets.find(t => t.id === activeTicketId)?.category === 'Design Strategy' && tickets.find(t => t.id === activeTicketId)?.status !== 'resolved' && (
-                           <button 
-                             onClick={() => handleApproveDesign(tickets.find(t => t.id === activeTicketId)!)}
-                             disabled={loading}
-                             className="px-4 py-2 bg-green-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-green-500/20 hover:scale-105 transition-all flex items-center gap-2"
-                           >
-                              <CheckCircle2 size={14} /> SATISFIED & APPROVE
-                           </button>
-                         )}
-                         <span className="text-[10px] font-black text-slate-300 uppercase">#{activeTicketId.slice(-6).toUpperCase()}</span>
-                      </div>
-                   </div>
-
-                   <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50/30">
-                      {chatMessages.map((msg, i) => (
-                        <div 
-                          key={i}
-                          className={cn(
-                            "flex flex-col max-w-[80%]",
-                            msg.senderId === user?.uid ? "ml-auto items-end" : "items-start"
-                          )}
-                        >
-                           <div className={cn(
-                             "px-5 py-4 rounded-[1.5rem] text-[11px] font-bold tracking-tight shadow-sm flex flex-col gap-2",
-                             msg.senderId === user?.uid 
-                               ? "bg-slate-900 text-white rounded-tr-none" 
-                               : msg.senderId === 'system' ? "bg-amber-50 border border-amber-100 text-amber-600 rounded-tl-none italic" : "bg-white border border-slate-100 text-slate-600 rounded-tl-none"
-                           )}>
-                              {msg.mediaUrl && (
-                                msg.mediaType === 'VIDEO' || msg.mediaUrl.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
-                                  <video src={getSafeUrl(msg.mediaUrl)} controls className="max-w-[200px] md:max-w-[300px] rounded-xl" />
-                                ) : (
-                                  <img src={getSafeUrl(msg.mediaUrl)} alt="Attachment" className="max-w-[200px] md:max-w-[300px] rounded-xl object-contain" />
-                                )
-                              )}
-                              {msg.content || msg.text}
-                           </div>
-                           <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-2 px-2">
-                             {msg.senderName} • {typeof msg.timestamp === 'object' && msg.timestamp?.seconds ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Just now'}
-                           </span>
-                        </div>
-                      ))}
-                      {chatMessages.length === 0 && (
-                        <div className="h-full flex items-center justify-center">
-                           <div className="text-center space-y-4 max-w-xs">
-                              <Sparkles className="mx-auto text-slate-200" size={48} />
-                              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-relaxed italic">Wait for designer response...</p>
-                           </div>
-                        </div>
-                      )}
-                   </div>
-
-                   <div className="p-6 border-t border-slate-100 bg-white">
-                      <div className="flex gap-4 items-center">
-                         <label className="w-14 h-14 bg-slate-100 text-slate-500 rounded-2xl flex items-center justify-center hover:bg-slate-200 transition-all cursor-pointer shadow-sm relative">
-                            {isUploadingMedia ? (
-                              <div className="absolute inset-0 flex items-center justify-center bg-slate-100 rounded-2xl">
-                                <span className="text-[10px] font-black">{uploadProgress}%</span>
-                              </div>
-                            ) : (
-                              <Paperclip size={20} />
-                            )}
-                            <input 
-                              type="file" 
-                              className="hidden" 
-                              accept="image/*,video/mp4,video/webm"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file || !activeTicketId) return;
-                                
-                                setIsUploadingMedia(true);
-                                setUploadProgress(0);
-                                try {
-                                  let mediaUrl = "";
-                                  const isVideo = file.type.startsWith('video');
-                                  
-                                  mediaUrl = await storageService.uploadFile(file, (p) => {
-                                    setUploadProgress(p.progress || 0);
-                                  });
-                                  
-                                  await firebaseService.sendChatMessage(activeTicketId, {
-                                    senderId: user?.uid || 'CUSTOMER',
-                                    senderName: user?.displayName || 'Customer',
-                                    senderRole: 'customer',
-                                    text: "Sent an attachment",
-                                    mediaUrl,
-                                    mediaType: isVideo ? 'VIDEO' : 'IMAGE'
-                                  });
-                                } catch (err) {
-                                  console.error("Attachment upload error:", err);
-                                  alert("Failed to upload attachment: " + (err instanceof Error ? err.message : "Unknown error"));
-                                } finally {
-                                  setIsUploadingMedia(false);
-                                  setUploadProgress(0);
-                                  e.target.value = '';
-                                }
-                              }}
-                              disabled={isUploadingMedia}
-                            />
-                         </label>
-                         <input 
-                           type="text"
-                           value={newMessage}
-                           onChange={(e) => setNewMessage(e.target.value)}
-                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                           placeholder="Type your feedback to the designer..."
-                           className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-xs font-bold tracking-tight outline-none"
-                         />
-                         <button 
-                           onClick={handleSendMessage}
-                           className="w-14 h-14 bg-slate-900 text-amber-500 rounded-2xl flex items-center justify-center hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
-                         >
-                            <Send size={20} />
-                         </button>
-                      </div>
-                   </div>
-                 </>
-               ) : (
-                 <div className="flex-1 flex flex-col items-center justify-center space-y-6 p-12 text-center">
-                    <div className="w-24 h-24 bg-slate-50 rounded-[3rem] flex items-center justify-center text-slate-200 border-4 border-dashed border-slate-100">
-                       <MessageSquare size={48} />
-                    </div>
-                    <div className="space-y-2 max-w-sm">
-                       <h4 className="text-lg font-black italic uppercase text-slate-900 tracking-tight">No Active Conversation</h4>
-                        <button
-                          onClick={() => setIsCreateTicketOpen(true)}
-                          className="mt-4 px-6 py-3.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 active:scale-95 transition-all inline-flex items-center gap-2"
-                        >
-                          <Plus size={16} /> Open Support Ticket
-                        </button>
-                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-relaxed">Select a ticket from the list to view your conversation history or get in touch with our team.</p>
-                    </div>
                  </div>
-               )}
+                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {tickets.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setActiveTicketId(t.id!)}
+                        className={cn(
+                          "w-full p-6 rounded-3xl border transition-all text-left relative group",
+                          activeTicketId === t.id 
+                            ? "bg-slate-900 border-slate-900 text-white shadow-xl md:translate-x-2" 
+                            : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border", 
+                            t.status?.toLowerCase() === 'open' ? "bg-amber-100 border-amber-200 text-amber-600" :
+                            t.status?.toLowerCase() === 'resolved' ? "bg-green-100 border-green-200 text-green-600" :
+                            "bg-blue-100 border-blue-200 text-blue-600"
+                          )}>
+                            {t.status}
+                          </span>
+                          {t.priority === 'HIGH' && <AlertCircle size={12} className="text-red-500 animate-pulse" />}
+                        </div>
+                        <p className="text-[10px] font-black uppercase tracking-tight line-clamp-1 mb-1">{t.title}</p>
+                        <p className="text-[8px] font-bold opacity-60 line-clamp-1 italic">{t.description}</p>
+                      </button>
+                    ))}
+                    {tickets.length === 0 && (
+                      <div className="py-20 text-center px-4">
+                         <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <MessageSquare className="text-slate-200" size={32} />
+                         </div>
+                         <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-4">No support chats started</p>
+                         <button
+                           onClick={() => setIsCreateTicketOpen(true)}
+                           className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 transition-all inline-flex items-center gap-2"
+                         >
+                           <Plus size={12} /> Start Ticket
+                         </button>
+                      </div>
+                    )}
+                 </div>
+              </div>
+
+              {/* Chat Area */}
+              <div className={cn(
+                "flex-1 flex flex-col bg-transparent relative z-10 transition-all duration-300",
+                !activeTicketId && "hidden md:flex"
+              )}>
+                 {activeTicketId ? (
+                   activeTicket ? (
+                     <>
+                      <div className="h-20 border-b border-slate-100 px-4 md:px-8 flex items-center justify-between bg-white/60 backdrop-blur-md">
+                        <div className="flex items-center gap-2 md:gap-4">
+                           <button 
+                             onClick={() => setActiveTicketId(null)}
+                             className="p-2.5 bg-slate-900 border border-slate-800 text-amber-500 rounded-xl transition-all shadow-xl hover:bg-slate-800 active:scale-95 flex items-center justify-center group"
+                             title="Back to Tickets"
+                           >
+                             <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
+                           </button>
+                           <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-amber-500 shadow-md">
+                              <User size={18} />
+                           </div>
+                           <div>
+                              <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight italic">
+                                {activeTicket?.title}
+                              </h4>
+                              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Support Conversation Diagnostic</p>
+                           </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           {activeTicket?.category === 'Design Strategy' && activeTicket?.status !== 'resolved' && (
+                             <button 
+                               onClick={() => {
+                                 if (activeTicket) handleApproveDesign(activeTicket);
+                               }}
+                               disabled={loading}
+                               className="px-4 py-2 bg-green-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-green-500/20 hover:scale-105 transition-all flex items-center gap-2"
+                             >
+                                <CheckCircle2 size={14} /> SATISFIED & APPROVE
+                             </button>
+                           )}
+                           <span className="text-[10px] font-black text-slate-300 uppercase">#{activeTicketId.slice(-6).toUpperCase()}</span>
+                        </div>
+                     </div>
+
+                     <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50/30">
+                        {chatMessages.length === 0 ? (
+                          <div className="h-full flex items-center justify-center">
+                             <div className="text-center space-y-4 max-w-xs">
+                                <Sparkles className="mx-auto text-slate-200" size={48} />
+                                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-relaxed italic">
+                                  Wait for designer response...
+                                </p>
+                             </div>
+                          </div>
+                        ) : (
+                          chatMessages.map((msg, i) => (
+                          <div 
+                            key={i}
+                            className={cn(
+                              "flex flex-col max-w-[80%]",
+                              msg.senderId === user?.uid ? "ml-auto items-end" : "items-start"
+                            )}
+                          >
+                             <div className={cn(
+                               "px-5 py-4 rounded-[1.5rem] text-[11px] font-bold tracking-tight shadow-sm flex flex-col gap-2",
+                               msg.senderId === user?.uid 
+                                 ? "bg-slate-900 text-white rounded-tr-none" 
+                                 : msg.senderId === 'system' ? "bg-amber-50 border border-amber-100 text-amber-600 rounded-tl-none italic" : "bg-white border border-slate-100 text-slate-600 rounded-tl-none"
+                             )}>
+                                {msg.mediaUrl && (
+                                  msg.mediaType === 'VIDEO' || msg.mediaUrl.split('?')[0].match(/\.(mp4|webm|ogg)$/i) ? (
+                                    <video src={getSafeUrl(msg.mediaUrl)} controls className="max-w-[200px] md:max-w-[300px] rounded-xl" />
+                                  ) : (
+                                    <img src={getSafeUrl(msg.mediaUrl)} alt="Attachment" className="max-w-[200px] md:max-w-[300px] rounded-xl object-contain" />
+                                  )
+                                )}
+                                {msg.content || msg.text}
+                             </div>
+                             <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-2 px-2">
+                               {msg.senderName} • {typeof msg.timestamp === 'object' && msg.timestamp?.seconds ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Just now'}
+                             </span>
+                          </div>
+                        )))}
+                     </div>
+
+                     <div className="p-6 border-t border-slate-100 bg-white">
+                        <div className="flex gap-4 items-center">
+                           <label className="w-14 h-14 bg-slate-100 text-slate-500 rounded-2xl flex items-center justify-center hover:bg-slate-200 transition-all cursor-pointer shadow-sm relative">
+                              {isUploadingMedia ? (
+                                <div className="absolute inset-0 flex items-center justify-center bg-slate-100 rounded-2xl">
+                                  <span className="text-[10px] font-black">{uploadProgress}%</span>
+                                </div>
+                              ) : (
+                                <Paperclip size={20} />
+                              )}
+                              <input 
+                                type="file" 
+                                className="hidden" 
+                                accept="image/*,video/mp4,video/webm"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file || !activeTicketId) return;
+                                  
+                                  setIsUploadingMedia(true);
+                                  setUploadProgress(0);
+                                  try {
+                                    let mediaUrl = "";
+                                    const isVideo = file.type.startsWith('video');
+                                    
+                                    mediaUrl = await storageService.uploadFile(file, (p) => {
+                                      setUploadProgress(p.progress || 0);
+                                    });
+                                    
+                                    await firebaseService.sendTicketChatMessage(activeTicketId, {
+                                      senderId: user?.uid || 'CUSTOMER',
+                                      senderName: user?.displayName || 'Customer',
+                                      senderRole: 'customer',
+                                      text: "Sent an attachment",
+                                      mediaUrl,
+                                      mediaType: isVideo ? 'VIDEO' : 'IMAGE'
+                                    });
+                                  } catch (err) {
+                                    console.error("Attachment upload error:", err);
+                                    alert("Failed to upload attachment: " + (err instanceof Error ? err.message : "Unknown error"));
+                                  } finally {
+                                    setIsUploadingMedia(false);
+                                    setUploadProgress(0);
+                                    e.target.value = '';
+                                  }
+                                }}
+                                disabled={isUploadingMedia}
+                              />
+                           </label>
+                           <input 
+                             type="text"
+                             value={newMessage}
+                             onChange={(e) => setNewMessage(e.target.value)}
+                             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                             placeholder="Type your feedback to the designer..."
+                             className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-xs font-bold tracking-tight outline-none"
+                           />
+                           <button 
+                             onClick={handleSendMessage}
+                             className="w-14 h-14 bg-slate-900 text-amber-500 rounded-2xl flex items-center justify-center hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+                           >
+                              <Send size={20} />
+                           </button>
+                        </div>
+                     </div>
+                   </>
+                   ) : (
+                     <div className="flex-1 flex items-center justify-center p-12">
+                       <p className="text-sm font-bold text-slate-500">Loading ticket...</p>
+                     </div>
+                   )
+                 ) : (
+                   <div className="flex-1 flex flex-col items-center justify-center space-y-6 p-12 text-center">
+                      <div className="w-24 h-24 bg-slate-50 rounded-[3rem] flex items-center justify-center text-slate-200 border-4 border-dashed border-slate-100">
+                         <MessageSquare size={48} />
+                      </div>
+                      <div className="space-y-2 max-w-sm">
+                         <h4 className="text-lg font-black italic uppercase text-slate-900 tracking-tight">No Active Conversation</h4>
+                          <button
+                            onClick={() => setIsCreateTicketOpen(true)}
+                            className="mt-4 px-6 py-3.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 active:scale-95 transition-all inline-flex items-center gap-2"
+                          >
+                            <Plus size={16} /> Open Support Ticket
+                          </button>
+                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-relaxed">Select a ticket from the list to view your conversation history or get in touch with our team.</p>
+                      </div>
+                   </div>
+                 )}
+              </div>
             </div>
-          </div>
-        )}
+          </ErrorBoundary>
 
         {activeTab === 'DASHBOARD' && (
           <div
@@ -2161,7 +2224,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                                className="cursor-pointer p-2.5 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm flex items-center gap-2"
                                              >
                                                <Upload size={14} />
-                                               <span className="text-[8px] font-black uppercase">{(ad.assetUrl || ad.mediaUrl) ? "Replace" : "Choose File"}</span>
+                                               <span className="text-[8px] font-black uppercase">{isUploadingMedia && uploadingCampaignId === ad.id ? `Uploading... ${uploadProgress}%` : ((ad.assetUrl || ad.mediaUrl) ? "Replace" : "Choose File")}</span>
                                              </button>
                                           </div>
                                        )
@@ -2238,11 +2301,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                 <button 
                                    onClick={(e) => {
                                      e.stopPropagation();
-                                     document.getElementById(`q-up-${ad.id}`)?.click();
+                                     if (!(isUploadingMedia && uploadingCampaignId === ad.id)) {
+                                       document.getElementById(`q-up-${ad.id}`)?.click();
+                                     }
                                    }}
                                    className="px-4 py-2 bg-amber-500 text-slate-950 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all"
                                 >
-                                   Upload Media
+                                   {isUploadingMedia && uploadingCampaignId === ad.id ? `Uploading (${uploadProgress}%)` : "Upload Media"}
                                 </button>
                                 <p className="text-[7px] font-bold text-amber-500 uppercase mt-2 tracking-widest">Awaiting Data</p>
                              </div>
@@ -3065,5 +3130,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       
     </div>
+    </>
   );
 }

@@ -25,7 +25,8 @@ import {
 } from "lucide-react";
 import { firebaseService } from "@/services/firebaseService";
 import { db } from "@/lib/firebase";
-import { doc, deleteDoc } from "firebase/firestore";
+import { doc, deleteDoc, writeBatch, collection } from "firebase/firestore";
+import { INITIAL_CITIES } from "@/modules/cityManagement/cities";
 
 interface FranchisesTabProps {
   setActiveTab: (tab: string) => void;
@@ -64,6 +65,18 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
   // Subscriptions on mount
   useEffect(() => {
     setLoading(true);
+    
+    // Sync cities if missing
+    (async () => {
+        const batch = writeBatch(db);
+        INITIAL_CITIES.forEach(city => {
+            const cityRef = doc(db, 'cities', city.id);
+            batch.set(cityRef, city, { merge: true });
+        });
+        await batch.commit();
+        console.log("Cities synchronized with INITIAL_CITIES");
+    })();
+
     const unsubFranchises = firebaseService.subscribeToFranchises((data) => {
       setFranchises(data);
       setLoading(false);
@@ -106,6 +119,7 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
 
   const handleCreateInvitation = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[DEBUG] Starting handleCreateInvitation", { wizardData });
     if (!wizardData.franchiseId || !wizardData.ownerEmail || !wizardData.ownerName) {
       showToast("Please fill all required representative coordinates", "error");
       return;
@@ -117,10 +131,18 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
       return;
     }
 
+    // Strict Email Validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(wizardData.ownerEmail.trim())) {
+      showToast("Invalid Owner Email format. Please provide a valid email (e.g. name@domain.com).", "error");
+      return;
+    }
+
     try {
       // 1. Generate unique key code, e.g. INV-BLR-83A
       const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
       const code = `INV-${wizardData.cityId.substring(0, 3).toUpperCase()}-${suffix}`;
+      console.log("[DEBUG] Generated code:", code);
 
       // 2. Build secure invitation object
       const selectedCity = cities.find(c => c.id === wizardData.cityId);
@@ -142,9 +164,22 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
       };
 
       // 3. Save invitation to firebase
+      console.log("[DEBUG] Saving invitation:", invitePayload);
       await firebaseService.saveInvitation(invitePayload);
 
       // 4. Create PENDING skeleton draft franchise record for immediate dashboard projection
+      console.log("[DEBUG] Saving franchise:", {
+        id: invitePayload.franchiseId,
+        cityId: invitePayload.cityId,
+        cityName: invitePayload.cityName,
+        ownerName: invitePayload.ownerName,
+        ownerEmail: invitePayload.ownerEmail,
+        status: "PENDING",
+        revenueModel: invitePayload.revenueModel,
+        totalDevices: invitePayload.totalDevices,
+        totalDrivers: invitePayload.totalDrivers,
+        createdAt: invitePayload.createdAt,
+      });
       await firebaseService.saveFranchise({
         id: invitePayload.franchiseId,
         cityId: invitePayload.cityId,
@@ -162,10 +197,13 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
       setWizardStep(3); // Advance to summary copy step
       showToast(`Onboarding invite code ${code} initialized!`, "success");
     } catch (err: any) {
-      console.error(err);
+      console.error("[DEBUG] Error in handleCreateInvitation:", err);
       showToast(err.message || "Failed to launch owner onboarding.", "error");
     }
   };
+
+  // Rendering wizard modal
+  // (Assuming this wizard component follows somewhere else in the code, I'll update the render section if possible, or just add a clear display for the wizard Step 3)
 
   const handleDeleteInvitation = async (id: string) => {
     if (!window.confirm(`Are you absolutely sure you want to revoke and delete invitation ${id}?`)) {
@@ -259,7 +297,7 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* Title Header Bar */}
-        <div className="bg-slate-900 p-6 md:p-8 rounded-3xl text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.08),transparent)] border border-slate-800">
+        <div className="bg-[#05070a] p-6 md:p-8 rounded-3xl text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.08),transparent)] border border-amber-500/20">
           <div>
             <div className="flex items-center gap-2">
               <Shield className="text-amber-500" size={24} />
@@ -434,47 +472,52 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
                       {filteredFranchises.map((item) => (
                         <div 
                           key={item.id} 
-                          className="p-5 bg-slate-50/50 rounded-2xl border border-slate-100/80 hover:border-slate-200 hover:bg-slate-50 transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4 group"
+                          className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-6 group relative overflow-hidden"
                         >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-mono bg-slate-900 text-white px-2 py-0.5 rounded-md font-semibold">{item.id}</span>
-                              <span className="text-xs font-mono text-slate-400">@{item.cityId}</span>
-                              <span className={`text-[8px] font-mono px-2 py-0.5 rounded-full font-black tracking-wider uppercase ${
-                                item.status === 'ACTIVE' 
-                                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/10' 
-                                  : item.status === 'DISABLED'
-                                  ? 'bg-red-500/10 text-red-500 border border-red-500/10'
-                                  : 'bg-amber-500/10 text-amber-500 border border-amber-500/10'
-                              }`}>
-                                {item.status}
-                              </span>
+                          <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500 rounded-l-3xl"></div>
+                          
+                          <div className="flex items-start gap-4 relative z-10 pl-2">
+                             <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-900 shadow-inner">
+                              <Building2 size={26} className="text-amber-600" />
                             </div>
-                            <h4 className="text-sm font-black text-slate-800 uppercase italic mt-1 font-sans">{item.ownerName}</h4>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-bold text-slate-500 font-mono">
-                              <span>Email: {item.ownerEmail}</span>
-                              <span>Split: <strong className="text-amber-500">{item.revenueModel}</strong></span>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono bg-slate-100 text-slate-800 px-2 py-0.5 rounded font-semibold tracking-wider">{item.id}</span>
+                                <span className={`text-[8px] font-mono px-2 py-0.5 rounded-full font-black tracking-wider uppercase ${
+                                  item.status === 'ACTIVE' 
+                                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/10' 
+                                    : item.status === 'DISABLED'
+                                    ? 'bg-red-500/10 text-red-500 border border-red-500/10'
+                                    : 'bg-amber-500/10 text-amber-500 border border-amber-500/10'
+                                }`}>
+                                  {item.status}
+                                </span>
+                              </div>
+                              <h4 className="text-xl font-black text-slate-950 uppercase italic font-sans tracking-tight">{item.ownerName}</h4>
+                              <p className="text-xs text-slate-500 font-mono italic">
+                                {item.cityName} • {item.ownerEmail}
+                              </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                            <div className="flex items-center gap-4 font-mono text-xs">
+                          <div className="flex items-center gap-8 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 relative z-10">
+                            <div className="flex items-center gap-8 font-mono text-xs">
                               <div className="text-right">
-                                <span className="text-[9px] font-black text-slate-400 uppercase block">Screens</span>
-                                <span className="font-extrabold text-slate-700">{item.totalDevices} Devices</span>
+                                <span className="text-[9px] font-black text-slate-400 uppercase block tracking-wider">Devices</span>
+                                <span className="font-extrabold text-slate-950 text-base">{item.totalDevices}</span>
                               </div>
                               <div className="text-right">
-                                <span className="text-[9px] font-black text-slate-400 uppercase block">Staff</span>
-                                <span className="font-extrabold text-slate-700">{item.totalDrivers} Drivers</span>
+                                <span className="text-[9px] font-black text-slate-400 uppercase block tracking-wider">Drivers</span>
+                                <span className="font-extrabold text-slate-950 text-base">{item.totalDrivers}</span>
                               </div>
                             </div>
 
                             <button 
                               onClick={() => setEditingFranchise(item)}
-                              className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:text-amber-500 hover:border-amber-300 transition-all cursor-pointer shadow-sm"
+                              className="p-3.5 bg-slate-50 hover:bg-slate-900 hover:text-amber-500 border border-slate-200 hover:border-slate-800 rounded-2xl text-slate-500 transition-all shadow-sm cursor-pointer"
                               title="Audit Franchise Config"
                             >
-                              <Edit3 size={14} />
+                              <Edit3 size={18} />
                             </button>
                           </div>
                         </div>

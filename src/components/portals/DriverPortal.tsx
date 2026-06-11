@@ -287,7 +287,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       setWithdrawRequests(data);
     }, user.uid);
 
-    const unsubTickets = firebaseService.subscribeToSupportTickets(user.uid, setSupportTickets);
+    const unsubTickets = firebaseService.subscribeToSupportTickets(setSupportTickets, { userId: user.uid });
 
     return () => {
       unsubAssignments();
@@ -422,7 +422,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const handleSendMessage = async () => {
     if (!activeTicketId || !newMessage.trim() || !user) return;
     try {
-      await firebaseService.sendChatMessage(activeTicketId, {
+      await firebaseService.sendTicketChatMessage(activeTicketId, {
         senderId: user.uid,
         senderName: user.displayName || 'Driver',
         senderRole: 'driver',
@@ -656,6 +656,48 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       default:
         return (
           <>
+            {/* KYC Urgent Action Banner */}
+            {driverProfile?.kycStatus !== 'APPROVED' && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={cn(
+                  "p-6 rounded-[2.5rem] border-2 shadow-2xl flex flex-col md:flex-row items-center gap-6 relative overflow-hidden",
+                  driverProfile?.kycStatus === 'REJECTED' 
+                    ? "bg-rose-500 border-rose-400 text-white" 
+                    : "bg-amber-400 border-amber-300 text-slate-900"
+                )}
+              >
+                <div className="absolute right-0 top-0 p-8 opacity-10">
+                  <ShieldCheck size={80} />
+                </div>
+                <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center shrink-0">
+                  {driverProfile?.kycStatus === 'REJECTED' ? <X size={32} /> : <CloudUpload size={32} />}
+                </div>
+                <div className="flex-1 text-center md:text-left space-y-1 relative z-10">
+                  <h3 className="text-xl font-black italic uppercase leading-none">
+                    {driverProfile?.kycStatus === 'REJECTED' ? "KYC Documentation Rejected" : "Identity Audit Required"}
+                  </h3>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">
+                    {driverProfile?.kycStatus === 'UNDER_REVIEW' || driverProfile?.kycStatus === 'PENDING'
+                      ? "Verification Pipeline: Your documents are being audited. Please wait." 
+                      : "Action Required: Upload your identification files to activate wallet & payouts."}
+                  </p>
+                </div>
+                {(!driverProfile?.kycStatus || driverProfile?.kycStatus === 'REJECTED') && (
+                  <button 
+                    onClick={() => setShowKYC(true)}
+                    className={cn(
+                      "px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all active:scale-95 shadow-xl relative z-10",
+                      driverProfile?.kycStatus === 'REJECTED' ? "bg-white text-rose-500" : "bg-slate-900 text-amber-500"
+                    )}
+                  >
+                    {driverProfile?.kycStatus === 'REJECTED' ? "Re-upload Now" : "Upload Docs"}
+                  </button>
+                )}
+              </motion.div>
+            )}
+
             {/* Security Pipeline UI Removed */}
 
             <div className="bg-white p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-slate-200/50 border border-slate-100">
@@ -1372,14 +1414,22 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
                       }
 
                       await firebaseService.createSupportTicket({
+                        userId: user.uid,
                         driverId: user.uid,
                         driverName: user.displayName || 'Driver',
                         title: desc.slice(0, 30) + (desc.length > 30 ? "..." : ""),
+                        subject: "Driver Support Request",
+                        message: desc,
                         description: desc,
-                        type: 'DEVICE',
+                        type: 'DRIVER',
                         priority: 'MEDIUM',
                         lat,
-                        lng
+                        lng,
+                        cityId: driverProfile?.cityId || "global",
+                        stateId: driverProfile?.stateId || "KA",
+                        franchiseId: driverProfile?.franchiseId,
+                        territoryId: driverProfile?.territoryId,
+                        assignedToHQ: false
                       });
                       (document.getElementById('support-desc') as HTMLTextAreaElement).value = '';
                     }}

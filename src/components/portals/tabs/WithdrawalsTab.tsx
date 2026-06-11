@@ -88,7 +88,7 @@ export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
   };
 
   return (
-    <div className="space-y-6 max-h-[85vh] overflow-y-auto pr-2 pb-12 font-sans">
+    <div className="space-y-6 pb-12 font-sans">
       {/* Title Header Card */}
       <div className="bg-amber-500 p-6 md:p-8 rounded-[2rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 blur-3xl rounded-full -mr-16 -mt-16" />

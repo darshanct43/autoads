@@ -23,6 +23,10 @@ import { db, auth, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { compressImage } from '../lib/utils';
 import { INITIAL_CITIES, INITIAL_FRANCHISES } from '../modules/cityManagement/cities';
+import { Settlement, SupportTicket } from '../types';
+
+export type { SupportTicket };
+export type { Settlement };
 
 export interface Driver {
   id: string;
@@ -63,6 +67,19 @@ export interface Driver {
     holderName: string;
   };
   fullName?: string;
+  verificationStatus?: string;
+  kycStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW';
+  adminApproved?: boolean;
+  payoutEnabled?: boolean;
+  walletBalance?: number;
+  documents?: {
+    aadhaar?: string;
+    drivingLicense?: string;
+    selfie?: string;
+    rc?: string;
+    pan?: string;
+    insurance?: string;
+  };
 }
 
 export interface AdCampaign {
@@ -73,6 +90,11 @@ export interface AdCampaign {
   mediaUrl: string;
   mediaType: 'VIDEO' | 'IMAGE';
   status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE' | 'AWAITING_PAYPORTAL';
+  customerId?: string;
+  customerPhone?: string;
+  phone?: string;
+  city?: string;
+  cityId?: string;
   durationDays?: number;
   hoursPerDay?: number;
   maxAutos?: number;
@@ -130,30 +152,7 @@ export interface DriverAssignment {
   createdAt: any;
 }
 
-export interface SupportTicket {
-  id?: string;
-  driverId?: string;
-  driverName?: string;
-  customerName?: string;
-  title: string;
-  subject?: string;
-  description: string;
-  imageUrl?: string;
-  status: 'open' | 'in_progress' | 'resolved' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
-  type?: 'DEVICE' | 'CUSTOMER';
-  priority?: 'LOW' | 'MEDIUM' | 'HIGH';
-  category?: string;
-  lat?: number;
-  lng?: number;
-  campaignId?: string;
-  createdAt: any;
-  updatedAt?: any;
-  resolvedAt?: any;
-  lastMessage?: string;
-  unreadCount?: number;
-  customerId?: string;
-  customerSatisfied?: boolean;
-}
+// Standardized on types.ts for SupportTicket
 
 export interface AppNotification {
   id?: string;
@@ -165,6 +164,8 @@ export interface AppNotification {
   link?: string;
   createdAt?: any;
   read?: boolean;
+  franchiseId?: string;
+  territoryId?: string;
 }
 
 export interface ChatMessage {
@@ -279,10 +280,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
-  // Instead of building a big object just for the throw, format the error message directly
   const errMessage = (error as any)?.message || String(error);
-  console.warn('Firestore Error [' + operationType + ']: ', errMessage, ' at path: ', path);
-  if (!isSilent) {
+  const isOffline = typeof window !== 'undefined' && localStorage.getItem('auto_ads_offline_mode') === 'true';
+  const isPermissionError = errMessage.toLowerCase().includes('permission') || errMessage.toLowerCase().includes('insufficient');
+  
+  console.warn(`[Firebase Error] [${operationType}] at [${path}]: ${errMessage}`);
+  
+  if (!isSilent && !isOffline && !isPermissionError) {
     throw new Error(errMessage);
   }
 }
@@ -309,6 +313,9 @@ export interface Payment {
   customerPhone?: string;
   campaignId: string;
   driverId?: string;
+  city?: string;
+  cityId?: string;
+  isTest?: boolean;
   createdAt: any;
 }
 
@@ -400,15 +407,32 @@ export const firebaseService = {
   // Existing...
 
   // Added/Restored methods for compatibility
-  subscribeToDrivers(callback: (drivers: Driver[]) => void) {
-    console.log("[DEBUG] Firebase: Subscribing to drivers collection...");
-    const q = query(collection(db, 'drivers'));
+  subscribeToDrivers(callback: (drivers: Driver[]) => void, franchiseId?: string, isHQ: boolean = false) {
+    console.log("[DEBUG] Firebase: Subscribing to drivers collection (isHQ: " + isHQ + ")...");
+    
+    if (!isHQ && !franchiseId) {
+      console.warn("[SECURITY] Franchise isolation: No franchiseId provided. Returning empty drivers.");
+      callback([]);
+      return () => {};
+    }
+    
+    let q = query(collection(db, 'drivers'));
+    if (!isHQ && franchiseId) {
+      q = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    }
+    
     return onSnapshot(q, (snapshot) => {
-      console.log("[DEBUG] Firebase: snapshot received, count:", snapshot.docs.length);
+      console.log("[DEBUG] Firebase: drivers snapshot received, count:", snapshot.docs.length);
+      if (snapshot.docs.length === 0) {
+        console.log("[DEBUG] Firebase: No drivers found in collection");
+      } else {
+        console.log("[DEBUG] Firebase: First driver doc:", snapshot.docs[0].id);
+      }
       const drivers = snapshot.docs.map(doc => {
         const data = doc.data();
         return { ...data, id: doc.id, uid: doc.id } as any;
       }) as Driver[];
+      
       // Client side sort by createdAt desc
       drivers.sort((a, b) => {
         const dateA = a.createdAt?.toMillis?.() || 0;
@@ -417,14 +441,32 @@ export const firebaseService = {
       });
       callback(drivers);
     }, (error) => {
-      console.error("[DEBUG] Firebase: snapshot error:", error);
+      console.error("[DEBUG] Firebase: drivers snapshot error:", error);
       handleFirestoreError(error, OperationType.LIST, 'drivers');
     });
   },
 
-  subscribeToPayments(callback: (payments: Payment[]) => void, customerId?: string, customerPhone?: string) {
-    // Fetch all payments to ensure we do not miss any due to missing OR indexes
-    const q = query(collection(db, 'payments'));
+  subscribeToPayments(callback: (payments: Payment[]) => void, franchiseId?: string, isHQ: boolean = false, customerId?: string, customerPhone?: string) {
+    console.log("[DEBUG] Firebase: Subscribing to payments collection (isHQ: " + isHQ + ")...");
+    
+    if (!isHQ && !franchiseId && !customerId && !customerPhone) {
+      console.warn("[SECURITY] Franchise isolation: No franchiseId, customerId, or customerPhone provided. Returning empty payments.");
+      callback([]);
+      return () => {};
+    }
+
+    let q;
+    if (isHQ) {
+      q = query(collection(db, 'payments'));
+    } else if (franchiseId) {
+      q = query(collection(db, 'payments'), where('franchiseId', '==', franchiseId));
+    } else if (customerId) {
+      q = query(collection(db, 'payments'), where('customerId', '==', customerId));
+    } else if (customerPhone) {
+      q = query(collection(db, 'payments'), where('customerPhone', '==', customerPhone));
+    } else {
+      q = query(collection(db, 'payments'));
+    }
 
     return onSnapshot(q, (snapshot) => {
       let payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as Payment[];
@@ -450,9 +492,17 @@ export const firebaseService = {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'payments'));
   },
 
-  subscribeToDevices(callback: (devices: Device[]) => void) {
+  subscribeToDevices(callback: (devices: Device[]) => void, franchiseId?: string, isHQ: boolean = false) {
     console.log("[DEBUG] Firebase: Subscribing to devices collection...");
-    const q = query(collection(db, 'devices'));
+    if (!isHQ && !franchiseId) {
+      console.warn("[SECURITY] Franchise isolation: No franchiseId provided. Returning empty devices.");
+      callback([]);
+      return () => {};
+    }
+    let q = query(collection(db, 'devices'));
+    if (franchiseId) {
+      q = query(collection(db, 'devices'), where('franchiseId', '==', franchiseId));
+    }
     return onSnapshot(q, (snapshot) => {
       console.log("[DEBUG] Firebase: devices snapshot received, count:", snapshot.docs.length);
       const devices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Device));
@@ -460,8 +510,14 @@ export const firebaseService = {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'devices'));
   },
 
-  async getDevices() {
-    const q = query(collection(db, 'devices'));
+  async getDevices(franchiseId?: string, isHQ: boolean = false) {
+    if (!isHQ && !franchiseId) {
+      return [];
+    }
+    let q = query(collection(db, 'devices'));
+    if (franchiseId) {
+      q = query(collection(db, 'devices'), where('franchiseId', '==', franchiseId));
+    }
     const snap = await getDocs(q);
     return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
   },
@@ -617,9 +673,9 @@ export const firebaseService = {
       const dbPlans = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       
       const defaults = [
-        { id: 'BASIC', name: 'Basic Plan', description: 'Entry level plan', price: 999, unitCount: '2 Units', color: 'bg-emerald-500' },
-        { id: 'STARTER', name: 'Starter Plan', description: 'Core features for growth', price: 1999, unitCount: '5 Units', color: 'bg-indigo-500' },
-        { id: 'PRO', name: 'Pro Plan', description: 'Advanced features for scaling', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
+        { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
+        { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
+        { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
       ];
       
       return defaults.map(def => {
@@ -632,68 +688,47 @@ export const firebaseService = {
     }
   },
 
-  async updatePlan(planId: string, updates: any) {
-    try {
-      await setDoc(doc(db, 'plans', planId), {
-        ...updates,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, 'plans');
-      throw e;
-    }
-  },
-
-  async getStudioPlans() {
-    try {
-      const dbPlansSnap = await getDocs(collection(db, 'studioPlans'));
-      const dbPlans = dbPlansSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
+  subscribeToPlans(callback: (plans: any[]) => void) {
+    const q = query(collection(db, 'plans'), orderBy('price', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+      const dbPlans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       const defaults = [
-        { id: 'FREE', name: 'Free Viewer', price: '₹0', description: 'Read-only mode. Cannot save or export.' },
-        { id: 'BRASS', name: 'Single Star Brass', price: '₹99', description: '2 to 3 poster edits, basic templates, PNG export, watermark.' },
-        { id: 'SILVER', name: 'Five Star Silver', price: '₹299', description: 'Unlimited edits, standard templates, SVG/JPG export, video editing.' },
-        { id: 'GOLD', name: 'Seven Star Gold', price: '₹499', description: 'Full access, AI tools, premium templates, high-res exports, no watermark.' }
+        { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
+        { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
+        { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
       ];
-      
-      return defaults.map(def => {
-        const match = dbPlans.find(p => p.id === def.id);
-        return match ? { ...def, ...match } : def;
+      const merged = defaults.map(def => {
+        const dbMatching = dbPlans.find(p => p.id === def.id);
+        return dbMatching ? { ...def, ...dbMatching } : def;
       });
-    } catch (e) {
-      console.error("Error getStudioPlans:", e);
-      return [
-        { id: 'FREE', name: 'Free Viewer', price: '₹0', description: 'Read-only mode. Cannot save or export.' },
-        { id: 'BRASS', name: 'Single Star Brass', price: '₹99', description: '2 to 3 poster edits, basic templates, PNG export, watermark.' },
-        { id: 'SILVER', name: 'Five Star Silver', price: '₹299', description: 'Unlimited edits, standard templates, SVG/JPG export, video editing.' },
-        { id: 'GOLD', name: 'Seven Star Gold', price: '₹499', description: 'Full access, AI tools, premium templates, high-res exports, no watermark.' }
-      ];
-    }
+      callback(merged);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "plans");
+    });
   },
 
-  async updateStudioPlan(planId: string, updates: any) {
-    try {
-      await setDoc(doc(db, 'studioPlans', planId), {
-        ...updates,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.error("Error updateStudioPlan:", e);
-      throw e;
-    }
+  // DISABLED: Direct plan writes are locked. Use proposePlanChange instead.
+  async updatePlan(planId: string, updates: any) {
+    throw new Error("Direct plan updates are DISABLED. Please use proposal workflow.");
   },
 
   // Plan Proposals Logic
   async proposePlanChange(proposal: {
     planId: string;
-    newPrice: number;
-    proposedBy: string;
-    type: 'price' | 'designerPrice' | 'videoMakerPrice';
+    currentPrice: any;
+    proposedPrice: any;
+    franchiseId?: string;
+    reason: string;
+    type: 'price' | 'designerPrice' | 'videoMakerPrice' | 'features' | 'description';
   }) {
     try {
       const data = {
         ...proposal,
-        status: 'pending',
+        newValue: proposal.proposedPrice,
+        newPrice: proposal.proposedPrice,
+        currentVal: proposal.currentPrice,
+        proposedBy: auth.currentUser?.uid,
+        status: 'pending', // Standardizing to 'pending' as used in subscribers
         createdAt: serverTimestamp()
       };
       return await addDoc(collection(db, 'planProposals'), data);
@@ -723,7 +758,7 @@ export const firebaseService = {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'planProposals'));
   },
 
-  async approvePlanProposal(proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice' | 'videoMakerPrice') {
+  async approvePlanProposal(proposalId: string, planId: string, newValue: any, type: 'price' | 'designerPrice' | 'videoMakerPrice' | 'features' | 'description') {
     try {
       const batch = writeBatch(db);
       
@@ -736,6 +771,10 @@ export const firebaseService = {
         updateData.designerPrice = newValue;
       } else if (type === 'videoMakerPrice') {
         updateData.videoMakerPrice = newValue;
+      } else if (type === 'features') {
+        updateData.features = newValue;
+      } else if (type === 'description') {
+        updateData.description = newValue;
       } else {
         updateData.price = newValue;
       }
@@ -770,6 +809,81 @@ export const firebaseService = {
     }
   },
 
+  /**
+   * PURGE SYSTEM DATA
+   * Wipes all demo, test, and fake records from the network.
+   * This is a destructive operation for Admin use only.
+   */
+  async purgeSystemData() {
+    try {
+      console.log("[firebaseService] Initiating system-wide master purge...");
+      const batch = writeBatch(db);
+      let count = 0;
+
+      const collectionsToPurge = [
+        'campaigns', 
+        'payments', 
+        'drivers', 
+        'terminals', 
+        'driverAssignments', 
+        'driverPayments', 
+        'withdrawRequests',
+        'supportTickets',
+        'liveStatus',
+        'driverLocations'
+      ];
+
+      for (const colName of collectionsToPurge) {
+        const snap = await getDocs(collection(db, colName));
+        snap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          const docIdLower = docSnap.id.toLowerCase();
+          const isTestId = docIdLower.includes('demo') || docIdLower.includes('test') || docIdLower.includes('pay_test');
+          
+          let isTestData = false;
+          if (data) {
+            if (data.isTest === true) {
+              isTestData = true;
+            } else if (data.isTest !== false) {
+              const fieldsToCheck = [
+                data.name, data.title, data.transactionId, data.upiTransactionId, data.paymentId, 
+                data.orderId, data.description, data.campaignId, data.customerId, data.customerPhone
+              ];
+              const markers = ['test', 'demo', 'fake', 'dummy', 'pay_test', 'sandbox'];
+              for (const val of fieldsToCheck) {
+                if (val && typeof val === 'string') {
+                  const lowerVal = val.toLowerCase();
+                  if (markers.some(m => lowerVal.includes(m))) {
+                    isTestData = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          const isTest = isTestId || isTestData;
+
+          if (isTest) {
+            batch.delete(docSnap.ref);
+            count++;
+          }
+        });
+      }
+
+      if (count > 0) {
+        await batch.commit();
+        console.log(`[firebaseService] Purged ${count} test/demo records.`);
+      } else {
+        console.log("[firebaseService] No test data identified for purge.");
+      }
+      return count;
+    } catch (e) {
+      console.error("[firebaseService] Purge failed:", e);
+      throw e;
+    }
+  },
+
   // --- NEW MULTI-ROLE CAMPAIGN METHODS ---
 
   async createCampaign(campaign: { title: string, mediaUrl?: string, mediaType?: 'VIDEO' | 'IMAGE', [key: string]: any }) {
@@ -779,12 +893,18 @@ export const firebaseService = {
       console.log(`[DEPLOYMENT_RECORD_TRIGGER] Function: firebaseService.createCampaign -> Title: ${campaign.title}`);
       const data = {
         ...campaign,
+        uid: campaign.uid || `CMP-${Math.floor(1000 + Math.random() * 9000)}`,
         mediaUrl: campaign.mediaUrl || campaign.assetUrl || '',
         assetUrl: campaign.assetUrl || campaign.mediaUrl || '',
         status: campaign.status || 'PENDING',
         createdBy: auth.currentUser?.uid,
         assignedDrivers: campaign.assignedDrivers || [],
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: campaign.stateId || 'KA',
+        territoryId: campaign.territoryId || 'HQ',
+        cityId: campaign.cityId || 'HQ',
+        franchiseId: campaign.franchiseId || null
       };
       const docRef = await addDoc(collection(db, 'campaigns'), data);
       
@@ -803,14 +923,18 @@ export const firebaseService = {
         role: 'ADMIN',
         title: 'New Campaign Request',
         message: `Client submitted a transit campaign: '${campaign.title}'.`,
-        type: 'CAMPAIGN_RECEIVED'
+        type: 'CAMPAIGN_RECEIVED',
+        franchiseId: campaign.franchiseId || null,
+        territoryId: campaign.territoryId || campaign.cityId || null
       });
 
       await this.createNotification({
         role: 'SUPPORT',
         title: 'New Campaign Request',
         message: `Client submitted a transit campaign: '${campaign.title}'.`,
-        type: 'CAMPAIGN_RECEIVED'
+        type: 'CAMPAIGN_RECEIVED',
+        franchiseId: campaign.franchiseId || null,
+        territoryId: campaign.territoryId || campaign.cityId || null
       });
       
       console.log("[Notification] System: New campaign submitted.");
@@ -821,7 +945,7 @@ export const firebaseService = {
     }
   },
 
-  async createTicket(ticket: { title: string, description: string, category: string, priority: string, campaignId?: string }) {
+  async createTicket(ticket: { title: string, description: string, category: string, priority: string, campaignId?: string, stateId: string, territoryId: string, cityId: string, franchiseId: string | null }) {
     try {
       if (!auth.currentUser) throw new Error("Authentication required");
       const ticketData = {
@@ -831,6 +955,11 @@ export const firebaseService = {
         status: 'open',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: ticket.stateId,
+        territoryId: ticket.territoryId,
+        cityId: ticket.cityId,
+        franchiseId: ticket.franchiseId,
         messages: [
           {
             role: 'system',
@@ -1074,9 +1203,16 @@ export const firebaseService = {
     }
   },
 
-  async getTerminals() {
+  async getTerminals(franchiseId?: string, isHQ: boolean = false) {
+    if (!isHQ && !franchiseId) {
+      return [];
+    }
+    let q = query(collection(db, 'terminals'));
+    if (franchiseId) {
+      q = query(collection(db, 'terminals'), where('franchiseId', '==', franchiseId));
+    }
     try {
-      const snap = await getDocs(collection(db, 'terminals'));
+      const snap = await getDocs(q);
       return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, 'terminals');
@@ -1084,9 +1220,17 @@ export const firebaseService = {
     }
   },
 
-  subscribeToTerminals(callback: (terminals: any[]) => void) {
+  subscribeToTerminals(callback: (terminals: any[]) => void, franchiseId?: string, isHQ: boolean = false) {
     console.log("[DEBUG] Firebase: Subscribing to terminals collection...");
-    const q = query(collection(db, 'terminals'));
+    if (!isHQ && !franchiseId) {
+      console.warn("[SECURITY] Franchise isolation: No franchiseId provided. Returning empty terminals.");
+      callback([]);
+      return () => {};
+    }
+    let q = query(collection(db, 'terminals'));
+    if (franchiseId) {
+      q = query(collection(db, 'terminals'), where('franchiseId', '==', franchiseId));
+    }
     return onSnapshot(q, (snapshot) => {
       console.log("[DEBUG] Firebase: terminals snapshot received, count:", snapshot.docs.length);
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -1110,9 +1254,14 @@ export const firebaseService = {
 
   async recordDeviceLog(terminalId: string, log: any) {
     try {
-      return await addDoc(collection(db, `terminals/${terminalId}/logs`), {
+      const docRef = await addDoc(collection(db, `terminals/${terminalId}/logs`), {
         ...log,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: 'KA',
+        territoryId: 'T-UNASSIGNED',
+        cityId: 'UNASSIGNED',
+        franchiseId: null
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, `terminals/${terminalId}/logs`);
@@ -1175,7 +1324,12 @@ export const firebaseService = {
           vehicleNumber: 'KA-01-ME-1111',
           vehicleModel: 'Auto-Rickshaw Pro',
           createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
+          // Territory Architecture Fields
+          stateId: 'KA',
+          territoryId: 'T-UNASSIGNED',
+          cityId: 'UNASSIGNED',
+          franchiseId: null
         });
         driverSnap = await getDoc(driverRef);
       }
@@ -1374,28 +1528,63 @@ export const firebaseService = {
     }
   },
 
-  subscribeToCampaigns(callback: (campaigns: AdCampaign[]) => void, customerId?: string) {
-    let q = query(collection(db, CAMPAIGNS_COLLECTION), orderBy('createdAt', 'desc'));
-    if (customerId) {
-        q = query(collection(db, CAMPAIGNS_COLLECTION), where('customerId', '==', customerId));
+  subscribeToCampaigns(callback: (campaigns: AdCampaign[]) => void, franchiseId?: string, isHQ: boolean = false, customerId?: string, customerPhone?: string) {
+    console.log("[DEBUG] Firebase: Subscribing to campaigns collection (isHQ: " + isHQ + ")...");
+
+    if (!isHQ && !franchiseId && !customerId && !customerPhone) {
+      console.warn("[SECURITY] Franchise isolation: No franchiseId, customerId, or customerPhone provided. Returning empty campaigns.");
+      callback([]);
+      return () => {};
     }
+
+    let q;
+    if (isHQ) {
+      q = query(collection(db, CAMPAIGNS_COLLECTION));
+    } else if (franchiseId) {
+      q = query(collection(db, CAMPAIGNS_COLLECTION), where('franchiseId', '==', franchiseId));
+    } else if (customerId) {
+      q = query(collection(db, CAMPAIGNS_COLLECTION), where('customerId', '==', customerId));
+    } else if (customerPhone) {
+      q = query(collection(db, CAMPAIGNS_COLLECTION), where('customerPhone', '==', customerPhone));
+    } else {
+      q = query(collection(db, CAMPAIGNS_COLLECTION));
+    }
+
     return onSnapshot(q, (snapshot) => {
       let campaigns = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as AdCampaign[];
+      
+      console.log("[DEBUG] Firebase: Campaigns subscription received count:", snapshot.docs.length);
+      if (snapshot.docs.length === 0) {
+        console.log("[DEBUG] Firebase: No campaigns found in collection");
+      } else {
+        console.log("[DEBUG] Firebase: First campaign doc:", snapshot.docs[0].id);
+      }
 
-      // Client-side sort if we couldn't do it server-side
-      if (customerId) {
-        campaigns.sort((a, b) => {
-          const timeA = a.createdAt?.toMillis?.() || 0;
-          const timeB = b.createdAt?.toMillis?.() || 0;
-          return timeB - timeA;
+      // Support OR matching: match customerId OR customerPhone
+      if (customerId || customerPhone) {
+        const cleanPhone = customerPhone ? customerPhone.trim().replace('+91', '') : '';
+        campaigns = campaigns.filter(c => {
+          const isByCustId = customerId && (c.customerId === customerId || c.createdBy === customerId);
+          const campaignPhone = c.customerPhone || c.phone || '';
+          const cleanCampPhone = campaignPhone.trim().replace('+91', '');
+          const isByPhone = cleanPhone && (cleanCampPhone === cleanPhone);
+          return isByCustId || isByPhone;
         });
       }
 
+      // Consistent descending order sort
+      campaigns.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || 0;
+        const timeB = b.createdAt?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+
       callback(campaigns);
     }, (error) => {
+      console.error("[DEBUG] Firebase: campaigns snapshot error:", error);
       handleFirestoreError(error, OperationType.LIST, CAMPAIGNS_COLLECTION);
     });
   },
@@ -1482,7 +1671,12 @@ export const firebaseService = {
           campaignId,
           status: 'assigned',
           earnings: 0,
-          createdAt: serverTimestamp()
+          createdAt: serverTimestamp(),
+          // Territory Architecture Fields
+          stateId: 'KA',
+          territoryId: 'T-UNASSIGNED',
+          cityId: 'UNASSIGNED',
+          franchiseId: null
         });
       });
       await batch.commit();
@@ -1520,11 +1714,29 @@ export const firebaseService = {
 
   async syncTerminalPulse(terminalId: string, metrics: any) {
     const docRef = doc(db, 'terminals', terminalId);
-    await updateDoc(docRef, {
+    
+    const updateData: any = {
       metrics,
       lastPulse: serverTimestamp(),
+      lastSync: serverTimestamp(),
       onlineStatus: 'ONLINE'
-    });
+    };
+
+    if (metrics) {
+      if (metrics.playbackStatus !== undefined) updateData.playbackStatus = metrics.playbackStatus;
+      if (metrics.lastPlayedCampaignId !== undefined) updateData.lastPlayedCampaignId = metrics.lastPlayedCampaignId;
+      if (metrics.lastPlaybackTime !== undefined) updateData.lastPlaybackTime = metrics.lastPlaybackTime;
+      if (metrics.batteryLevel !== undefined) updateData.batteryLevel = metrics.batteryLevel;
+      if (metrics.networkStatus !== undefined) updateData.networkStatus = metrics.networkStatus;
+      if (metrics.gpsLocation !== undefined) updateData.gpsLocation = metrics.gpsLocation;
+      
+      // Counters
+      if (metrics.totalAdsPlayed !== undefined) updateData.totalAdsPlayed = metrics.totalAdsPlayed;
+      if (metrics.todayAdsPlayed !== undefined) updateData.todayAdsPlayed = metrics.todayAdsPlayed;
+      if (metrics.lastCampaignPlayed !== undefined) updateData.lastCampaignPlayed = metrics.lastCampaignPlayed;
+    }
+
+    await updateDoc(docRef, updateData);
   },
 
   async updateTerminalNetwork(terminalId: string, networkConfig: any) {
@@ -1557,7 +1769,7 @@ export const firebaseService = {
 
   // Support Tickets
 
-  async sendChatMessage(ticketId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>) {
+  async sendTicketChatMessage(ticketId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>) {
     try {
       const messagePath = `${TICKETS_COLLECTION}/${ticketId}/messages`;
       const batch = writeBatch(db);
@@ -1571,7 +1783,7 @@ export const firebaseService = {
       // Update ticket with last message snippet
       const ticketRef = doc(db, TICKETS_COLLECTION, ticketId);
       batch.update(ticketRef, {
-        lastMessage: message.text,
+        lastMessage: message.text || message.content,
         updatedAt: serverTimestamp()
       });
 
@@ -1590,7 +1802,7 @@ export const firebaseService = {
     return onSnapshot(q, (snapshot) => {
       const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as ChatMessage[];
       callback(messages);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `${TICKETS_COLLECTION}/${ticketId}/messages`));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, `${TICKETS_COLLECTION}/${ticketId}/messages`, true));
   },
 
   // Payments
@@ -1637,13 +1849,22 @@ export const firebaseService = {
     transactionId?: string,
     failureReason?: string,
     attemptNumber?: number,
-    status: 'success' | 'failed' | 'SUCCESS' | 'FAILED' | 'PENDING_ADMIN_VERIFY' | 'PENDING' | 'CANCELLED' | 'RETRY' | 'REJECTED' | 'REFUNDED' | string
+    status: 'success' | 'failed' | 'SUCCESS' | 'FAILED' | 'PENDING_ADMIN_VERIFY' | 'PENDING' | 'CANCELLED' | 'RETRY' | 'REJECTED' | 'REFUNDED' | string,
+    stateId?: string,
+    territoryId?: string,
+    cityId?: string,
+    franchiseId?: string | null
   }) {
     console.log("[DEBUG] Recording payment:", payment);
     try {
       return await addDoc(collection(db, PAYMENTS_COLLECTION), {
         ...payment,
         createdAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: payment.stateId || 'KA',
+        territoryId: payment.territoryId || 'T-UNASSIGNED',
+        cityId: payment.cityId || 'UNASSIGNED',
+        franchiseId: payment.franchiseId || null
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, PAYMENTS_COLLECTION);
@@ -1663,7 +1884,7 @@ export const firebaseService = {
   },
 
   // Users
-  async saveUserProfile(userId: string, name: string, phone: string, role: string, subscriptionTier: 'FREE' | 'PREMIUM' | 'ENTERPRISE' = 'FREE') {
+  async saveUserProfile(userId: string, name: string, phone: string, role: string, subscriptionTier: 'FREE' | 'PREMIUM' | 'ENTERPRISE' = 'FREE', territoryData?: { stateId: string, territoryId: string, cityId: string, franchiseId: string | null }) {
     console.log("[FirebaseService] Syncing user profile...");
     
     const userRef = doc(db, USERS_COLLECTION, userId);
@@ -1676,7 +1897,12 @@ export const firebaseService = {
         role,
         subscriptionTier,
         isApproved: role === 'CUSTOMER' ? true : false,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: territoryData?.stateId || 'KA',
+        territoryId: territoryData?.territoryId || 'T-UNASSIGNED',
+        cityId: territoryData?.cityId || 'UNASSIGNED',
+        franchiseId: territoryData?.franchiseId || null
       }, { merge: true });
       console.log("[FirebaseService] Save success");
       return res;
@@ -1990,7 +2216,12 @@ export const firebaseService = {
     try {
       return await addDoc(collection(db, PAYOUTS_COLLECTION), {
         ...payout,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: payout.stateId || 'KA',
+        territoryId: payout.territoryId || 'HQ',
+        cityId: payout.cityId || 'global',
+        franchiseId: payout.franchiseId || null
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, PAYOUTS_COLLECTION);
@@ -1998,35 +2229,94 @@ export const firebaseService = {
     }
   },
 
-  subscribeToSupportTicketsForAll(callback: (tickets: SupportTicket[]) => void) {
-    const q = query(collection(db, TICKETS_COLLECTION));
-    return onSnapshot(q, (snapshot) => {
-      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
-      // Sort client-side
-      tickets.sort((a, b) => {
-        const timeA = a.createdAt?.seconds || 0;
-        const timeB = b.createdAt?.seconds || 0;
-        return timeB - timeA;
+  async createSettlement(settlement: Omit<Settlement, 'settlementId' | 'createdAt'>) {
+    try {
+      if (!auth.currentUser) throw new Error("Authentication required");
+      const settlementData = {
+        ...settlement,
+        status: 'PENDING',
+        createdAt: serverTimestamp(),
+      };
+      
+      const docRef = await addDoc(collection(db, 'settlements'), settlementData);
+      
+      await updateDoc(doc(db, 'settlements', docRef.id), {
+        settlementId: docRef.id
       });
-      callback(tickets);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION));
+      
+      return docRef.id;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'settlements');
+      throw e;
+    }
   },
 
-  subscribeToCustomerTickets(customerId: string, callback: (tickets: SupportTicket[]) => void) {
-    const q = query(
-      collection(db, TICKETS_COLLECTION),
-      where('customerId', '==', customerId)
-    );
-    return onSnapshot(q, (snapshot) => {
-      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
-      // Client-side sort
-      tickets.sort((a, b) => {
-        const timeA = a.updatedAt?.toMillis?.() || 0;
-        const timeB = b.updatedAt?.toMillis?.() || 0;
-        return timeB - timeA;
-      });
-      callback(tickets);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION, true));
+  async createRelayMessage(message: any) {
+    const docRef = await addDoc(collection(db, 'relayMessages'), {
+      ...message,
+      createdAt: serverTimestamp(),
+      stateId: 'KA', territoryId: 'T-UNASSIGNED', cityId: 'UNASSIGNED', franchiseId: null
+    });
+    return docRef.id;
+  },
+
+  async createSupportRoom(room: any) {
+    if (!room.franchiseId || room.franchiseId === 'FRANCHISE_PRO' || room.franchiseId === 'UNKNOWN') {
+      throw new Error('Room creation failed: franchiseId is missing or invalid');
+    }
+    if (!room.territoryId || room.territoryId === 'KA-MYS' || room.territoryId === 'UNKNOWN') {
+      throw new Error('Room creation failed: territoryId is missing or invalid');
+    }
+    if (!room.createdBy || room.createdBy === 'UNKNOWN') {
+      throw new Error('Room creation failed: user is missing or invalid');
+    }
+
+    const docRef = await addDoc(collection(db, 'supportRooms'), {
+      ...room,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    const roomId = docRef.id;
+
+    // Insert automatic system messages
+    await addDoc(collection(db, 'chatMessages'), {
+      roomId,
+      senderId: 'SYSTEM',
+      senderName: 'System',
+      senderRole: 'system',
+      text: 'Support room created.',
+      createdAt: serverTimestamp()
+    });
+
+    await addDoc(collection(db, 'chatMessages'), {
+      roomId,
+      senderId: 'SYSTEM',
+      senderName: 'System',
+      senderRole: 'system',
+      text: 'HQ support will respond shortly.',
+      createdAt: serverTimestamp()
+    });
+
+    return roomId;
+  },
+
+  async createMediaAsset(asset: any) {
+    const docRef = await addDoc(collection(db, 'mediaAssets'), {
+      ...asset,
+      createdAt: serverTimestamp(),
+      stateId: 'KA', territoryId: 'T-UNASSIGNED', cityId: 'UNASSIGNED', franchiseId: null
+    });
+    return docRef.id;
+  },
+
+  async createExportRecord(record: any) {
+    const docRef = await addDoc(collection(db, 'exports'), {
+      ...record,
+      createdAt: serverTimestamp(),
+      stateId: 'KA', territoryId: 'T-UNASSIGNED', cityId: 'UNASSIGNED', franchiseId: null
+    });
+    return docRef.id;
   },
 
   async approveDesignerWork(ticketId: string, campaignId: string) {
@@ -2051,20 +2341,27 @@ export const firebaseService = {
       
       // Fetch details for custom notification
       const campaignSnap = await getDoc(campaignRef);
-      const campaignTitle = campaignSnap.exists() ? (campaignSnap.data()?.title || 'a campaign') : 'a campaign';
+      const campaignData = campaignSnap.exists() ? campaignSnap.data() : null;
+      const campaignTitle = campaignData?.title || 'a campaign';
+      const fId = campaignData?.franchiseId || null;
+      const tId = campaignData?.territoryId || campaignData?.cityId || null;
       
       await this.createNotification({
         role: 'ADMIN',
         title: 'Design Satisfaction Met 👍',
         message: `Customer approved custom ad designs for campaign '${campaignTitle}'. Moving to queue verification.`,
-        type: 'DESIGNER_ASSIGNED'
+        type: 'DESIGNER_ASSIGNED',
+        franchiseId: fId,
+        territoryId: tId
       });
 
       await this.createNotification({
         role: 'SUPPORT',
         title: 'Design Satisfaction Met 👍',
         message: `Customer approved custom ad designs for campaign '${campaignTitle}'. Moving to queue verification.`,
-        type: 'DESIGNER_ASSIGNED'
+        type: 'DESIGNER_ASSIGNED',
+        franchiseId: fId,
+        territoryId: tId
       });
 
       // Add system message to chat
@@ -2076,29 +2373,6 @@ export const firebaseService = {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, TICKETS_COLLECTION);
-    }
-  },
-
-  subscribeToSupportTickets(driverId: string, callback: (tickets: SupportTicket[]) => void) {
-    try {
-      const q = query(
-        collection(db, TICKETS_COLLECTION), 
-        where('driverId', '==', driverId)
-      );
-      return onSnapshot(q, (snapshot) => {
-        const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as SupportTicket[];
-        tickets.sort((a, b) => {
-          const tA = a.createdAt?.toMillis?.() || 0;
-          const tB = b.createdAt?.toMillis?.() || 0;
-          return tB - tA;
-        });
-        callback(tickets);
-      }, (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION);
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, TICKETS_COLLECTION);
-      return () => {};
     }
   },
 
@@ -2133,46 +2407,83 @@ export const firebaseService = {
     }
   },
 
-  async createSupportTicket(ticket: Omit<SupportTicket, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { type?: 'DEVICE' | 'CUSTOMER' }) {
+  async createSupportTicket(ticket: Omit<SupportTicket, 'id' | 'createdAt' | 'updatedAt' | 'status'>) {
     try {
-      const docRef = await addDoc(collection(db, TICKETS_COLLECTION), {
+      const typePrefix = 
+        ticket.type === 'CUSTOMER' ? 'CUS' :
+        ticket.type === 'DRIVER' ? 'DRV' :
+        ticket.type === 'FRANCHISE' ? 'FRN' : 'HQ';
+      
+      const ticketNumber = `${typePrefix}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      const ticketData = {
         ...ticket,
-        type: ticket.type || 'CUSTOMER',
+        ticketNumber,
         status: 'OPEN',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        unreadCount: 0
-      });
-
-      // Emit support ticket notifications
-      await this.createNotification({
-        role: 'ADMIN',
-        title: 'New Support Ticket 🎟️',
-        message: `A ticket was raised: '${ticket.title}' (${ticket.priority || 'MEDIUM'} Priority)`,
-        type: 'SUPPORT_TICKET'
-      });
-
-      await this.createNotification({
-        role: 'SUPPORT',
-        title: 'New Support Ticket 🎟️',
-        message: `A ticket was raised: '${ticket.title}' (${ticket.priority || 'MEDIUM'} Priority)`,
-        type: 'SUPPORT_TICKET'
-      });
-
+        unreadCount: 0,
+        assignedToHQ: ticket.assignedToHQ || false
+      };
+      const docRef = await addDoc(collection(db, TICKETS_COLLECTION), ticketData);
       return docRef.id;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, TICKETS_COLLECTION);
-      throw error;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, TICKETS_COLLECTION);
+      throw e;
     }
   },
 
+  subscribeToSupportTickets(callback: (tickets: SupportTicket[]) => void, filters: { franchiseId?: string, territoryId?: string, isHQ?: boolean, userId?: string }) {
+    let q = query(collection(db, TICKETS_COLLECTION), orderBy('createdAt', 'desc'));
+
+    if (filters.isHQ) {
+      q = query(collection(db, TICKETS_COLLECTION),
+        where('assignedToHQ', '==', true),
+        orderBy('createdAt', 'desc')
+      );
+    } else if (!filters.isHQ) {
+      if (filters.userId) {
+        q = query(collection(db, TICKETS_COLLECTION), 
+          where('userId', '==', filters.userId),
+          orderBy('createdAt', 'desc')
+        );
+      } else if (filters.franchiseId && filters.territoryId) {
+        q = query(collection(db, TICKETS_COLLECTION), 
+          where('franchiseId', '==', filters.franchiseId),
+          where('territoryId', '==', filters.territoryId),
+          orderBy('createdAt', 'desc')
+        );
+      } else if (filters.franchiseId) {
+        q = query(collection(db, TICKETS_COLLECTION), 
+          where('franchiseId', '==', filters.franchiseId),
+          orderBy('createdAt', 'desc')
+        );
+      } else if (filters.territoryId) {
+         q = query(collection(db, TICKETS_COLLECTION), 
+          where('territoryId', '==', filters.territoryId),
+          orderBy('createdAt', 'desc')
+        );
+      }
+    }
+
+    return onSnapshot(q, (snapshot) => {
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportTicket));
+      callback(tickets);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION, true));
+  },
+
   // Driver Payment System
-  async createDriverPayment(payment: Omit<DriverPayment, 'id' | 'createdAt' | 'updatedAt'>) {
+  async createDriverPayment(payment: Omit<DriverPayment, 'id' | 'createdAt' | 'updatedAt'> & { stateId?: string, territoryId?: string, cityId?: string, franchiseId?: string | null }) {
     try {
       const docRef = await addDoc(collection(db, DRIVER_PAYMENTS_COLLECTION), {
         ...payment,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: payment.stateId,
+        territoryId: payment.territoryId,
+        cityId: payment.cityId,
+        franchiseId: payment.franchiseId
       });
       await updateDoc(doc(db, DRIVER_PAYMENTS_COLLECTION, docRef.id), {
         paymentId: docRef.id
@@ -2296,6 +2607,17 @@ export const firebaseService = {
     await updateDoc(ticketRef, {
       status,
       resolvedAt: status === 'resolved' ? serverTimestamp() : null,
+      updatedAt: serverTimestamp()
+    });
+  },
+
+  async escalateSupportTicket(ticketId: string) {
+    const ticketRef = doc(db, TICKETS_COLLECTION, ticketId);
+    await updateDoc(ticketRef, {
+      assignedToHQ: true,
+      status: 'in_progress',
+      escalatedAt: serverTimestamp(),
+      escalatedBy: auth.currentUser?.uid,
       updatedAt: serverTimestamp()
     });
   },
@@ -2636,7 +2958,7 @@ export const firebaseService = {
     }
   },
 
-  subscribeToNotifications(userId: string | undefined, role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string, callback: (notifications: AppNotification[]) => void) {
+  subscribeToNotifications(userId: string | undefined, role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string, callback: (notifications: AppNotification[]) => void, franchiseId?: string, territoryId?: string) {
     const q = query(
       collection(db, 'notifications')
     );
@@ -2646,6 +2968,14 @@ export const firebaseService = {
       // Client-side filtering to avoid needing multiple composite indexes
       const filtered = allNotifs.filter(n => {
         if (userId && n.userId === userId) return true;
+        
+        // Franchise isolation:
+        if (franchiseId || territoryId) {
+           if (n.franchiseId && n.franchiseId === franchiseId) return true;
+           if (n.territoryId && n.territoryId === territoryId) return true;
+           return false; // Exclude global/HQ notifications for franchise-scoped users
+        }
+        
         if (n.role && (n.role === role || n.role === 'ALL')) return true;
         return false;
       });
@@ -2793,7 +3123,12 @@ export const firebaseService = {
     try {
       await setDoc(doc(db, "franchises", franchise.id), {
         ...franchise,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: franchise.stateId || 'KA',
+        territoryId: franchise.territoryId || 'T-UNASSIGNED',
+        cityId: franchise.cityId || 'UNASSIGNED',
+        franchiseId: franchise.id // Franchises own themselves
       }, { merge: true });
       return true;
     } catch (e) {
@@ -2807,7 +3142,12 @@ export const firebaseService = {
     try {
       await setDoc(doc(db, "cities", city.id), {
         ...city,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // Territory Architecture Fields
+        stateId: city.stateId || 'KA',
+        territoryId: city.territoryId || 'T-UNASSIGNED',
+        cityId: city.id,
+        franchiseId: null
       }, { merge: true });
       return true;
     } catch (e) {
@@ -2910,7 +3250,12 @@ export const firebaseService = {
       });
 
       // 2. Save User Profile with the verified role loaded from invitation metadata
-      await this.saveUserProfile(uid, name || inviteData.ownerName, phone, role);
+      await this.saveUserProfile(uid, name || inviteData.ownerName, phone, role, 'FREE', {
+        stateId: inviteData.stateId || 'KA',
+        territoryId: inviteData.territoryId || 'T-UNASSIGNED',
+        cityId: inviteData.cityId || 'UNASSIGNED',
+        franchiseId: inviteData.franchiseId || null
+      });
 
       // Save role-specific and registration metadata inside the user profile document in users collection
       const userRef = doc(db, USERS_COLLECTION, uid);
@@ -2984,5 +3329,47 @@ export const firebaseService = {
       handleFirestoreError(e, OperationType.CREATE, `franchises/${franchiseId}/loungeMessages`);
       throw e;
     }
+  },
+
+  subscribeToSupportRooms(callback: (rooms: any[]) => void, franchiseId?: string, isHQ: boolean = false) {
+    let q = query(collection(db, 'supportRooms'));
+    if (!isHQ) {
+      if (!franchiseId) {
+        callback([]);
+        return () => {};
+      }
+      q = query(collection(db, 'supportRooms'), where('franchiseId', '==', franchiseId));
+    } else if (franchiseId) {
+      q = query(collection(db, 'supportRooms'), where('franchiseId', '==', franchiseId));
+    }
+    return onSnapshot(q, (snapshot) => {
+      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'supportRooms'));
+  },
+
+  async sendSupportChatMessage(roomId: string, message: any) {
+    try {
+      return await addDoc(collection(db, 'chatMessages'), {
+        roomId,
+        ...message,
+        createdAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'chatMessages');
+      throw e;
+    }
+  },
+
+  subscribeToSupportMessages(roomId: string, callback: (messages: any[]) => void) {
+    const q = query(collection(db, 'chatMessages'), where('roomId', '==', roomId));
+    return onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      msgs.sort((a: any, b: any) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return timeA - timeB;
+      });
+      callback(msgs);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'chatMessages'));
   },
 };

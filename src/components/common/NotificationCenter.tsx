@@ -18,9 +18,11 @@ interface NotificationCenterProps {
   role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string;
   onNavigateToTab?: (tabName: string) => void;
   shouldSubscribe?: boolean;
+  franchiseId?: string;
+  territoryId?: string;
 }
 
-export default function NotificationCenter({ userId, role, onNavigateToTab, shouldSubscribe = true }: NotificationCenterProps) {
+export default function NotificationCenter({ userId, role, onNavigateToTab, shouldSubscribe = true, franchiseId, territoryId }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [liveToast, setLiveToast] = useState<AppNotification | null>(null);
@@ -53,10 +55,10 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
         }
       }
       setNotifications(notifs);
-    });
+    }, franchiseId, territoryId);
 
     return () => unsubscribe();
-  }, [userId, role, shouldSubscribe]);
+  }, [userId, role, shouldSubscribe, franchiseId, territoryId]);
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -133,7 +135,12 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
         else if (role === 'DRIVER') onNavigateToTab('CAMPAIGNS');
         else onNavigateToTab('CAMPAIGNS');
       } else if (notif.type === 'STUDIO_PLAN_UNLOCKED') {
-        onNavigateToTab('STUDIO');
+        onNavigateToTab('DASHBOARD');
+      } else if (notif.type === 'DESIGNER_ASSIGNED') {
+        if (role === 'CUSTOMER') onNavigateToTab('DESIGN_HELP');
+        else onNavigateToTab('CAMPAIGNS');
+      } else if (notif.type === 'SYSTEM') {
+        onNavigateToTab('NOTICES');
       }
     }
     setIsOpen(false);

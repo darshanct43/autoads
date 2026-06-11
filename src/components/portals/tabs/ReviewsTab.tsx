@@ -1,6 +1,6 @@
 import React from "react";
-import { motion } from "motion/react";
-import { Check, X, Video, Monitor, Trash2 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Check, X, Video, Monitor, Trash2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Driver } from "@/services/firebaseService";
 import { getSafeUrl } from "../AdminPortal";
@@ -24,110 +24,53 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
   handleApproveCampaign,
   handleDeleteCampaign,
 }) => {
+  const [previewDoc, setPreviewDoc] = React.useState<{ url: string, label: string } | null>(null);
+
   return (
     <div className="space-y-8">
+      <AnimatePresence>
+        {previewDoc && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[2rem] p-8 max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-slate-900 tracking-tight leading-none">{previewDoc.label}</h3>
+                <button onClick={() => setPreviewDoc(null)} className="p-3 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors">
+                  <X size={20} className="text-slate-900" />
+                </button>
+              </div>
+              <div className="flex-1 bg-slate-50 rounded-2xl overflow-auto border border-slate-200 flex items-center justify-center p-4">
+                 <img src={previewDoc.url} alt={previewDoc.label} className="max-w-full h-auto rounded-lg shadow-lg" referrerPolicy="no-referrer" />
+              </div>
+              <button 
+                onClick={() => setPreviewDoc(null)}
+                className="mt-6 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
+              >
+                Close Preview
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-amber-500 p-6 md:p-8 rounded-[2rem] shadow-xl shadow-amber-500/10 text-slate-950 relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-white/10 blur-3xl rounded-full -mr-16 -mt-16" />
         <div className="relative z-10 font-sans">
-          <h2 className="text-2xl md:text-5xl font-black italic uppercase leading-none">
+          <h2 className="text-2xl md:text-5xl font-bold tracking-tight">
             Quality Control
           </h2>
-          <p className="text-[10px] md:text-[12px] font-black uppercase tracking-[0.3em] mt-3 opacity-60">
-            Pending Global Verification Queue
+          <p className="text-[10px] md:text-[12px] font-bold uppercase tracking-[0.3em] mt-3 opacity-60">
+            Pending Campaign Review Queue
           </p>
         </div>
       </div>
 
-      <div className="space-y-4 pb-12 font-sans">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Pending Driver Onboarding ({drivers.filter(d => d.status === "pending_verification").length})</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 font-sans">
-          {drivers.filter(d => d.status === "pending_verification").map((d) => (
-            <motion.div
-              key={d.uid}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm hover:shadow-2xl transition-all flex flex-col group font-sans"
-            >
-              <div className="p-6 space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-800">
-                    <img
-                      src={getSafeUrl(d.profileImage || `https://api.dicebear.com/7.x/avataaars/svg?seed=${d.uid}`)}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div>
-                    <h4 className="text-lg font-black text-slate-900 uppercase leading-none mb-1">{d.name}</h4>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.city || "Unknown Location"}</p>
-                    {d.phone && <p className="text-[10px] font-bold font-mono text-slate-500 mt-1 uppercase">Phone: {d.phone}</p>}
-                    {d.email && <p className="text-[9px] font-medium font-mono text-slate-400 truncate max-w-[150px]">{d.email}</p>}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                  {[
-                    { label: "Aadhaar", key: "aadharPhoto" },
-                    { label: "RC", key: "rcPhoto" },
-                    { label: "License", key: "dlPhoto" },
-                    { label: "PAN", key: "panPhoto" },
-                    { label: "Insurance", key: "insurancePhoto" },
-                    { label: "Selfie", key: "profileImage" }
-                  ].map(doc => (
-                    <div key={doc.key} className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-1">
-                      <span className="text-[7px] font-black uppercase text-slate-400">{doc.label}</span>
-                      {((d as any)[doc.key] || (doc.key === "aadharPhoto" && (d as any).documents?.aadhaar) || (doc.key === "dlPhoto" && (d as any).documents?.drivingLicense) || (doc.key === "profileImage" && (d as any).documents?.selfie)) ? (
-                        <Check size={12} className="text-green-500" />
-                      ) : (
-                        <X size={12} className="text-slate-300" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      const newId = d.terminalId || `DEVICE-${Math.floor(1000 + Math.random() * 9000)}`;
-                      const newKey = d.accessKey || Math.floor(1000 + Math.random() * 9000).toString();
-                      firebaseService.updateDriverProfile(d.id, {
-                        status: "active",
-                        isVerified: true,
-                        kycStatus: "APPROVED",
-                        payoutEnabled: true,
-                        adminApproved: true,
-                        terminalId: newId,
-                        accessKey: newKey,
-                        provisionStatus: "PROVISIONED"
-                      });
-
-                      // Auto-approve the agreement if they are being quick approved
-                      firebaseService.updateDriverAgreement(d.id, {
-                        agreementAccepted: true,
-                        acceptedAt: new Date().toISOString(),
-                        version: "1.0",
-                        ipAddress: "admin-provisioned"
-                      });
-                      showToast("Driver Approved & Terminal Provisioned", "success");
-                    }}
-                    className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 font-sans"
-                  >
-                    Quick Approve
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-          {drivers.filter(d => d.status === "pending_verification").length === 0 && (
-            <div className="col-span-full py-12 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] text-center">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-sans">No pending driver verifications</p>
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="space-y-4 pt-8">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT")).length})</h3>
+        <h3 className="text-xs font-bold uppercase tracking-[0.15em] text-slate-400 ml-2">Campaign Submissions ({campaigns.filter(c => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT")).length})</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 font-sans">
           {campaigns.filter((c) => c.status === "PENDING" || (c.status === "AWAITING_PAYPORTAL" && c.paymentStatus === "PAYMENT_LINK_SENT")).length > 0 ? (
             campaigns
@@ -175,11 +118,17 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
                   </div>
                   <div className="p-4 md:p-6 flex flex-col flex-1 font-sans">
                     <div className="flex-1 space-y-2">
-                      <h4 className="text-lg font-black text-slate-900 uppercase leading-none truncate">
-                        {c.title}
-                      </h4>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-slate-900 tracking-tight truncate">
+                          {c.title}
+                        </h4>
+                        {c.uid && (
+                          <span className="text-[8px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded border border-amber-200">
+                            {c.uid}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-400 font-mono flex items-center gap-2">
                         ID: {c.id?.slice(-8).toUpperCase()}
                       </p>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
@@ -200,20 +149,20 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
                         </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 mt-8">
-                      <button
-                        onClick={() => handleRejectCampaign(c.id!)}
-                        className="py-4 border border-slate-100 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-50 hover:border-red-100 transition-all font-sans"
-                      >
-                        Reject
-                      </button>
-                      <button
-                        onClick={() => handleApproveCampaign(c.id!)}
-                        className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 font-sans"
-                      >
-                        Approve
-                      </button>
-                    </div>
+                      <div className="grid grid-cols-2 gap-3 mt-8">
+                        <button
+                          onClick={() => handleRejectCampaign(c.id!)}
+                          className="py-4 border border-slate-100 text-red-500 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-50 hover:border-red-100 transition-all"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => handleApproveCampaign(c.id!)}
+                          className="py-4 bg-slate-900 text-amber-500 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+                        >
+                          Approve
+                        </button>
+                      </div>
                     <button
                       onClick={() => handleDeleteCampaign(c.id!)}
                       className="w-full mt-3 py-3 text-slate-400 hover:text-red-500 transition-colors text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 font-sans"

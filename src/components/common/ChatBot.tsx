@@ -164,13 +164,16 @@ export default function ChatBot() {
     const user = auth.currentUser;
     try {
       await firebaseService.createSupportTicket({
+        userId: user?.uid || 'anonymous',
         driverId: user?.uid || 'anonymous',
         driverName: user?.displayName || 'Unknown',
         title: 'Chat Escalation',
         subject: 'Chat Escalation',
+        message: 'User requested human assistance via AI ChatBot',
         description: 'User requested human assistance via AI ChatBot',
         priority: 'MEDIUM',
-        category: 'SUPPORT_CHAT'
+        category: 'SUPPORT_CHAT',
+        type: 'DRIVER'
       });
       
       setLoading(true);

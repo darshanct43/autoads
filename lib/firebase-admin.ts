@@ -18,8 +18,23 @@ try {
 
 const firebaseProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || appletConfig.projectId;
 const firebaseDatabaseId = appletConfig.firestoreDatabaseId || process.env.FIRESTORE_DATABASE_ID || '(default)';
-console.log('[FIREBASE] Admin SDK loading variables:', { firebaseProjectId, firebaseDatabaseId, hasSA: !!process.env.FIREBASE_SERVICE_ACCOUNT });
-const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT;
+
+let rawSA = process.env.FIREBASE_SERVICE_ACCOUNT;
+let serviceAccount = parseServiceAccount(rawSA);
+
+if (!serviceAccount) {
+  try {
+    const saPath = path.resolve(process.cwd(), 'firebase-service-account.json');
+    if (fs.existsSync(saPath)) {
+      rawSA = fs.readFileSync(saPath, 'utf8');
+      serviceAccount = parseServiceAccount(rawSA);
+      console.log('[FIREBASE] Admin SDK loaded service account from file.');
+    }
+  } catch (e) {
+    console.error("[FIREBASE] Could not load service account from disk:", e);
+  }
+}
+console.log('[FIREBASE] Admin SDK loading variables:', { firebaseProjectId, firebaseDatabaseId, hasSA: !!serviceAccount });
 const appOptions: any = {
   projectId: firebaseProjectId
 };
@@ -64,7 +79,6 @@ function parseServiceAccount(raw: string | undefined): any {
   return null;
 }
 
-const serviceAccount = parseServiceAccount(rawSA);
 const isAdminAuthReady = !!(serviceAccount && serviceAccount.private_key);
 
 if (!getApps().length) {

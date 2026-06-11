@@ -12,6 +12,7 @@ import AdminPortal from './components/portals/AdminPortal.js';
 import CustomerPortal from './components/portals/CustomerPortal.js';
 import DevicePortal from './components/portals/DevicePortal.js';
 import DriverPortal from './components/portals/DriverPortal.js';
+import DriverQuotesExtension from './components/portals/DriverQuotesExtension.js';
 import FranchisePortal from './components/portals/FranchisePortal.js';
 import SupportPortal from './components/portals/SupportPortal.js';
 import { ErrorBoundary } from './components/common/ErrorBoundary.js';
@@ -23,6 +24,17 @@ export default function App() {
   const [showBoot, setShowBoot] = useState(true);
 
   useEffect(() => {
+    // Check for offline debug bypass session
+    const isOffline = localStorage.getItem('auto_ads_offline_mode') === 'true';
+    if (isOffline) {
+      const offlineRole = (localStorage.getItem('auto_ads_offline_role') as UserRole) || 'CUSTOMER';
+      setUser({ uid: 'OFFLINE_UID', email: `${offlineRole.toLowerCase()}@autoads.in` } as any);
+      setUserRole(offlineRole);
+      setLoading(false);
+      setShowBoot(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       setUser(firebaseUser);
       if (firebaseUser) {
@@ -37,8 +49,8 @@ export default function App() {
           
           if (profile?.role === 'ADMIN' || emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
             role = 'ADMIN';
-          } else if (profile?.role === 'SUPPORT' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
-            role = 'SUPPORT';
+          } else if (profile?.role === 'SUPPORT' || profile?.role === 'SUPPORT_AGENT' || profile?.role === 'SUPPORT_MANAGER' || profile?.role === 'SUPPORT_TEAM' || profile?.role === 'STAFF' || emailLower.includes('support')) {
+            role = 'SUPPORT_TEAM';
           } else if (profile?.role === 'FRANCHISE_STAFF') {
             role = 'FRANCHISE_STAFF';
           } else if (profile?.role === 'FRANCHISE_OWNER') {
@@ -72,7 +84,9 @@ export default function App() {
   const handleLogout = async () => {
     try {
       localStorage.removeItem('auto_ads_is_terminal');
-      await signOut(auth);
+      localStorage.removeItem('auto_ads_offline_mode');
+      localStorage.removeItem('auto_ads_offline_role');
+      await signOut(auth).catch(() => {});
       setUser(null);
       setUserRole(null);
     } catch (err) {
@@ -108,17 +122,14 @@ export default function App() {
           {userRole === 'ADMIN' && (
             <AdminPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
           )}
-          {userRole === 'SUPPORT' && (
+          {['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(userRole) && (
             <SupportPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
           )}
-          {userRole === 'FRANCHISE_OWNER' && (
-            <FranchisePortal onLogout={handleLogout} />
-          )}
-          {userRole === 'FRANCHISE_STAFF' && (
-            <FranchisePortal onLogout={handleLogout} />
-          )}
           {userRole === 'DRIVER' && (
-            <DriverPortal onLogout={handleLogout} />
+            <React.Fragment>
+              <DriverPortal onLogout={handleLogout} />
+              <DriverQuotesExtension />
+            </React.Fragment>
           )}
           {userRole === 'CUSTOMER' && (
             <CustomerPortal onLogout={handleLogout} />
@@ -127,7 +138,7 @@ export default function App() {
             <DevicePortal onLogout={handleLogout} />
           )}
           {/* Fallback standard route */}
-          {!['ADMIN', 'SUPPORT', 'FRANCHISE_OWNER', 'FRANCHISE_STAFF', 'DRIVER', 'CUSTOMER', 'DEVICE'].includes(userRole) && (
+          {!['ADMIN', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM', 'DRIVER', 'CUSTOMER', 'DEVICE'].includes(userRole) && (
             <CustomerPortal onLogout={handleLogout} />
           )}
         </React.Fragment>

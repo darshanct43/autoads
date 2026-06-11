@@ -12,7 +12,9 @@ import {
   XCircle,
   HelpCircle,
   TrendingUp,
+  Trash2,
 } from "lucide-react";
+import { firebaseService } from "@/services/firebaseService";
 
 interface Payment {
   id?: string;
@@ -78,9 +80,36 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
     return isNaN(date.getTime()) ? "N/A" : date.toLocaleString();
   };
 
+  const isTestPayment = (p: any) => {
+    if (!p) return false;
+    if (p.isTest === true) return true;
+    if (p.isTest === false) return false;
+    
+    const idStr = String(p.id || '').toLowerCase();
+    const txIdStr = String(p.transactionId || p.upiTransactionId || p.paymentId || '').toLowerCase();
+    const orderIdStr = String(p.orderId || '').toLowerCase();
+    const descStr = String(p.description || '').toLowerCase();
+    const campaignStr = String(p.campaignId || '').toLowerCase();
+    
+    const markers = ['test', 'demo', 'fake', 'dummy', 'pay_test', 'sandbox'];
+    for (const marker of markers) {
+      if (idStr.includes(marker)) return true;
+      if (txIdStr.includes(marker)) return true;
+      if (orderIdStr.includes(marker)) return true;
+      if (descStr.includes(marker)) return true;
+      if (campaignStr.includes(marker)) return true;
+    }
+    return false;
+  };
+
+  // Filter out any test transactions
+  const filteredPayments = (payments || []).filter((p) => {
+    return !isTestPayment(p);
+  });
+
   // 1. Calculations for Metrics Bar
   // Successful customer payments represent Revenue (Income)
-  const totalRevenue = payments
+  const totalRevenue = filteredPayments
     .filter((p) => p.status?.toLowerCase() === "success")
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
@@ -106,7 +135,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
   };
 
   return (
-    <div className="space-y-6 max-h-[85vh] overflow-y-auto pr-2 pb-12 font-sans" id="payments-registry-view">
+    <div className="space-y-6 pb-12 font-sans" id="payments-registry-view">
       {/* Visual Header Banner */}
       <div className="bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden" id="payments-header-banner">
         <div className="absolute right-0 top-0 w-96 h-96 bg-emerald-500/10 blur-3xl rounded-full -mr-16 -mt-16" />
@@ -140,7 +169,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
               ₹ {totalRevenue.toLocaleString()}
             </h4>
             <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
-              From {payments.filter((p) => p.status?.toLowerCase() === "success").length} successful payments
+              From {filteredPayments.filter((p) => p.status?.toLowerCase() === "success").length} successful payments
             </p>
           </div>
           <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-500">
@@ -216,7 +245,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
 
         <div className="text-right">
           <span className="text-[9px] font-extrabold uppercase font-mono bg-slate-100 px-3 py-1.5 rounded-lg text-slate-500">
-            SHOWING TOTAL {paymentSubTab === "INCOME" ? payments.length : driverPayments.length} LOGS
+            SHOWING TOTAL {paymentSubTab === "INCOME" ? filteredPayments.length : driverPayments.length} LOGS
           </span>
         </div>
       </div>
@@ -230,7 +259,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
               <Receipt size={14} /> Customer Campaigns Checkout Stream
             </h3>
 
-            {payments.length === 0 ? (
+            {filteredPayments.length === 0 ? (
               <div className="py-16 text-center flex flex-col items-center justify-center space-y-3 bg-slate-50/55 rounded-2xl" id="income-empty-state">
                 <div className="w-16 h-16 bg-slate-100/70 rounded-3xl flex items-center justify-center text-slate-400">
                   <CreditCard size={28} />
@@ -242,7 +271,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4">
-                {payments.map((p, idx) => {
+                {filteredPayments.map((p, idx) => {
                   const isSuccess = p.status?.toLowerCase() === "success" || p.status?.toLowerCase() === "completed";
                   const isFailed = p.status?.toLowerCase() === "failed";
                   
@@ -294,7 +323,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
                           </p>
                         </div>
 
-                        <div className="flex-shrink-0">
+                        <div className="flex-shrink-0 flex items-center gap-2">
                           {isSuccess ? (
                             <span className="flex items-center gap-1 text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100">
                               <CheckCircle2 size={12} /> Success
@@ -308,6 +337,24 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
                               <Clock size={12} /> {p.status === 'PAYMENT_LINK_SENT' ? 'Payment Link Sent' : (p.status || "Pending")}
                             </span>
                           )}
+
+                          <button
+                            title="Delete Payment"
+                            onClick={async () => {
+                              if (p.id) {
+                                if (window.confirm("Are you sure you want to delete this payment record from the database list? This will update the total revenue instantly.")) {
+                                  try {
+                                    await firebaseService.deletePayment(p.id);
+                                  } catch (err) {
+                                    alert("Error deleting payment: " + err);
+                                  }
+                                }
+                              }
+                            }}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-105 text-rose-600 rounded-xl transition-all cursor-pointer flex items-center justify-center"
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
                       </div>
                     </div>

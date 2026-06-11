@@ -42,25 +42,25 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
         <div className="absolute right-0 top-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full" />
         <div className="relative z-10 flex items-center justify-between">
           <div>
-            <h2 className="text-lg md:text-2xl font-black italic uppercase text-amber-500">
+            <h2 className="text-lg md:text-2xl font-bold text-amber-500 tracking-tight">
               Campaign Matrix
             </h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Global Fleet Deployment Control
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.15em]">
+              Fleet Deployment Control
             </p>
           </div>
           <div className="flex items-center gap-4">
             <button
               onClick={(e) => handleExtractionClick(e, campaigns, "Campaign_Deployment_Records")}
               disabled={isExtracting}
-              className="bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl border border-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50"
+              className="bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl border border-white/10 text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50"
             >
               {isExtracting ? <RefreshCw size={14} className="animate-spin text-amber-500" /> : <Download size={14} className="text-amber-500" />}
               {isExtracting ? "Extracting..." : "Extract Matrix"}
             </button>
             <div className="hidden sm:flex items-center gap-4">
               <div className="text-right">
-                <p className="text-[10px] font-black text-white uppercase tracking-widest">
+                <p className="text-[10px] font-bold text-white uppercase tracking-widest">
                   {campaigns.filter((c) => c.status === "ACTIVE").length}
                 </p>
                 <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
@@ -77,15 +77,15 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
           <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-            <h3 className="text-xs font-black text-slate-900 uppercase italic">
-              Live Deployment Inventory
+            <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+              Deployment Inventory
             </h3>
-            <span className="text-[10px] font-black text-slate-400">
+            <span className="text-[11px] font-bold text-slate-400">
               {campaigns.filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase")).length}{" "}
-              Units
+              Active
             </span>
           </div>
-          <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
+          <div className="divide-y divide-slate-50 overflow-y-auto">
             {campaigns
               .filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase"))
               .map((c) => (
@@ -107,15 +107,22 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-black uppercase text-slate-900 leading-none mb-1.5 truncate">
-                        {c.title}
-                      </p>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="text-xs font-bold text-slate-900 leading-none truncate">
+                          {c.title}
+                        </p>
+                        {c.uid && (
+                          <span className="text-[8px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-tighter">
+                            {c.uid}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[8px] font-black bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-widest text-slate-500">
+                        <span className="text-[8px] font-bold bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-widest text-slate-600">
                           {c.planId || "PRO"}
                         </span>
-                        <span className="text-[8px] font-black text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded uppercase tracking-widest leading-none">
-                          {c.assignedDrivers?.length || 0} Nodes
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none">
+                          {c.assignedDrivers?.length || 0} Nodes Linked
                         </span>
                       </div>
                     </div>
@@ -133,10 +140,10 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                 <MousePointer2 size={32} />
               </div>
               <div className="space-y-2">
-                <h3 className="text-sm font-black text-slate-900 uppercase">
+                <h3 className="text-sm font-bold text-slate-900 uppercase">
                   Selection Required
                 </h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] max-w-[200px]">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] max-w-[200px]">
                   Select a campaign from the deployment inventory to configure node targeting.
                 </p>
               </div>
@@ -150,21 +157,23 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                 className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl border border-slate-200 transition-all flex items-center gap-2"
               >
                 <ArrowLeft size={16} />
-                <span className="text-[9px] font-black uppercase tracking-widest hidden xs:inline">Back</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest hidden xs:inline">Back</span>
               </button>
-              <h3 className="text-xs font-black text-slate-900 uppercase italic">
-                Node Activation Desk
+              <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                Node Activation Control
               </h3>
             </div>
-            <span className="px-3 py-1 bg-green-100 text-green-600 text-[8px] font-black uppercase rounded-lg">
-              Cluster: {selectedCampaign?.title?.slice(0, 10)}
-            </span>
+            {selectedCampaign?.uid && (
+              <span className="px-3 py-1 bg-amber-100 text-amber-700 text-[9px] font-bold uppercase rounded-lg border border-amber-200">
+                REF: {selectedCampaign.uid}
+              </span>
+            )}
           </div>
 
           <div className="p-4 border-b border-slate-50 bg-slate-50/10 space-y-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Media Content & Type</h4>
+                <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.15em]">Media Content & Type</h4>
                 {!isEditingMedia ? (
                   <button
                     onClick={() => {
@@ -172,14 +181,14 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                       setEditMediaType(selectedCampaign?.mediaType || "IMAGE");
                       setIsEditingMedia(true);
                     }}
-                    className="text-[8px] font-black text-amber-600 uppercase hover:underline"
+                    className="text-[8px] font-bold text-amber-600 uppercase hover:underline"
                   >
                     Edit Media link
                   </button>
                 ) : (
                   <button
                     onClick={() => setIsEditingMedia(false)}
-                    className="text-[8px] font-black text-slate-400 uppercase hover:underline"
+                    className="text-[8px] font-bold text-slate-400 uppercase hover:underline"
                   >
                     Cancel
                   </button>
@@ -292,13 +301,13 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                 <input
                   type="text"
                   placeholder="Search nodes by name, number, city..."
-                  className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-2xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all shadow-sm h-14"
+                  className="w-full bg-white border border-slate-200 p-4 pl-12 rounded-2xl text-[10px] font-bold uppercase tracking-widest focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all shadow-sm h-14"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
               <select
-                className="bg-white border border-slate-200 px-4 rounded-2xl text-[9px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-14"
+                className="bg-white border border-slate-200 px-4 rounded-2xl text-[9px] font-bold uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/20 h-14"
                 value={selectedArea}
                 onChange={(e) => setSelectedArea(e.target.value)}
               >
@@ -310,7 +319,7 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto max-h-[400px] p-6 space-y-2">
+          <div className="flex-1 overflow-y-auto p-6 space-y-2">
             {filteredDrivers.map((d) => (
               <label
                 key={d.uid}
@@ -361,11 +370,11 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
             ))}
           </div>
 
-          <div className="p-8 bg-slate-950 border-t border-slate-800 mt-auto font-sans">
+          <div className="p-8 bg-slate-950 border-t border-slate-800 mt-auto">
             <button
               onClick={handleBulkAssign}
               disabled={isAssigning || selectedDriverIds.length === 0}
-              className="w-full py-5 bg-amber-500 text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] shadow-xl shadow-amber-500/10 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3 italic"
+              className="w-full py-5 bg-amber-500 text-slate-950 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] shadow-xl shadow-amber-500/10 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
             >
               {isAssigning
                 ? "Synchronizing Cluster..."

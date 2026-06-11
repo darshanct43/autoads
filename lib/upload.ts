@@ -5,8 +5,26 @@ import path from 'path';
 import { exec } from 'child_process';
 import util from 'util';
 import { s3Service } from '../src/services/s3Service';
+import { dbAdm, admin } from './firebase-admin.js';
 
 const execPromise = util.promisify(exec);
+
+async function trackAwsAction(success: boolean) {
+  try {
+    const docRef = dbAdm.collection('systemMetrics').doc('live');
+    const updateData: any = {};
+    if (success) {
+      updateData.awsUploadCount = admin.firestore.FieldValue.increment(1);
+    } else {
+      updateData.awsFailedUploads = admin.firestore.FieldValue.increment(1);
+    }
+    // Track write operation too
+    updateData.firestoreWrites = admin.firestore.FieldValue.increment(1);
+    await docRef.set(updateData, { merge: true });
+  } catch (err: any) {
+    console.warn("[Telemetry Sync Warning] Failed to track AWS upload:", err.message);
+  }
+}
 
 export default async function handler(req: any, res: any) {
   console.log("UPLOAD_ROUTE_ENTERED");
@@ -73,6 +91,7 @@ export default async function handler(req: any, res: any) {
         console.log("S3_UPLOAD_START");
         const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
         console.log("S3_UPLOAD_SUCCESS");
+        await trackAwsAction(true);
 
         const successResponse = { url: fileUrl };
         console.log("RESPONSE_SENT", { status: 200, body: successResponse });
@@ -81,6 +100,7 @@ export default async function handler(req: any, res: any) {
       } catch (writeErr: any) {
         console.log("S3_UPLOAD_ERROR");
         console.error("FULL ERROR:", writeErr);
+        await trackAwsAction(false);
 
         const errorResponse = { error: 'Failed to write uploaded file to S3.' };
         console.log("RESPONSE_SENT", { status: 500, body: errorResponse });

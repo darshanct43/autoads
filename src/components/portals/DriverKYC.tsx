@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { CloudUpload, User, FileText, CheckCircle2, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { storageService } from '@/services/storageService';
 import { firebaseService } from '@/services/firebaseService';
 import { cn } from '@/lib/utils';
 import { DriverProfile, DriverDocument } from '@/types';
+import { db } from '@/lib/firebase';
+import { onSnapshot, doc } from 'firebase/firestore';
 
 interface DriverKYCProps {
   driverId: string;
@@ -17,6 +19,26 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
   const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Partial<DriverDocument>>({});
   const [upiId, setUpiId] = useState('');
+  const [driverData, setDriverData] = useState<any>(null);
+
+  useEffect(() => {
+    if (!driverId) return;
+    
+    // Subscribe to driver profile to load existing data
+    const unsub = onSnapshot(doc(db, 'drivers', driverId), (snap: any) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setDriverData(data);
+        setDocuments({
+          aadhaar: data.aadharPhoto || '',
+          drivingLicense: data.dlPhoto || '',
+          selfie: data.selfiePhoto || ''
+        });
+        setUpiId(data.upiId || '');
+      }
+    });
+    return unsub;
+  }, [driverId]);
 
   const handleUpload = async (docKey: keyof DriverDocument, file: File) => {
     setLoading(true);
@@ -83,15 +105,23 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
         <h2 className="text-xl font-black italic uppercase tracking-tighter text-slate-900">Driver KYC Verification</h2>
       </div>
       
-      <div className="space-y-3">
-          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Document Uploads</p>
+      <div className="space-y-4">
+          <p className="text-xs font-black uppercase tracking-widest text-slate-500">Required Documents</p>
           {(['aadhaar', 'drivingLicense', 'selfie'] as const).map(doc => (
-            <div key={doc} className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
-               <span className="text-xs font-bold text-slate-700 capitalize">{doc.replace(/([A-Z])/g, ' $1')}</span>
-               <input type="file" onChange={(e) => e.target.files && handleUpload(doc, e.target.files[0])} className="hidden" id={doc} />
-               <label htmlFor={doc} className={cn("p-2.5 rounded-xl cursor-pointer transition-all active:scale-95", documents[doc] ? "bg-green-100 text-green-600" : "bg-slate-200 hover:bg-slate-300")}>
-                  <CloudUpload size={18} />
-               </label>
+            <div key={doc} className="flex flex-col gap-2 p-4 bg-white rounded-2xl border border-slate-200">
+               <div className="flex items-center justify-between">
+                 <span className="text-sm font-bold text-slate-800 capitalize">{doc.replace(/([A-Z])/g, ' $1')}</span>
+                 <input type="file" onChange={(e) => e.target.files && handleUpload(doc, e.target.files[0])} className="hidden" id={doc} />
+                 <label htmlFor={doc} className={cn("px-6 py-3 rounded-2xl cursor-pointer text-[10px] font-black uppercase tracking-widest transition-all shadow-sm border active:scale-95 flex items-center gap-2", documents[doc] ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-900 text-amber-500 border-slate-800")}>
+                    <CloudUpload size={14} />
+                    {documents[doc] ? "Update Doc" : "Upload Document"}
+                 </label>
+               </div>
+               {documents[doc] && (
+                 <div className="mt-2">
+                   <img src={documents[doc]} alt={doc} className="w-full h-32 object-cover rounded-lg border border-slate-200" />
+                 </div>
+               )}
             </div>
           ))}
       </div>

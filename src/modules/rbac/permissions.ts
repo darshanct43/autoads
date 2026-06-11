@@ -32,6 +32,16 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, RolePermissions> = {
     canAccessSystemsAudit: true,
     canDischargeFinances: false
   },
+  SUPPORT_TEAM: {
+    canApproveDrivers: true,
+    canApproveCampaigns: true,
+    canApproveDevices: true,
+    canManageSupportTeams: true,
+    canViewGlobalAnalytics: false,
+    canManageFranchises: false,
+    canAccessSystemsAudit: true,
+    canDischargeFinances: false
+  },
   SUPPORT_AGENT: {
     canApproveDrivers: true,
     canApproveCampaigns: true,
@@ -110,6 +120,26 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, RolePermissions> = {
     canViewGlobalAnalytics: false,
     canManageFranchises: false,
     canAccessSystemsAudit: false,
+    canDischargeFinances: false
+  },
+  HQ_ADMIN: {
+    canApproveDrivers: true,
+    canApproveCampaigns: true,
+    canApproveDevices: true,
+    canManageSupportTeams: true,
+    canViewGlobalAnalytics: true,
+    canManageFranchises: true,
+    canAccessSystemsAudit: true,
+    canDischargeFinances: true
+  },
+  HQ_SUPPORT: {
+    canApproveDrivers: true,
+    canApproveCampaigns: true,
+    canApproveDevices: true,
+    canManageSupportTeams: true,
+    canViewGlobalAnalytics: true,
+    canManageFranchises: false,
+    canAccessSystemsAudit: true,
     canDischargeFinances: false
   }
 };

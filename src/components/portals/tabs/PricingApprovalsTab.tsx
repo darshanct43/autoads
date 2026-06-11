@@ -7,8 +7,8 @@ interface PricingApprovalsTabProps {
 }
 
 export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
-  planProposals,
-  plans,
+  planProposals = [],
+  plans = [],
   handleRejectPlan,
   handleApprovePlan,
 }) => {
@@ -32,6 +32,8 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
         ) : (
           planProposals.map((prop) => {
             const plan = plans.find(p => p.id === prop.planId);
+            const finalNewVal = prop.newValue !== undefined ? prop.newValue : (prop.newPrice !== undefined ? prop.newPrice : prop.proposedPrice);
+            const finalCurrentVal = prop.currentPrice !== undefined ? prop.currentPrice : (prop.currentVal !== undefined ? prop.currentVal : (prop.type === "designerPrice" ? plan?.designerPrice : prop.type === "videoMakerPrice" ? plan?.videoMakerPrice : plan?.price));
             return (
               <motion.div
                 key={prop.id}
@@ -41,7 +43,11 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <div className="bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">
-                    {prop.type === "designerPrice" ? "Designer Rate" : prop.type === "videoMakerPrice" ? "Video Rate" : "Base Rate"}
+                    {prop.type === "designerPrice" ? "Designer Rate" : 
+                     prop.type === "videoMakerPrice" ? "Video Rate" : 
+                     prop.type === "features" ? "Features List" :
+                     prop.type === "description" ? "Description" :
+                     "Base Rate"}
                   </div>
                   <span className="text-[10px] font-bold text-slate-400">
                     {prop.createdAt?.toDate?.()?.toLocaleDateString() || "Today"}
@@ -53,19 +59,32 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Proposed by: {prop.proposedBy}</p>
                 </div>
 
-                <div className="flex items-baseline gap-4 py-4 bg-slate-50 rounded-2xl px-6">
-                  <div className="flex-1">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Proposed</p>
-                    <p className="text-2xl font-black text-amber-500 italic">₹{prop.newValue || prop.newPrice}</p>
+                {prop.type === 'features' || prop.type === 'description' ? (
+                  <div className="py-4 bg-slate-50 rounded-2xl px-6 space-y-4">
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                        {prop.type === 'features' ? 'Proposed Features' : 'Proposed Description'}
+                      </p>
+                      <div className="text-[10px] font-bold text-slate-700 whitespace-pre-line leading-relaxed">
+                        {finalNewVal}
+                      </div>
+                    </div>
                   </div>
-                  <div className="w-px h-10 bg-slate-200" />
-                  <div className="flex-1">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current</p>
-                    <p className="text-2xl font-black text-slate-300 italic">
-                      ₹{prop.type === "designerPrice" ? plan?.designerPrice : prop.type === "videoMakerPrice" ? plan?.videoMakerPrice : plan?.price}
-                    </p>
+                ) : (
+                  <div className="flex items-baseline gap-4 py-4 bg-slate-50 rounded-2xl px-6">
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Proposed</p>
+                      <p className="text-2xl font-black text-amber-500 italic">₹{finalNewVal}</p>
+                    </div>
+                    <div className="w-px h-10 bg-slate-200" />
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Current</p>
+                      <p className="text-2xl font-black text-slate-300 italic">
+                        ₹{finalCurrentVal}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="flex gap-3">
                   <button
@@ -75,10 +94,10 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
                     Reject
                   </button>
                   <button
-                    onClick={() => handleApprovePlan(prop.id, prop.planId, prop.newValue || prop.newPrice, prop.type || "price")}
+                    onClick={() => handleApprovePlan(prop.id, prop.planId, finalNewVal, prop.type || "price")}
                     className="flex-[2] bg-amber-500 text-slate-950 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all"
                   >
-                    Approve Rate
+                    Approve Change
                   </button>
                 </div>
               </motion.div>

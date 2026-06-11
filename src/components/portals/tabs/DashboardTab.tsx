@@ -7,6 +7,7 @@ import { Driver } from "@/services/firebaseService";
 
 interface DashboardTabProps {
   [key: string]: any;
+  onPurgeRequest?: () => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -14,6 +15,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   drivers,
   isExtracting,
   handleExtractionClick,
+  onPurgeRequest,
 }) => {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -21,10 +23,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl transition-all h-full">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-sm md:text-base font-black text-slate-900 uppercase italic">
+              <h3 className="text-sm md:text-base font-bold text-slate-900 tracking-tight">
                 Live Network Performance
               </h3>
-              <p className="text-[10px] md:text-[12px] text-slate-400 uppercase tracking-widest font-black opacity-60">
+              <p className="text-[10px] md:text-[12px] text-slate-400 uppercase tracking-widest font-bold opacity-60">
                 Active Metric Synchronization
               </p>
             </div>
@@ -113,7 +115,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       <div className="flex flex-col gap-3">
         <div className="bg-white p-3 md:p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[10px] font-black text-slate-900 uppercase italic">
+            <h3 className="text-[10px] font-bold text-slate-900 uppercase">
               Node Activation
             </h3>
           </div>
@@ -121,9 +123,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             {(dynamicChartData || []).length > 0 ? (
               (dynamicChartData || []).map((item: any) => (
                 <div key={item.name} className="space-y-2">
-                  <div className="flex justify-between text-[10px] md:text-[11px] font-black uppercase tracking-widest">
+                  <div className="flex justify-between text-[10px] md:text-[11px] font-bold uppercase tracking-wider">
                     <span className="text-slate-500">{item.name}</span>
-                    <span className="text-slate-950 font-mono italic">
+                    <span className="text-slate-950 font-mono">
                       {item.autos} Units
                     </span>
                   </div>
@@ -152,27 +154,37 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             onClick={(e) => handleExtractionClick(e, drivers, "Global_Status_Report")}
             disabled={isExtracting}
             className={cn(
-              "w-full mt-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl transition-all",
+              "w-full mt-6 py-4 rounded-2xl text-[10px] font-bold uppercase tracking-[0.1em] shadow-xl transition-all",
               isExtracting
                 ? "bg-slate-800 text-slate-500 cursor-not-allowed"
                 : "bg-slate-950 text-white hover:bg-amber-500 hover:text-slate-950 active:scale-95"
             )}
           >
-            {isExtracting ? "PROCESSING..." : "GENERATE REPORT"}
+            {isExtracting ? "PROCESSING..." : "GENERATE SYSTEM REPORT"}
           </button>
+          
+          {onPurgeRequest && (
+            <button
+              onClick={onPurgeRequest}
+              className="w-full mt-3 py-3 border border-red-500/30 text-red-500 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
+            >
+              <Database size={14} />
+              Purge Network Data
+            </button>
+          )}
         </div>
         <div className="bg-amber-500 p-4 md:p-6 rounded-2xl shadow-xl shadow-amber-500/10 text-slate-950 flex flex-col justify-between overflow-hidden relative group">
           <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
             <Activity size={120} />
           </div>
           <div className="relative z-10">
-            <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-60 mb-2">
               Fleet Pulse
             </p>
-            <h4 className="text-3xl font-black italic">
-              NETWORK
+            <h4 className="text-2xl font-bold tracking-tight">
+              Network
               <br />
-              ACCELERATED
+              Accelerated
             </h4>
           </div>
           <div className="mt-8 relative z-10">

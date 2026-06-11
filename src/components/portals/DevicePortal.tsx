@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firebaseService, AdCampaign, Driver, SafeRideSession } from '../../services/firebaseService';
-import { auth } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import CommunityQuotesFeed from './CommunityQuotesFeed.js';
 import { isSchoolTiming, filterAds } from '../smartAds/SmartAdEngine';
 import SmartPassengerQR from '../smartAds/SmartPassengerQR';
 import { AdaptiveRideContentEngine } from '../smartRide/AdaptiveRideContentEngine';
@@ -137,6 +139,170 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       videoRef.current.volume = volFraction;
     }
   }, [terminalVolume]);
+
+  // --- Playback Telemetry & Heartbeat state trackers ---
+  const [totalAdsPlayed, setTotalAdsPlayed] = useState(0);
+  const [todayAdsPlayed, setTodayAdsPlayed] = useState(0);
+  const [lastCampaignPlayed, setLastCampaignPlayed] = useState('');
+  const [lastTrackedIndex, setLastTrackedIndex] = useState(-1);
+
+  // --- Community Quotes Feed state ---
+  const [approvedQuotes, setApprovedQuotes] = useState<any[]>([]);
+  const [activeQuote, setActiveQuote] = useState<any>(null);
+  const [showQuoteOverlay, setShowQuoteOverlay] = useState(false);
+  const [lastQuoteAdCount, setLastQuoteAdCount] = useState(0);
+
+  // Listen to approved driver quotes from community quotes program
+  useEffect(() => {
+    if (!isLogged) return;
+    
+    const qCol = collection(db, 'driverQuotes');
+    const qQuery = query(qCol, where('status', '==', 'APPROVED'));
+    
+    const unsubscribe = onSnapshot(qQuery, (snapshot) => {
+      const fetched: any[] = [];
+      snapshot.forEach(docSnap => {
+        fetched.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setApprovedQuotes(fetched);
+    }, (error) => {
+      console.error("[Terminal] Approved quotes sync failed:", error);
+    });
+    
+    return () => unsubscribe();
+  }, [isLogged]);
+
+  // --- Community Quotes Selection & Triggering logic ---
+  useEffect(() => {
+    if (totalAdsPlayed > 0 && totalAdsPlayed % 10 === 0 && totalAdsPlayed !== lastQuoteAdCount) {
+      if (approvedQuotes.length > 0) {
+        // Find a quote (random)
+        const randomIndex = Math.floor(Math.random() * approvedQuotes.length);
+        const selected = approvedQuotes[randomIndex];
+        setActiveQuote(selected);
+        setShowQuoteOverlay(true);
+        setLastQuoteAdCount(totalAdsPlayed);
+        
+        // Pause any playing raw video underneath
+        if (videoRef.current) {
+          try {
+            videoRef.current.pause();
+          } catch (e) {
+            console.warn("[Terminal] Failed to pause video for quote overlay:", e);
+          }
+        }
+      }
+    }
+  }, [totalAdsPlayed, approvedQuotes, lastQuoteAdCount]);
+
+  // Hook to handle quote playback end
+  const handleQuoteComplete = () => {
+    setShowQuoteOverlay(false);
+    setActiveQuote(null);
+    
+    // Resume video
+    if (videoRef.current) {
+      try {
+        videoRef.current.play().catch(() => {});
+      } catch (e) {
+        console.warn("[Terminal] Failed to resume video after quote dismissed:", e);
+      }
+    }
+  };
+
+  // Helper function to sync pulse
+  const syncTerminalPulseNow = async (customIndex?: number) => {
+    const tid = activeTerminal?.id || terminalId;
+    if (!tid) return;
+
+    const idx = customIndex !== undefined ? customIndex : currentIndex;
+    const currentAdToSync = playlist[idx];
+    const adCampaignId = currentAdToSync?.campaignId || '';
+
+    const payload = {
+      playbackStatus: playlist.length > 0 ? "PLAYING_AD" : "IDLE",
+      lastPlayedCampaignId: adCampaignId || null,
+      lastPlaybackTime: new Date().toISOString(),
+      batteryLevel: systemMetrics.battery ?? 88,
+      networkStatus: online ? "CONNECTED" : "DISCONNECTED",
+      gpsLocation: {
+        latitude: posRef.current?.lat ?? 12.9716,
+        longitude: posRef.current?.lng ?? 77.5946
+      },
+      totalAdsPlayed,
+      todayAdsPlayed,
+      lastCampaignPlayed: adCampaignId || lastCampaignPlayed || ""
+    };
+
+    try {
+      await firebaseService.syncTerminalPulse(tid, payload);
+      console.log("[Heartbeat] Terminal pulse synchronized successfully:", payload);
+    } catch (e) {
+      console.error("[Heartbeat] Pulse sync failed:", e);
+    }
+  };
+
+  // Heartbeat loop - every 30 seconds
+  useEffect(() => {
+    if (!isLogged || !(activeTerminal?.id || terminalId)) return;
+
+    const interval = setInterval(() => {
+      syncTerminalPulseNow();
+    }, 30000);
+
+    // Initial immediate sync on load / resume (device starts, device resumes)
+    syncTerminalPulseNow();
+
+    return () => clearInterval(interval);
+  }, [isLogged, activeTerminal?.id, terminalId, playlist, currentIndex, totalAdsPlayed, todayAdsPlayed, lastCampaignPlayed, systemMetrics.battery, online]);
+
+  // Telemetry triggered when campaign changes or playlist changes
+  useEffect(() => {
+    if (!isLogged || !(activeTerminal?.id || terminalId)) return;
+    if (playlist.length === 0) return;
+
+    const currentAdToSync = playlist[currentIndex];
+    const adCampaignId = currentAdToSync?.campaignId || '';
+
+    if (currentIndex !== lastTrackedIndex) {
+      setLastTrackedIndex(currentIndex);
+      
+      setTotalAdsPlayed(prevTotal => {
+        const nextTotal = prevTotal + 1;
+        setTodayAdsPlayed(prevToday => {
+          const nextToday = prevToday + 1;
+          
+          // Trigger actual playback update immediately
+          const tid = activeTerminal?.id || terminalId;
+          const payload = {
+            playbackStatus: "PLAYING_AD",
+            lastPlayedCampaignId: adCampaignId || null,
+            lastPlaybackTime: new Date().toISOString(),
+            batteryLevel: systemMetrics.battery ?? 88,
+            networkStatus: online ? "CONNECTED" : "DISCONNECTED",
+            gpsLocation: {
+              latitude: posRef.current?.lat ?? 12.9716,
+              longitude: posRef.current?.lng ?? 77.5946
+            },
+            totalAdsPlayed: nextTotal,
+            todayAdsPlayed: nextToday,
+            lastCampaignPlayed: adCampaignId || lastCampaignPlayed || ""
+          };
+          
+          firebaseService.syncTerminalPulse(tid, payload).catch(e => {
+            console.error("[Playback Telemetry] Immediate sync failed:", e);
+          });
+          
+          return nextToday;
+        });
+        return nextTotal;
+      });
+
+      if (adCampaignId) {
+        setLastCampaignPlayed(adCampaignId);
+      }
+    }
+  }, [currentIndex, playlist, isLogged, activeTerminal?.id, terminalId]);
 
   const [terminalsDump, setTerminalsDump] = useState('');
   useEffect(() => {
@@ -301,6 +467,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         if (mainUrl) {
           campaignAds.push({
             id: `${campaign.id}_primary`,
+            campaignId: campaign.id,
             url: mainUrl,
             type: campaign.mediaType || 'IMAGE',
             title: campaign.title,
@@ -315,6 +482,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
             if (adUrl && adUrl !== mainUrl) {
               campaignAds.push({
                 id: ad.id || `${campaign.id}_sub_${idx}`,
+                campaignId: campaign.id,
                 url: adUrl,
                 type: ad.type || ad.mediaType || 'IMAGE',
                 title: ad.title || campaign.title,
@@ -503,13 +671,15 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     console.log(`[Terminal] Resuming session for ${tid}...`);
     try {
       setLoading(true);
-      const terminals: any[] = await firebaseService.getTerminals();
-      const term = terminals.find(t => t.id === tid);
+      const term: any = await firebaseService.getTerminal(tid);
       
       console.log(`[Terminal] Found terminal record:`, term);
       
       if (term && term.status === 'ACTIVE') {
         setActiveTerminal(term);
+        if (typeof term.totalAdsPlayed === 'number') setTotalAdsPlayed(term.totalAdsPlayed);
+        if (typeof term.todayAdsPlayed === 'number') setTodayAdsPlayed(term.todayAdsPlayed);
+        if (term.lastCampaignPlayed) setLastCampaignPlayed(term.lastCampaignPlayed);
         if (typeof term.volume === 'number') {
           setTerminalVolume(term.volume);
         }
@@ -1197,6 +1367,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                    {currentAd?.title || 'AutoAds Campaign'}
                  </motion.h2>
               </div>
+
+              {showQuoteOverlay && activeQuote && (
+                <CommunityQuotesFeed 
+                  quote={activeQuote} 
+                  duration={9} 
+                  onComplete={handleQuoteComplete} 
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>

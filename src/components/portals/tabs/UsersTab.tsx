@@ -40,13 +40,18 @@ interface UsersTabProps {
   users: User[];
 }
 
-type DirectoryView = "USERS" | "FRANCHISES" | "STAFF" | "PERMISSIONS";
+type DirectoryView = "USERS" | "FRANCHISES" | "STAFF" | "PERMISSIONS" | "INVITE_STAFF";
 
 export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
   const [activeSubView, setActiveSubView] = useState<DirectoryView>("USERS");
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("ALL");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
+  // Staff Invitation State
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"SUPPORT_MANAGER" | "SUPPORT_AGENT">("SUPPORT_AGENT");
+  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
 
   // Phase 1B Interactive Administrative States
   const [inspectorTab, setInspectorTab] = useState<"INFO" | "CONTROL" | "AUDIT">("INFO");
@@ -227,6 +232,34 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
     }
   };
 
+  const handleInviteStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingInvite(true);
+    try {
+      const inviteId = `INV-STAFF-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      await firebaseService.saveInvitation({
+        id: inviteId,
+        ownerEmail: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        specialization: "OPERATIONS_STAFF"
+      });
+      if (typeof (window as any).showToast === "function") {
+        (window as any).showToast(`Staff invitation sent to ${inviteEmail}`, "success");
+      }
+      setInviteEmail("");
+    } catch (e: any) {
+      console.error(e);
+      if (typeof (window as any).showToast === "function") {
+        (window as any).showToast(e.message || "Invitation failed", "error");
+      }
+    } finally {
+      setIsSubmittingInvite(false);
+    }
+  };
+
   // Safe Timestamp Formatter
   const formatTimestamp = (ts: any) => {
     if (!ts) return "N/A";
@@ -296,6 +329,12 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
           pill: "bg-amber-500 text-white",
           label: "Support Manager",
         };
+      case "SUPPORT_TEAM":
+        return {
+          bg: "bg-amber-100 text-amber-800 border-amber-200",
+          pill: "bg-amber-500 text-white",
+          label: "Support Team Core",
+        };
       case "SUPPORT_AGENT":
       case "SUPPORT":
         return {
@@ -343,24 +382,24 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
   };
 
   return (
-    <div className="space-y-6 max-h-[85vh] overflow-y-auto pr-2 pb-12 font-sans" id="users-directory-root">
+    <div className="space-y-6 pb-12 font-sans" id="users-directory-root">
       {/* Banner Segment */}
       <div className="bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden" id="users-header-banner">
         <div className="absolute right-0 top-0 w-96 h-96 bg-indigo-500/10 blur-3xl rounded-full -mr-16 -mt-16 animate-pulse" />
         <div className="absolute left-1/3 bottom-0 w-64 h-64 bg-violet-500/5 blur-2xl rounded-full -ml-8 -mb-8" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl md:text-5xl font-black italic uppercase leading-none tracking-tight">
-              Staff & Organizations Directory
+            <h2 className="text-2xl md:text-5xl font-black uppercase leading-none tracking-tight">
+              User & Staff Directory
             </h2>
             <p className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.25em] mt-3 text-indigo-400">
-              Administrative Control Registry • Live Personnel Stream • Franchises Ledger
+              Manage Registered Users and Staff Accounts
             </p>
           </div>
           <div className="flex gap-2">
             <span className="text-[10px] font-bold uppercase font-mono px-3 py-1.5 bg-slate-800 border border-slate-700 text-emerald-400 rounded-xl flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              Live Feed Connected
+              Connected
             </span>
           </div>
         </div>
@@ -369,10 +408,8 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
       {/* Directory Selector Buttons */}
       <div className="flex flex-wrap gap-2 p-1.5 bg-slate-100 rounded-2xl max-w-max border border-slate-200/50" id="directory-selectors">
         {[
-          { id: "USERS", label: "Roles Directory", icon: Users },
-          { id: "STAFF", label: "Staff Directory", icon: Shield },
-          { id: "FRANCHISES", label: "Franchise Directory", icon: Building2 },
-          { id: "PERMISSIONS", label: "Permissions Matrix", icon: Layers },
+          { id: "USERS", label: "User Accounts", icon: Users },
+          { id: "INVITE_STAFF", label: "Invite to Support Team", icon: Mail },
         ].map((btn) => {
           const Icon = btn.icon;
           const active = activeSubView === btn.id;
@@ -397,7 +434,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
       </div>
 
       {/* Metrics Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="users-metrics-panel">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="users-metrics-panel">
         <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex items-center justify-between">
           <div>
             <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Total Registers</p>
@@ -415,26 +452,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
           </div>
           <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-500">
             <Shield size={20} />
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Franchise Holders</p>
-            <h4 className="text-3xl font-black mt-1 font-mono text-slate-800">{franchiseOwnersCount}</h4>
-          </div>
-          <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-purple-500">
-            <Building2 size={20} />
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Operators & Clients</p>
-            <h4 className="text-3xl font-black mt-1 font-mono text-slate-800">{driverCount + customerCount}</h4>
-          </div>
-          <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-500">
-            <UserCheck size={20} />
           </div>
         </div>
       </div>
@@ -622,6 +639,48 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {activeSubView === "INVITE_STAFF" && (
+              <div className="max-w-md mx-auto p-8 rounded-3xl bg-white border border-slate-100 shadow-sm space-y-6">
+                <div>
+                  <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">Invite Support Staff</h3>
+                  <p className="text-[11px] text-slate-400 mt-1 uppercase font-black tracking-wider">
+                    Invite colleagues to join and assist on the Support Team website portal.
+                  </p>
+                </div>
+                <form onSubmit={handleInviteStaff} className="space-y-4">
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Email Address</label>
+                    <input 
+                      type="email" 
+                      required
+                      placeholder="colleague@company.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Assign Role</label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as "SUPPORT_MANAGER" | "SUPPORT_AGENT")}
+                      className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                    >
+                      <option value="SUPPORT_AGENT">Support Agent</option>
+                      <option value="SUPPORT_MANAGER">Support Manager</option>
+                    </select>
+                  </div>
+                  <button 
+                    type="submit"
+                    disabled={isSubmittingInvite}
+                    className="w-full p-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg"
+                  >
+                    {isSubmittingInvite ? "Sending..." : "Send Invitation"}
+                  </button>
+                </form>
               </div>
             )}
 
@@ -954,6 +1013,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
                                     <option value="FRANCHISE_OWNER" className="text-white bg-slate-900">FRANCHISE_OWNER</option>
                                     <option value="SUPPORT_AGENT" className="text-white bg-slate-900">SUPPORT_AGENT</option>
                                     <option value="SUPPORT_MANAGER" className="text-white bg-slate-900">SUPPORT_MANAGER</option>
+                                    <option value="SUPPORT_TEAM" className="text-white bg-slate-900">SUPPORT_TEAM</option>
                                     <option value="STAFF" className="text-white bg-slate-900">STAFF</option>
                                     <option value="SUPPORT" className="text-white bg-slate-900">SUPPORT (Legacy)</option>
                                     {isCurrentUserAdmin && (

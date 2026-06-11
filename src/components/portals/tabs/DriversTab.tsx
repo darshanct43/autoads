@@ -14,26 +14,37 @@ import {
   Wallet,
   Cpu,
   FileText,
-  MapPin
+  MapPin,
+  Eye
 } from "lucide-react";
 import { firebaseService, Driver } from "@/services/firebaseService";
 import { cn } from "@/lib/utils";
 
 interface DriversTabProps {
+  isHQ?: boolean;
+  isAdmin?: boolean;
+  franchiseId?: string;
   setSelectedDriverForEarning?: (driver: any) => void;
   setShowEarningModal?: (show: boolean) => void;
   setSelectedDriverForProvision?: (driver: any) => void;
   setShowProvisionModal?: (show: boolean) => void;
   setSelectedDriverForAgreement?: (driver: any) => void;
+  setSelectedDriverForDocs?: (driver: any) => void;
+  setShowDocModal?: (show: boolean) => void;
   handleFetchDriverHistory?: (driverId: string) => void;
 }
 
 export const DriversTab: React.FC<DriversTabProps> = ({
+  isHQ = false,
+  isAdmin = false,
+  franchiseId,
   setSelectedDriverForEarning,
   setShowEarningModal,
   setSelectedDriverForProvision,
   setShowProvisionModal,
   setSelectedDriverForAgreement,
+  setSelectedDriverForDocs,
+  setShowDocModal,
   handleFetchDriverHistory,
 }) => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -47,15 +58,18 @@ export const DriversTab: React.FC<DriversTabProps> = ({
     const unsubscribe = firebaseService.subscribeToDrivers((data) => {
       setDrivers(data);
       setLoading(false);
-    });
+    }, franchiseId, isHQ);
     return () => unsubscribe();
-  }, []);
+  }, [franchiseId, isHQ]);
 
   // Manual fallback refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const data = await firebaseService.getDrivers();
+      let data = await firebaseService.getDrivers();
+      if (!isHQ && franchiseId) {
+        data = data.filter((d: any) => d.franchiseId === franchiseId);
+      }
       setDrivers(data);
     } catch (e) {
       console.error("[DriversTab] Manual Refresh Error:", e);
@@ -142,11 +156,10 @@ export const DriversTab: React.FC<DriversTabProps> = ({
       </div>
 
       {/* Stats Counter Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {[
           { label: "Total Drivers Registry", value: drivers.length, icon: User, color: "text-amber-500 bg-amber-50" },
           { label: "Verified Node Power", value: drivers.filter(d => (d.status || "").toLowerCase() === "active").length, icon: ShieldCheck, color: "text-emerald-500 bg-emerald-50" },
-          { label: "Awaiting Verification", value: drivers.filter(d => (d.status || "").toLowerCase() !== "active").length, icon: Activity, color: "text-amber-500 bg-amber-50" },
         ].map((stat) => (
           <div key={stat.label} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
             <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center shrink-0", stat.color)}>
@@ -224,9 +237,6 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                     <th className="py-5 px-6 text-[9px] font-black uppercase tracking-widest text-slate-400 italic">
                       Status Node
                     </th>
-                    <th className="py-5 px-6 text-[9px] font-black uppercase tracking-widest text-slate-400 italic">
-                      Vehicle Assembly vNo
-                    </th>
                     <th className="py-5 px-6 text-[9px] font-black uppercase tracking-widest text-slate-400 italic text-right">
                       Operations
                     </th>
@@ -235,7 +245,6 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredDrivers.map((driver) => {
                     const drvCode = driver.driverCode || (driver as any).code || driver.id || "N/A";
-                    const vehicleNo = driver.vNo || driver.vehicleNumber || "N/A";
                     return (
                       <tr key={driver.id || driver.uid} className="hover:bg-slate-50 transition-colors">
                         <td className="py-5 px-6">
@@ -270,16 +279,32 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                         <td className="py-5 px-6">
                           {renderStatusBadge(driver.status)}
                         </td>
-                        <td className="py-5 px-6">
-                          <div className="flex items-center gap-2">
-                            <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest bg-slate-900 text-amber-500 rounded border border-slate-800 flex items-center gap-1.5">
-                              <Truck size={12} />
-                              {vehicleNo}
-                            </div>
-                          </div>
-                        </td>
                         <td className="py-5 px-6 text-right">
                           <div className="flex items-center justify-end gap-2">
+                            {setSelectedDriverForEarning && setShowEarningModal && isAdmin && (
+                              <button
+                                onClick={() => {
+                                  setSelectedDriverForEarning(driver);
+                                  setShowEarningModal(true);
+                                }}
+                                className="p-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-xl transition-all"
+                                title="Wallet & Payouts (Admin Only)"
+                              >
+                                <Wallet size={14} />
+                              </button>
+                            )}
+                            {setSelectedDriverForDocs && setShowDocModal && (
+                              <button
+                                onClick={() => {
+                                  setSelectedDriverForDocs(driver);
+                                  setShowDocModal(true);
+                                }}
+                                className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-xl transition-all"
+                                title="Identity Documents Preview"
+                              >
+                                <Eye size={14} />
+                              </button>
+                            )}
                             {setSelectedDriverForAgreement && (
                               <button
                                 onClick={() => setSelectedDriverForAgreement(driver)}
@@ -292,6 +317,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                             {setSelectedDriverForProvision && setShowProvisionModal && (
                               <button
                                 onClick={() => {
+                                  console.log("[DEBUG] DriversTab: Provision clicked for driver:", driver.id);
                                   setSelectedDriverForProvision(driver);
                                   setShowProvisionModal(true);
                                 }}
@@ -299,27 +325,6 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                                 title="Device Provisioning"
                               >
                                 <Cpu size={14} />
-                              </button>
-                            )}
-                            {setSelectedDriverForEarning && setShowEarningModal && (
-                              <button
-                                onClick={() => {
-                                  setSelectedDriverForEarning(driver);
-                                  setShowEarningModal(true);
-                                }}
-                                className="p-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-xl transition-all"
-                                title="Assign Credit"
-                              >
-                                <Wallet size={14} />
-                              </button>
-                            )}
-                            {handleFetchDriverHistory && (
-                              <button
-                                onClick={() => handleFetchDriverHistory(driver.id || driver.uid || "")}
-                                className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all"
-                                title="Telemetry History"
-                              >
-                                <MapPin size={14} />
                               </button>
                             )}
                           </div>
@@ -370,16 +375,28 @@ export const DriversTab: React.FC<DriversTabProps> = ({
 
                       <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
                         <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block">
-                          Vehicle Register
+                          Credential ID
                         </span>
                         <div className="flex items-center gap-1 text-[10px] font-black text-slate-900 tracking-wider">
-                          <Truck size={12} className="text-amber-500 shrink-0" />
-                          <span>{vehicleNo}</span>
+                          <Tag size={12} className="text-amber-500 shrink-0" />
+                          <span>{drvCode}</span>
                         </div>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+                      {setSelectedDriverForDocs && setShowDocModal && (
+                        <button
+                          onClick={() => {
+                            setSelectedDriverForDocs(driver);
+                            setShowDocModal(true);
+                          }}
+                          className="py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
+                        >
+                          <Eye size={12} />
+                          Preview
+                        </button>
+                      )}
                       {setSelectedDriverForAgreement && (
                         <button
                           onClick={() => setSelectedDriverForAgreement(driver)}
@@ -399,27 +416,6 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                         >
                           <Cpu size={12} />
                           Provision
-                        </button>
-                      )}
-                      {setSelectedDriverForEarning && setShowEarningModal && (
-                        <button
-                          onClick={() => {
-                            setSelectedDriverForEarning(driver);
-                            setShowEarningModal(true);
-                          }}
-                          className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
-                        >
-                          <Wallet size={12} />
-                          Credit
-                        </button>
-                      )}
-                      {handleFetchDriverHistory && (
-                        <button
-                          onClick={() => handleFetchDriverHistory(driver.id || driver.uid || "")}
-                          className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
-                        >
-                          <MapPin size={12} />
-                          Track Map
                         </button>
                       )}
                     </div>

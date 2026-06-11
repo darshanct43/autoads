@@ -29,8 +29,7 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'vijayathrishu@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPPORT' || 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'STAFF'))
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'STAFF']))
       );
     }
 
@@ -52,10 +51,114 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // --- Collections ---
+    function isHQ() {
+      return isSignedIn() && (
+        isAdmin() ||
+        isStaff() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['HQ_ADMIN', 'HQ_SUPPORT', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'])
+      );
+    }
+
+    function isFranchiseStaffFor(franchiseId) {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId == franchiseId;
+    }
+
+    // --- Phase 4-10 Collections ---
+    
+    match /systemMetrics/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /territories/{territoryId} {
+      allow read: if isHQ() || (isSignedIn() && ((resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId) || resource.data.franchiseIds.hasAny([get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId])));
+      allow write: if isAdmin();
+    }
+    
+    match /territoryManagers/{managerId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+      allow write: if isAdmin();
+    }
+
+    match /settlements/{settlementId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+      allow write: if isAdmin();
+    }
+
+    match /settlementLogs/{logId} {
+      allow read: if isAdmin() || isSupportManager() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['HQ_ADMIN', 'HQ_SUPPORT']);
+      allow write: if isAdmin();
+    }
+
+    match /revenueDistributions/{distributionId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+      allow write: if isAdmin();
+    }
+
+    match /territoryMetrics/{territoryId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+      allow write: if false; // Only backend
+    }
+
+    match /franchiseMetrics/{franchiseId} {
+      allow read: if isHQ() || isFranchiseStaffFor(franchiseId);
+      allow write: if false; // Only backend
+    }
+
+    match /driverMetrics/{metricId} {
+      allow read: if isHQ() || (isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'FRANCHISE_STAFF']);
+      allow write: if false; // Only backend
+    }
+
+    match /campaignMetrics/{metricId} {
+      allow read: if isHQ() || (isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'FRANCHISE_STAFF']);
+      allow write: if false; // Only backend
+    }
+
+    match /deviceMetrics/{metricId} {
+      allow read: if isHQ() || (isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'FRANCHISE_STAFF']);
+      allow write: if false; // Only backend
+    }
+
+    match /fleetMetrics/{metricId} {
+      allow read: if isHQ() || (isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'FRANCHISE_STAFF']);
+      allow write: if false; // Only backend
+    }
+
+    match /deployments/{deploymentId} {
+      allow read: if isHQ();
+      allow write: if isHQ();
+    }
+
+    match /deviceHealth/{healthId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow write: if isHQ() || (isSignedIn() && (resource.data.driverId == request.auth.uid || request.resource.data.driverId == request.auth.uid));
+    }
+
+    match /deploymentAudits/{auditId} {
+      allow read: if isHQ();
+      allow write: if false; // only backend
+    }
+
+    match /campaignAnalytics/{campaignId} {
+      allow read: if isHQ() || (isSignedIn() && resource.data.advertiserId == request.auth.uid);
+      allow write: if false; // only backend
+    }
+
+    match /advertiserAnalytics/{advertiserId} {
+      allow read: if isHQ() || (isSignedIn() && advertiserId == request.auth.uid);
+      allow write: if false; // only backend
+    }
+
+    match /revenueAnalytics/{revenueId} {
+      allow read: if isHQ();
+      allow write: if false; // only backend
+    }
 
     match /users/{userId} {
-      allow read: if isSignedIn();
+      allow read: if isHQ() || isOwner(userId);
 
       // Ensure standard self-registration is secure and role-restricted, while allowing admins/staff/franchise owners to register records
       allow create: if isSignedIn() && (
@@ -98,27 +201,37 @@ service cloud.firestore {
     }
 
     match /drivers/{driverId} {
-      allow read: if isSignedIn() || true; // Allow reading driver profiles for activation/status
-      allow create: if isSignedIn(); // Allow self-registration
-      allow update: if (isSignedIn() && (isOwner(driverId) || isAdmin())) || true; // Allow unauthenticated update for activation if needed (TEMPORARY FOR PREVIEW)
+      allow read: if isHQ() || (isOwner(driverId) || isFranchiseStaffFor(resource.data.franchiseId));
+      allow create: if isSignedIn() && (request.auth.uid == driverId || request.auth.uid == request.resource.data.userId);
+      allow update: if isHQ() || (isOwner(driverId) || isFranchiseStaffFor(resource.data.franchiseId));
       allow delete: if isAdmin();
 
       match /locations/{locId} {
-        allow read, write: if isSignedIn() || true;
+        allow read, write: if isHQ() || isOwner(driverId);
       }
       match /logs/{logId} {
-        allow read, write: if isSignedIn() || true;
+        allow read, write: if isHQ() || isOwner(driverId);
       }
     }
 
     match /campaigns/{campaignId} {
-      allow read: if isSignedIn() || true;
-      allow create: if isSignedIn();
-      allow update: if isAdmin() || isStaff() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+      allow read: if isHQ() || (isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 'franchiseId' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId) ||
+        resource.data.customerId == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.advertiserId == request.auth.uid
+      ));
+      allow create: if isSignedIn() && (request.resource.data.createdBy == request.auth.uid || request.resource.data.customerId == request.auth.uid || request.resource.data.advertiserId == request.auth.uid);
+      allow update: if isHQ() || (isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 'franchiseId' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId) ||
+        resource.data.customerId == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.advertiserId == request.auth.uid
+      ));
       allow delete: if isAdmin();
 
       match /media/{mediaId} {
-        allow read, write: if isSignedIn() || true;
+        allow read, write: if isHQ() || (isSignedIn() && get(/databases/$(database)/documents/campaigns/$(campaignId)).data.createdBy == request.auth.uid);
       }
       match /payments/{payId} {
         allow read: if isSignedIn() && (isAdmin() || resource.data.createdBy == request.auth.uid);
@@ -126,101 +239,69 @@ service cloud.firestore {
       }
     }
 
-    match /driverAssignments/{assignmentId} {
-      allow read: if isSignedIn() || true;
-      allow write: if isAdmin() || isStaff() || isSignedIn();
-    }
-
-    match /payments/{paymentId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
-    }
-
-    match /driverPayments/{paymentId} {
-      allow read: if true;
-      allow create: if isAdmin() || isStaff();
-      allow update, delete: if isAdmin();
-    }
-
-    match /withdrawRequests/{requestId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
-    }
-
-    match /supportTickets/{ticketId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if true;
-      allow delete: if isAdmin();
-
-      match /messages/{messageId} {
-        allow read, create: if true;
-      }
-    }
-
-    match /publicNotices/{noticeId} {
-      allow read: if true;
-      allow write: if isAdmin() || isStaff();
-    }
-
-    match /driverLocations/{driverId} {
-      allow read: if true;
-      allow write: if isSignedIn() || true;
-    }
-    
-    match /deviceScreens/{driverId} {
-      allow read: if isAdmin() || isStaff() || isOwner(driverId) || true;
-      allow write: if isOwner(driverId) || isAdmin() || true;
-    }
-
-    match /locationLogs/{logId} {
-      allow read: if isAdmin() || isStaff();
-      allow create: if isSignedIn() || true;
-    }
-
     match /activityLogs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read: if isAdmin() || isSupportManager() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['HQ_ADMIN', 'HQ_SUPPORT'] ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'FRANCHISE_STAFF'] && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.performedBy;
       allow update, delete: if isAdmin();
     }
     
     match /terminals/{terminalId} {
-      allow read: if true;
-      allow write: if isAdmin() || isStaff() || isSignedIn() || true; // Broad for preview activation
+      allow read: if isHQ() || isFranchiseStaffFor(resource.data.franchiseId);
+      allow write: if isHQ() || isFranchiseStaffFor(resource.data.franchiseId);
     }
 
     match /liveStatus/{terminalId} {
-      allow read: if true;
-      allow write: if isSignedIn() || true;
+      allow read: if isHQ();
+      allow write: if isHQ();
+    }
+
+    match /supportTickets/{ticketId} {
+      allow read: if isHQ() || (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.customerId == request.auth.uid || resource.data.driverId == request.auth.uid || resource.data.createdBy == request.auth.uid));
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.customerId == request.auth.uid || request.resource.data.driverId == request.auth.uid || request.resource.data.createdBy == request.auth.uid);
+      allow update: if isHQ() || (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.customerId == request.auth.uid || resource.data.driverId == request.auth.uid || resource.data.createdBy == request.auth.uid));
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isHQ() || (isSignedIn() && (get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.userId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.customerId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.createdBy == request.auth.uid));
+        allow write: if isHQ() || (isSignedIn() && (get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.userId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.customerId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.driverId == request.auth.uid || get(/databases/$(database)/documents/supportTickets/$(ticketId)).data.createdBy == request.auth.uid));
+      }
     }
 
     match /planProposals/{proposalId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isAdmin() || isStaff();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'HQ_SUPPORT']
+      );
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        isStaff() ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['FRANCHISE_OWNER', 'HQ_SUPPORT'])
+      );
       allow delete: if isAdmin();
     }
 
     match /plans/{planId} {
       allow read: if true;
-      allow write: if isAdmin() || isStaff();
+      allow write: if isAdmin(); // Lock to HQ_ADMIN / IS_ADMIN only
     }
 
     match /driverDocuments/{docId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow read: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow create: if isHQ() || (isSignedIn() && request.resource.data.driverId == request.auth.uid);
+      allow update, delete: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
     }
 
     match /devices/{deviceId} {
-      allow read: if true;
-      allow write: if isAdmin() || isStaff() || isSignedIn();
+      allow read: if isHQ();
+      allow write: if isHQ();
     }
 
     match /ridePreferences/{deviceId} {
-      allow read, write: if true;
+      allow read: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow write: if isHQ() || (isSignedIn() && (resource.data.driverId == request.auth.uid || request.resource.data.driverId == request.auth.uid));
     }
 
     match /canvaTokens/{uid} {
@@ -228,25 +309,12 @@ service cloud.firestore {
     }
 
     match /canvaOauthStates/{stateId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isSignedIn() && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
     }
 
     match /franchises/{franchiseId} {
       allow read: if true;
       allow write: if isAdmin() || isStaff() || isSupportManager();
-
-      match /loungeMessages/{messageId} {
-        allow read, create: if isSignedIn() && (
-          isAdmin() || 
-          isStaff() ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId == franchiseId)
-        );
-        allow update, delete: if isAdmin() || (
-          isSignedIn() && 
-          resource.data.senderId == request.auth.uid
-        );
-      }
     }
 
     match /cities/{cityId} {
@@ -269,8 +337,113 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read: if isSignedIn() || true;
-      allow write: if isSignedIn() || true;
+      allow read: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+      allow write: if isHQ() || (isSignedIn() && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId);
+    }
+
+    match /publicNotices/{noticeId} {
+      allow read: if isSignedIn();
+      allow create, update: if isHQ();
+      allow delete: if isAdmin() || isSupportManager();
+    }
+
+    match /driverAssignments/{assignmentId} {
+      allow read: if isHQ() || (isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         'franchiseId' in resource.data && 
+         resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isHQ() || isSignedIn();
+      allow update: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{payId} {
+      allow read: if isHQ() || (isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         'franchiseId' in resource.data && 
+         resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isSignedIn();
+      allow update: if isHQ() || (isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid
+      ));
+      allow delete: if isAdmin();
+    }
+
+    match /revenueLedger/{ledgerId} {
+      allow read: if isHQ() || (isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        'franchiseId' in resource.data && 
+        resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId
+      );
+      allow create: if isSignedIn();
+      allow update: if isHQ();
+      allow delete: if isAdmin();
+    }
+
+    match /driverPayments/{paymentId} {
+      allow read: if isHQ() || (isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         'franchiseId' in resource.data && 
+         resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isHQ() || (isSignedIn() && request.resource.data.driverId == request.auth.uid);
+      allow update: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /driverPayouts/{payoutId} {
+      allow read: if isHQ() || (isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         'franchiseId' in resource.data && 
+         resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isHQ();
+      allow update: if isHQ();
+      allow delete: if isAdmin();
+    }
+
+    match /withdrawRequests/{requestId} {
+      allow read: if isHQ() || (isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         'franchiseId' in resource.data && 
+         resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId)
+      ));
+      allow create: if isSignedIn() && request.resource.data.driverId == request.auth.uid;
+      allow update: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow delete: if isAdmin() || isSupportManager();
+    }
+
+    // --- IoT Operations Control (Phase 4 Block) ---
+    match /iotSims/{simId} {
+      allow read, write: if isSignedIn();
+    }
+    match /iotRechargeHistory/{id} {
+      allow read, write: if isSignedIn();
+    }
+    match /deviceTelemetry/{id} {
+      allow read, write: if isSignedIn();
+    }
+    match /connectivityAlerts/{id} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /driverQuotes/{quoteId} {
+      allow read: if isHQ() || isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow create: if isSignedIn() && (isAdmin() || request.resource.data.driverId == request.auth.uid);
+      allow update: if isHQ() || isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'approvedAt', 'approvedBy', 'rejectedReason']));
+      allow delete: if isAdmin() || isHQ();
     }
   }
 }

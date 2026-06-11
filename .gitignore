@@ -1,5 +1,6 @@
 # Build and Environment
 node_modules/
+dist/
 .env
 .env.local
 .env.*.local
@@ -32,9 +33,18 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 
-# Temporary files
+# Temporary/Backup files
 *.zip
 *.tar.gz
 *.rar
 tmp/
 temp/
+*.backup
+*.backup.*
+*.backup.txt
+*.txt
+firebase-service-account.json
+dump_all_payments.ts
+query_ledger.ts
+query_settlements.ts
+fetch_razorpay_payments.ts

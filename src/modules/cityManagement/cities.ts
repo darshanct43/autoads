@@ -12,12 +12,38 @@ export interface CityFranchise {
 }
 
 export const INITIAL_CITIES = [
+  { id: 'hassan', name: 'Hassan', description: 'Heritage Region Tier-2' },
   { id: 'bangalore', name: 'Bangalore', description: 'Tech Capital Region Tier-1' },
   { id: 'mysore', name: 'Mysore', description: 'Heritage Smart Grid Tier-2' },
-  { id: 'mangalore', name: 'Mangalore', description: 'Coastal Transit Hub Tier-2' }
+  { id: 'mangalore', name: 'Mangalore', description: 'Coastal Transit Hub Tier-2' },
+  { id: 'hubli', name: 'Hubli', description: 'North Karnataka Transit Point Tier-2' },
+  { id: 'belgaum', name: 'Belgaum', description: 'Border Trade Region Tier-2' },
+  { id: 'shimoga', name: 'Shimoga', description: 'Malnad Gateway Tier-3' },
+  { id: 'gulbarga', name: 'Kalaburagi', description: 'North-East Transit Hub Tier-2' },
+  { id: 'davangere', name: 'Davangere', description: 'Central Trade Center Tier-2' },
+  { id: 'bellary', name: 'Ballari', description: 'Mining/Industrial Corridor Tier-2' },
+  { id: 'bijapur', name: 'Vijayapura', description: 'Heritage/Industrial Hub Tier-2' },
+  { id: 'raichur', name: 'Raichur', description: 'Interstate Transit Zone Tier-3' },
+  { id: 'bidar', name: 'Bidar', description: 'Northern Border Region Tier-3' },
+  { id: 'gadag', name: 'Gadag', description: 'Artisan Transit Gateway Tier-3' },
+  { id: 'hospet', name: 'Hospet', description: 'Tourism / Industrial Corridor Tier-3' },
+  { id: 'chikkaballapur', name: 'Chikkaballapur', description: 'Peripheral Tech Zone Tier-3' },
+  { id: 'tumkur', name: 'Tumakuru', description: 'Industrial Satellite Tier-2' }
 ];
 
 export const INITIAL_FRANCHISES: CityFranchise[] = [
+  {
+    id: 'fr-has-01',
+    cityId: 'hassan',
+    cityName: 'Hassan',
+    ownerName: 'Admin',
+    ownerEmail: 'admin@autoads.in',
+    status: 'ACTIVE',
+    totalDevices: 10,
+    totalDrivers: 15,
+    revenueModel: '70/30 split',
+    createdAt: '2026-06-05T08:00:00Z'
+  },
   {
     id: 'fr-blr-01',
     cityId: 'bangalore',
@@ -53,6 +79,18 @@ export const INITIAL_FRANCHISES: CityFranchise[] = [
     totalDrivers: 15,
     revenueModel: '80/20 split',
     createdAt: '2026-04-01T14:15:00Z'
+  },
+  {
+    id: 'fr-hub-01',
+    cityId: 'hubli',
+    cityName: 'Hubli',
+    ownerName: 'Admin',
+    ownerEmail: 'admin@autoads.in',
+    status: 'ACTIVE',
+    totalDevices: 8,
+    totalDrivers: 10,
+    revenueModel: '70/30 split',
+    createdAt: '2026-06-05T08:00:00Z'
   }
 ];
 
