@@ -668,7 +668,7 @@ export const firebaseService = {
   // Plans
   async getPlans() {
     try {
-      const q = query(collection(db, 'plans'), orderBy('price', 'asc'));
+      const q = query(collection(db, 'plans'));
       const snap = await getDocs(q);
       const dbPlans = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       
@@ -676,12 +676,28 @@ export const firebaseService = {
         { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
         { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
         { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
+        { id: 'DESIGNER', name: 'Standard Creative', description: 'Professional Graphic Design • High Conversion Ads', price: 1000, unitCount: 'Design Service', color: 'bg-amber-500', isDesignerService: true },
+        { id: 'VIDEOMAK', name: 'Video Ads Service', description: 'Premium Motion Graphics • Professional Video Ads', price: 2000, unitCount: 'Video Service', color: 'bg-rose-500', isDesignerService: true },
       ];
       
-      return defaults.map(def => {
+      const merged = defaults.map(def => {
         const dbMatching = dbPlans.find(p => p.id === def.id);
         return dbMatching ? { ...def, ...dbMatching } : def;
       });
+
+      dbPlans.forEach(dbPlan => {
+        if (!defaults.some(d => d.id === dbPlan.id)) {
+          merged.push(dbPlan);
+        }
+      });
+
+      merged.sort((a, b) => {
+        const priceA = typeof a.price === 'number' ? a.price : parseFloat(String(a.price || 0));
+        const priceB = typeof b.price === 'number' ? b.price : parseFloat(String(b.price || 0));
+        return priceA - priceB;
+      });
+
+      return merged;
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, 'plans');
       throw e;
@@ -689,18 +705,35 @@ export const firebaseService = {
   },
 
   subscribeToPlans(callback: (plans: any[]) => void) {
-    const q = query(collection(db, 'plans'), orderBy('price', 'asc'));
+    const q = query(collection(db, 'plans'));
     return onSnapshot(q, (snapshot) => {
-      const dbPlans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const dbPlans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() as any }));
+      
       const defaults = [
         { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
         { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
         { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
+        { id: 'DESIGNER', name: 'Standard Creative', description: 'Professional Graphic Design • High Conversion Ads', price: 1000, unitCount: 'Design Service', color: 'bg-amber-500', isDesignerService: true },
+        { id: 'VIDEOMAK', name: 'Video Ads Service', description: 'Premium Motion Graphics • Professional Video Ads', price: 2000, unitCount: 'Video Service', color: 'bg-rose-500', isDesignerService: true },
       ];
+
       const merged = defaults.map(def => {
         const dbMatching = dbPlans.find(p => p.id === def.id);
         return dbMatching ? { ...def, ...dbMatching } : def;
       });
+
+      dbPlans.forEach(dbPlan => {
+        if (!defaults.some(d => d.id === dbPlan.id)) {
+          merged.push(dbPlan);
+        }
+      });
+
+      merged.sort((a, b) => {
+        const priceA = typeof a.price === 'number' ? a.price : parseFloat(String(a.price || 0));
+        const priceB = typeof b.price === 'number' ? b.price : parseFloat(String(b.price || 0));
+        return priceA - priceB;
+      });
+
       callback(merged);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, "plans");
@@ -780,6 +813,10 @@ export const firebaseService = {
       }
 
       batch.set(planRef, updateData, { merge: true });
+
+      // Keep custom planConfigurations synchronized dynamically
+      const configRef = doc(db, 'planConfigurations', planId);
+      batch.set(configRef, updateData, { merge: true });
 
       // Update the proposal status.
       const proposalRef = doc(db, 'planProposals', proposalId);
@@ -2416,8 +2453,32 @@ export const firebaseService = {
       
       const ticketNumber = `${typePrefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 
+      let resolvedUserId = (ticket as any).userId;
+      let resolvedCustomerId = (ticket as any).customerId;
+      let resolvedDriverId = (ticket as any).driverId;
+
+      if (ticket.type === 'CUSTOMER') {
+        if (resolvedUserId && !resolvedCustomerId) {
+          resolvedCustomerId = resolvedUserId;
+        } else if (resolvedCustomerId && !resolvedUserId) {
+          resolvedUserId = resolvedCustomerId;
+        }
+      } else if (ticket.type === 'DRIVER') {
+        if (resolvedUserId && !resolvedDriverId) {
+          resolvedDriverId = resolvedUserId;
+        } else if (resolvedDriverId && !resolvedUserId) {
+          resolvedUserId = resolvedDriverId;
+        }
+      }
+
+      const resolvedCreatedBy = (ticket as any).createdBy || resolvedUserId || resolvedCustomerId || resolvedDriverId || 'SYSTEM';
+
       const ticketData = {
         ...ticket,
+        userId: resolvedUserId || null,
+        customerId: resolvedCustomerId || null,
+        driverId: resolvedDriverId || null,
+        createdBy: resolvedCreatedBy,
         ticketNumber,
         status: 'OPEN',
         createdAt: serverTimestamp(),
@@ -2434,40 +2495,41 @@ export const firebaseService = {
   },
 
   subscribeToSupportTickets(callback: (tickets: SupportTicket[]) => void, filters: { franchiseId?: string, territoryId?: string, isHQ?: boolean, userId?: string }) {
-    let q = query(collection(db, TICKETS_COLLECTION), orderBy('createdAt', 'desc'));
+    let q = query(collection(db, TICKETS_COLLECTION));
 
     if (filters.isHQ) {
       q = query(collection(db, TICKETS_COLLECTION),
-        where('assignedToHQ', '==', true),
-        orderBy('createdAt', 'desc')
+        where('assignedToHQ', '==', true)
       );
     } else if (!filters.isHQ) {
       if (filters.userId) {
         q = query(collection(db, TICKETS_COLLECTION), 
-          where('userId', '==', filters.userId),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', filters.userId)
         );
       } else if (filters.franchiseId && filters.territoryId) {
         q = query(collection(db, TICKETS_COLLECTION), 
           where('franchiseId', '==', filters.franchiseId),
-          where('territoryId', '==', filters.territoryId),
-          orderBy('createdAt', 'desc')
+          where('territoryId', '==', filters.territoryId)
         );
       } else if (filters.franchiseId) {
         q = query(collection(db, TICKETS_COLLECTION), 
-          where('franchiseId', '==', filters.franchiseId),
-          orderBy('createdAt', 'desc')
+          where('franchiseId', '==', filters.franchiseId)
         );
       } else if (filters.territoryId) {
          q = query(collection(db, TICKETS_COLLECTION), 
-          where('territoryId', '==', filters.territoryId),
-          orderBy('createdAt', 'desc')
+          where('territoryId', '==', filters.territoryId)
         );
       }
     }
 
     return onSnapshot(q, (snapshot) => {
-      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportTicket));
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      // Perform resilient client-side sort by createdAt descending
+      tickets.sort((a, b) => {
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt || 0);
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt || 0);
+        return timeB - timeA;
+      });
       callback(tickets);
     }, (error) => handleFirestoreError(error, OperationType.LIST, TICKETS_COLLECTION, true));
   },
@@ -3372,4 +3434,63 @@ export const firebaseService = {
       callback(msgs);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'chatMessages'));
   },
+
+  // Centralized Plan Configurations (planConfigurations collection)
+  subscribeToPlanConfigurations(callback: (plans: any[]) => void) {
+    const q = query(collection(db, 'planConfigurations'), orderBy('price', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+      const plans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(plans);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "planConfigurations");
+    });
+  },
+
+  async getPlanConfigurations(): Promise<any[]> {
+    try {
+      const q = query(collection(db, 'planConfigurations'), orderBy('price', 'asc'));
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'planConfigurations');
+      throw e;
+    }
+  },
+
+  async createPlanConfiguration(planId: string, plan: any) {
+    try {
+      const docRef = doc(db, 'planConfigurations', planId);
+      await setDoc(docRef, {
+        ...plan,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'planConfigurations');
+      throw e;
+    }
+  },
+
+  async updatePlanConfiguration(planId: string, updates: any) {
+    try {
+      const docRef = doc(db, 'planConfigurations', planId);
+      await updateDoc(docRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'planConfigurations');
+      throw e;
+    }
+  },
+
+  async deletePlanConfiguration(planId: string) {
+    try {
+      const docRef = doc(db, 'planConfigurations', planId);
+      await deleteDoc(docRef);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, 'planConfigurations');
+      throw e;
+    }
+  }
 };

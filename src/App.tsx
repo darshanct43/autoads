@@ -1,21 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
-import { auth } from './lib/firebase.js';
-import { firebaseService } from './services/firebaseService.js';
-import { UserRole } from './types.js';
+import { auth } from './lib/firebase';
+import { firebaseService } from './services/firebaseService';
+import { UserRole } from './types';
 
 // Component Imports
-import Auth from './components/Auth.js';
-import BootAnimation from './components/common/BootAnimation.js';
-import AutoLoader from './components/common/AutoLoader.js';
-import AdminPortal from './components/portals/AdminPortal.js';
-import CustomerPortal from './components/portals/CustomerPortal.js';
-import DevicePortal from './components/portals/DevicePortal.js';
-import DriverPortal from './components/portals/DriverPortal.js';
-import DriverQuotesExtension from './components/portals/DriverQuotesExtension.js';
-import FranchisePortal from './components/portals/FranchisePortal.js';
-import SupportPortal from './components/portals/SupportPortal.js';
-import { ErrorBoundary } from './components/common/ErrorBoundary.js';
+import Auth from './components/Auth';
+import BootAnimation from './components/common/BootAnimation';
+import AutoLoader from './components/common/AutoLoader';
+
+// Lazy Loaded Portals for Performance Optimization
+const AdminPortal = lazy(() => import('./components/portals/AdminPortal'));
+const CustomerPortal = lazy(() => import('./components/portals/CustomerPortal'));
+const DevicePortal = lazy(() => import('./components/portals/DevicePortal'));
+const DriverPortal = lazy(() => import('./components/portals/DriverPortal'));
+const SupportPortal = lazy(() => import('./components/portals/SupportPortal'));
+
+import DriverQuotesExtension from './components/portals/DriverQuotesExtension';
+import FranchisePortal from './components/portals/FranchisePortal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -23,10 +27,26 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [showBoot, setShowBoot] = useState(true);
 
+  console.log("[DEBUG] App render state:", { user: user?.email, userRole, loading, showBoot });
+
+  useEffect(() => {
+    // Safety Force Start: If still stuck in boot or loading after 7 seconds, force continue
+    const timer = setTimeout(() => {
+      if (showBoot || loading) {
+        console.warn("[DEBUG] Safety timeout triggered: forcing showBoot=false, loading=false");
+        setShowBoot(false);
+        setLoading(false);
+      }
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [showBoot, loading]);
+
   useEffect(() => {
     // Check for offline debug bypass session
+    console.log("[DEBUG] App initialization hook started");
     const isOffline = localStorage.getItem('auto_ads_offline_mode') === 'true';
     if (isOffline) {
+      console.log("[DEBUG] Offline mode detected");
       const offlineRole = (localStorage.getItem('auto_ads_offline_role') as UserRole) || 'CUSTOMER';
       setUser({ uid: 'OFFLINE_UID', email: `${offlineRole.toLowerCase()}@autoads.in` } as any);
       setUserRole(offlineRole);
@@ -36,14 +56,16 @@ export default function App() {
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      console.log("[DEBUG] Auth state changed:", firebaseUser?.email || "No user");
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
           const emailLower = firebaseUser.email?.toLowerCase() || '';
           
-          // Fetch additional profile elements to determine the precise role
+          console.log("[DEBUG] Fetching profile for:", firebaseUser.uid);
           const profile = await firebaseService.getUserProfile(firebaseUser.uid);
           const driverProfile = await firebaseService.getDriverProfile(firebaseUser.uid);
+          console.log("[DEBUG] Profile fetched:", profile?.role, "Driver profile:", !!driverProfile);
           
           let role: UserRole = 'CUSTOMER';
           
@@ -98,49 +120,48 @@ export default function App() {
     setUserRole(role);
   };
 
-  // If boot animation is active, show the majestic Rickshaw animation
-  if (showBoot) {
-    return <BootAnimation onComplete={() => setShowBoot(false)} />;
-  }
-
-  // Loader screen after boot, while verifying user identity
-  if (loading) {
-    return (
-      <div id="app-root-loader" className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
-        <AutoLoader />
-      </div>
-    );
-  }
-
   // Render components according to user auth state and role
   return (
-    <ErrorBoundary>
-      {!user || !userRole ? (
+    <ErrorBoundary componentName="Network Core">
+      {showBoot ? (
+        <BootAnimation onComplete={() => setShowBoot(false)} />
+      ) : loading ? (
+        <div id="app-root-loader" className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
+          <AutoLoader />
+        </div>
+      ) : !user || !userRole ? (
         <Auth onLogin={(role: UserRole) => setUserRole(role)} />
       ) : (
         <React.Fragment>
-          {userRole === 'ADMIN' && (
-            <AdminPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
-          )}
-          {['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(userRole) && (
-            <SupportPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
-          )}
-          {userRole === 'DRIVER' && (
-            <React.Fragment>
-              <DriverPortal onLogout={handleLogout} />
-              <DriverQuotesExtension />
-            </React.Fragment>
-          )}
-          {userRole === 'CUSTOMER' && (
-            <CustomerPortal onLogout={handleLogout} />
-          )}
-          {userRole === 'DEVICE' && (
-            <DevicePortal onLogout={handleLogout} />
-          )}
-          {/* Fallback standard route */}
-          {!['ADMIN', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM', 'DRIVER', 'CUSTOMER', 'DEVICE'].includes(userRole) && (
-            <CustomerPortal onLogout={handleLogout} />
-          )}
+          <PWAInstallPrompt />
+          <Suspense fallback={
+            <div id="portal-lazy-loader" className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
+              <AutoLoader />
+            </div>
+          }>
+            {userRole === 'ADMIN' && (
+              <AdminPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
+            )}
+            {['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(userRole) && (
+              <SupportPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
+            )}
+            {userRole === 'DRIVER' && (
+              <React.Fragment>
+                <DriverPortal onLogout={handleLogout} />
+                <DriverQuotesExtension />
+              </React.Fragment>
+            )}
+            {userRole === 'CUSTOMER' && (
+              <CustomerPortal onLogout={handleLogout} />
+            )}
+            {userRole === 'DEVICE' && (
+              <DevicePortal onLogout={handleLogout} />
+            )}
+            {/* Fallback standard route */}
+            {!['ADMIN', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM', 'DRIVER', 'CUSTOMER', 'DEVICE'].includes(userRole) && (
+              <CustomerPortal onLogout={handleLogout} />
+            )}
+          </Suspense>
         </React.Fragment>
       )}
     </ErrorBoundary>

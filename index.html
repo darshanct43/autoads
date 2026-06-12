@@ -4,9 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Auto Ads Driver & Fleet</title>
+    <link rel="manifest" href="/manifest.json" />
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          const isPreview = location.hostname.includes('ais-pre') || location.hostname.includes('ais-dev');
+          const isIFrame = window.self !== window.top;
+          
+          if (isLocalhost || isPreview || isIFrame) {
+            console.log('[Service Worker] Skipping SW registration in localhost, preview, or iframe conditions.');
+            return;
+          }
+
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('SW registration failed: ', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

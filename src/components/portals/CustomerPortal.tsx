@@ -19,9 +19,9 @@ import NotificationCenter from '../common/NotificationCenter';
 declare const Razorpay: any;
 
 const plans = [
-  { id: 'BASIC', name: 'Elite Starter', price: '₹999', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', color: 'bg-emerald-500' },
-  { id: 'STARTER', name: 'Brand Velocity', price: '₹1999', description: '7 Auto Displays • 2 Days • High Retention', color: 'bg-indigo-500' },
-  { id: 'PRO', name: 'Dominion Pro', price: '₹4999', description: 'Priority Network • 7 Days • Pro Strategy', color: 'bg-slate-900' },
+  { id: 'BASIC', name: 'Basic Plan', price: 999, color: 'bg-emerald-500' },
+  { id: 'STARTER', name: 'Starter Plan', price: 1999, color: 'bg-indigo-500' },
+  { id: 'PRO', name: 'Pro Plan', price: 4999, color: 'bg-slate-900' },
 ];
 
 const getSafeUrl = (url: string | undefined | null) => {
@@ -122,6 +122,7 @@ interface CustomerPortalProps {
 }
 
 export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
+  console.log("[DEBUG] CustomerPortal render started");
   const triggerToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     console.log(`[TOAST] [${type.toUpperCase()}] ${msg}`);
     if (typeof (window as any).showToast === 'function') {
@@ -136,7 +137,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [isFirestoreOffline, setIsFirestoreOffline] = useState(false);
   const [activeCampaignData, setActiveCampaignData] = useState<any>(null);
   const [editablePlans, setEditablePlans] = useState<Plan[]>(plans.map(p => ({...p})));
-  const [activePlan, setActivePlan] = useState('BASIC');
+  const [activePlan, setActivePlan] = useState(() => localStorage.getItem('last_selected_plan') || 'BASIC');
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showPayment, setShowPaymentState] = useState(false);
   const hasUserInitiatedPayment = useRef(false);
@@ -208,6 +209,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             duration: String(foundAd.duration || '30')
          });
          setNeedDesigner(!!foundAd.needDesigner);
+         setNeedVideoMaker(!!foundAd.needVideoMaker);
          const matchedPlan = mergedPlans.find(p => p.id === foundAd.planId) || 
                              plans.find(p => p.id === foundAd.planId) || 
                              (foundAd.duration === 7 ? (mergedPlans.find(p => p.id === 'PRO') || plans[2]) : 
@@ -240,12 +242,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       setSelectedState('');
       setCustomCity('');
       setNeedDesigner(null);
+      setNeedVideoMaker(null);
       dispatch({ type: 'INIT_DETAILS' });
     }
     hasUserInitiatedPayment.current = true;
     setShowPayment(true);
   };
   const [needDesigner, setNeedDesigner] = useState<boolean | null>(null);
+  const [needVideoMaker, setNeedVideoMaker] = useState<boolean | null>(null);
   const [selectedState, setSelectedState] = useState(() => localStorage.getItem('last_selected_state') || '');
   const [selectedCity, setSelectedCity] = useState(() => localStorage.getItem('last_selected_city') || '');
   const [customCity, setCustomCity] = useState(() => localStorage.getItem('last_custom_city') || '');
@@ -353,7 +357,22 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [dbPlans, setDbPlans] = useState<any[]>([]);
+  const [plansList, setPlansList] = useState<any[]>([]);
+  const [configList, setConfigList] = useState<any[]>([]);
+  const dbPlans = useMemo(() => {
+    const combined: Record<string, any> = {};
+    plansList.forEach(p => {
+      if (p && p.id) {
+        combined[p.id] = { ...(combined[p.id] || {}), ...p };
+      }
+    });
+    configList.forEach(c => {
+      if (c && c.id) {
+        combined[c.id] = { ...(combined[c.id] || {}), ...c };
+      }
+    });
+    return Object.values(combined);
+  }, [plansList, configList]);
   const [promotions, setPromotions] = useState<any[]>([]);
   const [showFloatingOffer, setShowFloatingOffer] = useState(true);
   const [myCampaigns, setMyCampaigns] = useState<AdCampaign[]>([]);
@@ -398,23 +417,30 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     return payments.reduce((sum, p) => sum + (p.amount || 0), 0);
   }, [payments]);
 
+  useEffect(() => {
+    firebaseService.getPlans().then(setPlansList);
+    return firebaseService.subscribeToPlans(setPlansList);
+  }, []);
+
   const mergedPlans = useMemo(() => {
-    if (dbPlans.length > 0) {
-      return dbPlans.map(p => {
-        const fallback = plans.find(f => f.id === p.id);
-        return {
-          id: p.id,
-          name: p.name || fallback?.name || 'Unknown',
-          price: p.price,
-          designerPrice: p.designerPrice,
-          videoMakerPrice: p.videoMakerPrice,
-          description: p.description || fallback?.description || 'A great plan',
-          color: fallback?.color || 'bg-slate-900'
-        };
-      });
-    }
-    return editablePlans;
-  }, [dbPlans, editablePlans]);
+    const basePlans = [
+      { id: 'BASIC', name: 'Basic Plan', price: 999, maxScreens: 3, durationDays: 1, type: 'PLAN', color: 'bg-emerald-500' },
+      { id: 'STARTER', name: 'Starter Plan', price: 1999, maxScreens: 5, durationDays: 5, type: 'PLAN', color: 'bg-indigo-500' },
+      { id: 'PRO', name: 'Pro Plan', price: 4999, maxScreens: 10, durationDays: 7, type: 'PLAN', color: 'bg-slate-900' },
+    ];
+    
+    // Merge basePlans with dbPlans, ensuring all dbPlans are included
+    const result = [...basePlans];
+    dbPlans.forEach(dbPlan => {
+      const index = result.findIndex(p => p.id === dbPlan.id);
+      if (index !== -1) {
+        result[index] = { ...result[index], ...dbPlan };
+      } else {
+        result.push(dbPlan);
+      }
+    });
+    return result;
+  }, [dbPlans]);
 
   // SINGLE SOURCE OF TRUTH REDUCER STATE MACHINE
   type WorkflowState = 'DETAILS' | 'AWAITING_PAYMENT' | 'PAYMENT_PROCESSING' | 'ACTIVE' | 'FAILED';
@@ -553,15 +579,32 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
   };
 
-  const [selectedPlan, setSelectedPlan] = useState<any>(plans[1]);
+  const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const paymentProcessedRef = useRef(false);
   const activeRazorpayRef = useRef<any>(null);
 
   useEffect(() => {
-    const plan = mergedPlans.find(p => p.id === activePlan);
-    if (plan) setSelectedPlan(plan);
-  }, [activePlan, mergedPlans]);
+    // Sync selected plan with mergedPlans or default to the first plan if not set
+    const savedPlanId = localStorage.getItem('last_selected_plan') || 'BASIC';
+    const plan = mergedPlans.find(p => p.id === activePlan) || 
+                 mergedPlans.find(p => p.id === savedPlanId) || 
+                 mergedPlans[0];
+    
+    if (plan) {
+      const p = plan as any;
+      const s = selectedPlan as any;
+      if (!selectedPlan || 
+        s.id !== p.id || 
+        s.price !== p.price ||
+        s.designerPrice !== p.designerPrice ||
+        s.videoMakerPrice !== p.videoMakerPrice ||
+        s.description !== p.description
+      ) {
+        setSelectedPlan(plan);
+      }
+    }
+  }, [activePlan, mergedPlans, selectedPlan]);
   
   const [isExtracting, setIsExtracting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -750,6 +793,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     try {
       setLoading(true);
       // 1. Record Campaign
+      const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
+      const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
+
       const campaignRef = await firebaseService.createCampaign({
         title: campaignDetails.title,
         status: 'PENDING',
@@ -761,16 +807,18 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         targetState: selectedState,
         duration: campaignDetails.duration,
         needDesigner: !!needDesigner,
+        needVideoMaker: !!needVideoMaker,
+        designerFee: designerCharge,
+        videoMakerFee: videoMakerCharge,
         paymentReceived: true
       });
 
       // 2. Record Payment
       const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-      const designerCharge = needDesigner ? 1000 : 0;
       
       await firebaseService.recordPayment({
         campaignId: campaignRef.id,
-        amount: baseAmount + designerCharge,
+        amount: baseAmount + designerCharge + videoMakerCharge,
         currency: 'INR',
         status: 'SUCCESS',
         paymentMethod: 'system',
@@ -828,7 +876,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
 
     const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    const amount = baseAmount + (needDesigner ? 1000 : 0);
+    const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
+    const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
+    const amount = baseAmount + designerCharge + videoMakerCharge;
     if (!amount || amount <= 0) {
       triggerToast('Invalid order amount.', 'error');
       return null;
@@ -876,7 +926,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       const keyId = data.key_id || order.key_id || data.key || order.key;
       const finalOrderData = {
         ...order,
-        key_id: keyId
+        key_id: keyId,
+        is_simulated: !!data.is_simulated
       };
       
       console.log('Order ID details:', finalOrderData.id, finalOrderData.order_id);
@@ -915,7 +966,57 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       if (!currentOrderData) return;
       
-      const razorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      if (currentOrderData.is_simulated) {
+        setLoading(true);
+        triggerToast("Sandbox Mode: Simulating secure payment...", "info");
+        
+        try {
+          const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+          const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
+          const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
+          const totalAmount = baseAmount + designerCharge + videoMakerCharge;
+
+          const response = {
+            razorpay_order_id: currentOrderData.id,
+            razorpay_payment_id: "pay_simulated_" + Date.now(),
+            razorpay_signature: "simulated_signature",
+            is_simulated: true
+          };
+
+          const verifyRes = await fetch("/api/verify-payment", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              ...response,
+              uid: user?.uid,
+              campaignId: createdCampaignId || localStorage.getItem('last_created_campaign') || undefined,
+              planData: { amount: totalAmount }
+            })
+          });
+
+          const verifyData = await verifyRes.json();
+          if (verifyData.success) {
+            localStorage.removeItem("payment_pending");
+            setShowPaymentState(false);
+            triggerToast("Simulated Sandbox Payment completed successfully!", "success");
+            window.location.hash = 'customer';
+            dispatch({ type: 'SET_ACTIVE' });
+          } else {
+            throw new Error(verifyData.error || "Simulation Verification failed");
+          }
+        } catch (err: any) {
+          console.error("SIMULATED VERIFY ERROR:", err);
+          triggerToast(`Sandbox Verification failed: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+
+      const rawRazorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || "";
+      const razorpayKey = String(rawRazorpayKey).trim().replace(/^["']|["']$/g, '');
       
       if (!(window as any).Razorpay) {
         console.error("Razorpay SDK not loaded");
@@ -939,71 +1040,73 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           setLoading(true);
           try {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-            const designerCharge = needDesigner ? 1000 : 0;
-            const totalAmount = baseAmount + designerCharge;
+            const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
+            const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
+            const totalAmount = baseAmount + designerCharge + videoMakerCharge;
 
             console.log("BEFORE_VERIFY");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                ...response,
-                uid: user?.uid,
-                campaignId: createdCampaignId,
-                planData: { amount: totalAmount }
-              })
-            });
-            console.log("AFTER_VERIFY");
-            const verifyData = await verifyRes.json();
-            console.log("STEP 3");
-            console.log("VERIFY RESULT:", verifyData);
+               },
+               body: JSON.stringify({
+                 ...response,
+                 uid: user?.uid,
+                 campaignId: createdCampaignId,
+                 planData: { amount: totalAmount }
+               })
+             });
+             console.log("AFTER_VERIFY");
+             const verifyData = await verifyRes.json();
+             console.log("STEP 3");
+             console.log("VERIFY RESULT:", verifyData);
 
-            if (verifyData.success) {
-              localStorage.removeItem("payment_pending");
-              setShowPaymentState(false);
-              triggerToast("Payment successful!", "success");
-              window.location.hash = 'customer';
-              dispatch({ type: 'SET_ACTIVE' });
-            } else {
-              throw new Error(verifyData.error || "Verification failed");
-            }
-          } catch (err) {
-            console.error("VERIFY ERROR:", err);
-            triggerToast("Payment verification failed.", "error");
-          } finally {
-            setLoading(false);
-          }
-        },
-        modal: {
-          ondismiss: function () {
-            console.log("PAYMENT CANCELLED");
-          }
-        },
-        prefill: {
-          name: user?.displayName || "",
-          email: user?.email || "",
-          contact: phone || user?.phoneNumber?.replace('+91', '') || ""
-        },
-        theme: {
-          color: "#2563eb"
-        }
-      };
+             if (verifyData.success) {
+               localStorage.removeItem("payment_pending");
+               setShowPaymentState(false);
+               triggerToast("Payment successful!", "success");
+               window.location.hash = 'customer';
+               dispatch({ type: 'SET_ACTIVE' });
+             } else {
+               throw new Error(verifyData.error || "Verification failed");
+             }
+           } catch (err) {
+             console.error("VERIFY ERROR:", err);
+             triggerToast("Payment verification failed.", "error");
+           } finally {
+             setLoading(false);
+           }
+         },
+         modal: {
+           ondismiss: function () {
+             console.log("PAYMENT CANCELLED");
+           }
+         },
+         prefill: {
+           name: user?.displayName || "",
+           email: user?.email || "",
+           contact: phone || user?.phoneNumber?.replace('+91', '') || ""
+         },
+         theme: {
+           color: "#2563eb"
+         }
+       };
 
-      localStorage.setItem("pending_order", currentOrderData.id);
-      const razor = new (window as any).Razorpay(options);
-      razor.on('payment.success', function(resp: any) {
-        console.log("EVENT SUCCESS", resp);
-      });
-      razor.open();
+       localStorage.setItem("pending_order", currentOrderData.id);
+       const razor = new (window as any).Razorpay(options);
+       activeRazorpayRef.current = razor;
+       razor.on('payment.success', function(resp: any) {
+         console.log("EVENT SUCCESS", resp);
+       });
+       razor.open();
     } catch (e: any) {
       triggerToast(`Modal Error: ${e.message}`, "error");
     }
   };
 
   useEffect(() => {
-    const unsubPlans = firebaseService.subscribeToPlans(setDbPlans);
+    const unsubPlans = firebaseService.subscribeToPlanConfigurations(setConfigList);
 
     // Pre-load Razorpay script
     if (typeof (window as any).Razorpay === 'undefined') {
@@ -1320,6 +1423,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   const handleActivePlanChange = (planId: string) => {
     setActivePlan(planId);
+    localStorage.setItem('last_selected_plan', planId);
     setSelectedPlan(mergedPlans.find(p => p.id === planId) || plans.find(p => p.id === planId));
     setOrderData(null); // Reset order data when plan changes
   };
@@ -1331,13 +1435,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       // Auto-configure the campaign flow
       setNeedDesigner(true);
+      let newPlanId = 'STARTER';
       if (type.includes('Video')) {
-        setActivePlan('PRO');
-        setSelectedPlan(mergedPlans.find(p => p.id === 'PRO') || plans[2]);
-      } else {
-        setActivePlan('STARTER');
-        setSelectedPlan(mergedPlans.find(p => p.id === 'STARTER') || plans[1]);
+        newPlanId = 'PRO';
       }
+      setActivePlan(newPlanId);
+      localStorage.setItem('last_selected_plan', newPlanId);
+      setSelectedPlan(mergedPlans.find(p => p.id === newPlanId) || plans.find(p => p.id === newPlanId));
       
       // Switch to Ads tab and trigger checkout
       setActiveTab('CAMPAIGNS');
@@ -1952,11 +2056,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              <div className={cn("px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest", 
-                                ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500" :
-                                ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "bg-blue-50 text-blue-600 border border-blue-100 animate-pulse" :
-                                ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "bg-amber-50 text-amber-600 border border-amber-100 animate-pulse" :
-                                "bg-slate-100 text-slate-400"
+                              <div className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border", 
+                                ad.status === 'ACTIVE' || ad.status === 'LIVE' ? "bg-slate-900 text-amber-500 border-slate-900 shadow-sm" :
+                                ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "bg-blue-50 text-blue-600 border-blue-100 animate-pulse" :
+                                ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "bg-amber-50 text-amber-600 border-amber-100/60 animate-pulse shadow-sm" :
+                                "bg-slate-100 text-slate-400 border-slate-100"
                               )}>
                                 {ad.paymentStatus === 'PAYMENT_LINK_SENT' ? "Waiting For Payment Confirmation" : 
                                  (ad.status === 'AWAITING_PAYPORTAL' || !ad.paymentReceived ? "Awaiting Payment" : ad.status)}
@@ -1968,9 +2072,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                                     e.stopPropagation();
                                     openPaymentModal(ad.id);
                                   }}
-                                  className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[7px] uppercase tracking-wider rounded transition-all flex items-center gap-1 shadow"
+                                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-amber-500/10 cursor-pointer"
                                 >
-                                  <CreditCard size={10} />
+                                  <CreditCard size={13} />
                                   <span>Pay Now</span>
                                 </button>
                               )}
@@ -2008,60 +2112,51 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 </div>
             
                 <div className="space-y-2">
-                  {mergedPlans.map((plan) => (
+                  {Array.isArray(mergedPlans) && mergedPlans.filter(p => ['BASIC', 'STARTER', 'PRO'].includes(p.id)).map((plan) => (
                     <div
                       key={plan.id}
                       className={cn(
-                        "w-full p-4 bg-white rounded-2xl border transition-all text-left relative overflow-hidden group",
+                        "w-full px-4 py-3 bg-white rounded-xl border transition-all text-left relative overflow-hidden group cursor-pointer",
                         activePlan === plan.id 
-                          ? cn("ring-2 shadow-md translate-x-1", 
-                               plan.id === 'REEL' ? "border-emerald-500 ring-emerald-50" : 
-                               plan.id === 'EDIT' ? "border-indigo-500 ring-indigo-50" : 
-                               plan.id === 'MOTION' ? "border-violet-500 ring-violet-50" :
-                               "border-slate-900 ring-slate-50")
-                          : "border-slate-100 hover:border-slate-300 shadow-sm hover:translate-x-1"
+                          ? "border-amber-500 ring-2 ring-amber-500/5 shadow-sm"
+                          : "border-slate-100 shadow-sm hover:border-slate-200"
                       )}
+                      onClick={() => {
+                        handleActivePlanChange(plan.id);
+                      }}
                     >
-                      <button className="w-full text-left" onClick={() => handleActivePlanChange(plan.id)}>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-0.5">
-                              <h4 className="text-xs font-black text-slate-900 tracking-tight uppercase italic leading-tight">{plan.name}</h4>
-                              <p className="text-[7px] text-slate-400 font-bold uppercase tracking-widest italic">{plan.unitCount || 'Standard Access'}</p>
-                            </div>
-                            <div className="flex flex-col items-end">
-                              <input 
-                                type="text"
-                                value={plan.price}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => updatePlanPrice(plan.id, e.target.value)}
-                                className="w-20 text-right text-base font-black text-slate-900 italic tracking-tight tabular-nums leading-tight bg-transparent border-b border-slate-300 focus:border-amber-500 outline-none"
-                              />
-                              <p className="text-[7px] text-slate-400 font-bold uppercase mt-0.5">/ cycle</p>
-                            </div>
-                          </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <h4 className="text-[11px] font-black text-slate-900 tracking-tight uppercase italic">{plan.name}</h4>
+                          <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1.5 leading-none">
+                            <Monitor size={8} className="text-amber-500" />
+                            <span>{plan.type === 'SERVICE' ? 'Creation Service' : `${plan.maxScreens} Units • ${plan.durationDays} Day Cycle`}</span>
+                          </p>
                         </div>
-                      </button>
-                      {activePlan === plan.id && (
-                        <motion.div layoutId="plan-pulse-small" className="absolute -top-6 -right-6 w-16 h-16 bg-amber-500/10 rounded-full blur-xl" />
-                      )}
+                        <div className="text-right">
+                          <span className="text-sm font-black text-slate-950 italic tabular-nums leading-none">
+                            ₹{plan.price}
+                          </span>
+                          <p className="text-[6px] text-slate-400 font-black uppercase tracking-widest leading-none mt-0.5">Base Rate</p>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="p-6 bg-slate-950 rounded-[2rem] space-y-6 text-white shadow-xl relative overflow-hidden border border-slate-900">
+                <div className="p-4 bg-slate-950 rounded-2xl space-y-4 text-white shadow-xl relative overflow-hidden border border-slate-900">
                    <div className="relative z-10">
                       <button 
                         onClick={() => {
                           setCreationStep('DETAILS');
                           openPaymentModal();
                         }}
-                        className="w-full bg-amber-500 text-slate-950 rounded-xl py-4 font-black text-[10px] uppercase tracking-[0.15em] hover:bg-amber-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+                        className="w-full bg-amber-500 text-slate-950 rounded-lg py-3 font-black text-[9px] uppercase tracking-[0.2em] hover:bg-amber-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
                       >
-                        Initiate Payment <ArrowUpRight size={14} />
+                        Confirm Selection <ArrowUpRight size={12} />
                       </button>
                    </div>
-                   <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/4 w-32 h-32 bg-amber-500/5 blur-3xl pointer-events-none" />
+                   <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/4 w-24 h-24 bg-amber-500/5 blur-3xl pointer-events-none" />
                 </div>
               </div>
             </div>
@@ -2354,7 +2449,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4">
                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Standard Creative</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Perfect for quick announcements, offers, and regional targeting.</p>
-                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹1000</h3>
+                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹{dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000}</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Professional 4K Static Design</li>
@@ -2375,7 +2470,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4 relative z-10">
                          <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Video Ads Service</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">High-Impact 1080p motion graphics to grab maximum network attention.</p>
-                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹2000</h3>
+                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹{dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000}</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-300 tracking-widest relative z-10">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Custom Motion Narrative (15s)</li>
@@ -2451,12 +2546,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 </div>
              </div>
              
-             <div className="pt-8 flex flex-col sm:flex-row justify-between items-center border-t border-white/5 gap-4">
+             <div className="pt-8 flex flex-col sm:flex-row justify-center items-center border-t border-white/5 gap-4">
                 <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.3em]">© 2026 AUTOADS NETWORK LIVE / MAYAAN GROUP</p>
-                <div className="flex gap-4 opacity-40 grayscale">
-                   <img src="https://img.icons8.com/color/48/razorpay.png" className="h-4" alt="Razorpay" />
-                   <img src="/mayaan_logo.svg" className="h-4" alt="Mayaan Group" />
-                </div>
+                
              </div>
           </div>
         </div>
@@ -2608,24 +2700,42 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         </div>
                       </div>
                       
-                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                               <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
-                                  <Sparkles size={14} />
-                               </div>
-                               <div>
-                                  <p className="text-[10px] font-bold text-slate-900 uppercase">Need Creative Help?</p>
-                                  <p className="text-[8px] text-slate-400 uppercase">₹1,000 for Professional Design</p>
-                               </div>
-                            </div>
-                            <button 
-                              onClick={() => setNeedDesigner(!needDesigner)}
-                              className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needDesigner ? "bg-slate-900 text-white" : "bg-white text-slate-400 border border-slate-200")}
-                            >
-                              {needDesigner ? 'Added' : 'Add'}
-                            </button>
-                         </div>
+                      <div className="space-y-3">
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+                                 <Palette size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Professional Graphic Design</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{(dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000).toLocaleString()} for Custom Banner Design</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedDesigner(!needDesigner)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needDesigner ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needDesigner ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+                                 <Video size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Professional Video Editing</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{(dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000).toLocaleString()} for Animated Video Ad</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedVideoMaker(!needVideoMaker)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needVideoMaker ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needVideoMaker ? 'Added' : 'Add'}
+                           </button>
+                        </div>
                       </div>
                     </div>
 
@@ -2831,12 +2941,22 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                        {needDesigner && (
                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
                             <span>Creative Strategy Fee</span>
-                            <span>₹1,000</span>
+                            <span>₹{(dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000).toLocaleString()}</span>
+                         </div>
+                       )}
+                       {needVideoMaker && (
+                         <div className="flex justify-between items-center text-[11px] font-black uppercase text-rose-600 font-extrabold italic">
+                            <span>Video Ad Service Fee</span>
+                            <span>₹{(dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000).toLocaleString()}</span>
                          </div>
                        )}
                        <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200 text-lg font-black italic uppercase text-slate-900">
                           <span>Total Deployment Fee</span>
-                          <span>₹{(typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + (needDesigner ? 1000 : 0)}</span>
+                          <span>₹{(
+                            (typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + 
+                            (needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0) + 
+                            (needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0)
+                          ).toLocaleString()}</span>
                        </div>
                     </div>
 

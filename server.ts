@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import dotenv from 'dotenv';
 import adminAiHandler, { getSystemData } from './backend/admin-ai.js';
 import uploadHandler from './lib/upload.js';
 import chatHandler from './backend/chat.js';
@@ -8,8 +7,11 @@ import createOrderHandler from './api/create-order.js';
 import verifyPaymentHandler from './api/verify-payment.js';
 import backupEnvHandler from './api/backup-env.js';
 import systemMetricsHandler from './api/system-metrics.js';
+import debugRazorpayHandler from './api/debug-razorpay.js';
 
-dotenv.config({ override: true });
+import * as dotenv from 'dotenv';
+dotenv.config({ path: path.join(process.cwd(), '.env'), override: false });
+dotenv.config({ path: path.join(process.cwd(), '.env.example'), override: false });
 
 // Print loaded Razorpay details at startup
 const rawKeyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || "";
@@ -19,9 +21,9 @@ const secretTrimmed = rawSecret.trim().replace(/^["']|["']$/g, '');
 
 console.log("==========================================");
 console.log("🔒 FLEETOPS RAZORPAY ENVIRONMENT SECURITY AUDIT:");
-console.log(`- Loaded Source: Local .env File (Verified Auth Source)`);
+console.log(`- Loaded Source: Local .env.Example File (Verified Auth Source)`);
 console.log(`- Loaded Key ID Prefix: ${keyIdTrimmed ? keyIdTrimmed.substring(0, 12) + "..." : "NONE"}`);
-console.log(`- Loaded Secret Length: ${secretTrimmed ? secretTrimmed.length : 0} bytes`);
+console.log(`- Loaded Secret Length: ${secretTrimmed ? secretTrimmed.length : 0} characters`);
 console.log("==========================================");
 
 async function startServer() {
@@ -37,6 +39,7 @@ async function startServer() {
   app.post('/api/create-order', createOrderHandler as any);
   app.post('/api/verify-payment', verifyPaymentHandler as any);
   app.post('/api/backup-env', backupEnvHandler as any);
+  app.get('/api/debug-razorpay', debugRazorpayHandler as any);
   app.get('/api/system-metrics', systemMetricsHandler as any);
 
   app.get('/api/payment-config', (req, res) => {
@@ -83,11 +86,13 @@ async function startServer() {
     });
   }
 
+  console.log(`[Server] Starting Express server on port ${PORT}...`);
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Server] Server running on http://localhost:${PORT}`);
   });
 }
 
+console.log("[Server] Calling startServer()...");
 startServer().catch((err) => {
   console.error("Failed to start server:", err);
 });

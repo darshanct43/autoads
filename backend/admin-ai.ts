@@ -1,9 +1,7 @@
 import { OpenAI } from 'openai';
 import { GoogleGenAI } from '@google/genai';
-import dotenv from 'dotenv';
 import { dbAdm, admin } from '../lib/firebase-admin.js';
 
-dotenv.config({ override: true });
 
 async function trackAiMetric(engine: 'gemini' | 'openai', state: 'request' | 'failure') {
   try {

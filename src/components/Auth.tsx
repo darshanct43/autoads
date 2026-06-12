@@ -667,64 +667,7 @@ export default function Auth({ onLogin }: AuthProps) {
                   </button>
                 </div>
 
-                <div className="relative py-4">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-                  <div className="relative flex justify-center text-[8px] font-black uppercase bg-white px-4 text-amber-500 tracking-widest">Rapid Test Access</div>
-                </div>
-                <div className="space-y-3">
-                  <p className="text-[9px] text-center font-black text-slate-400 uppercase tracking-widest leading-loose">
-                    Server unconfigured or incorrect password? Choose standard access:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        localStorage.setItem('auto_ads_offline_mode', 'true');
-                        localStorage.setItem('auto_ads_offline_role', 'ADMIN');
-                        window.location.reload();
-                      }}
-                      className="py-3 bg-slate-900 border border-slate-850 hover:border-amber-500/30 text-amber-500 font-black rounded-xl text-[9px] uppercase tracking-wider text-center hover:bg-slate-800 transition-colors shadow-sm"
-                    >
-                      Admin Portal
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        localStorage.setItem('auto_ads_offline_mode', 'true');
-                        localStorage.setItem('auto_ads_offline_role', 'SUPPORT_TEAM');
-                        window.location.reload();
-                      }}
-                      className="py-3 bg-slate-900 border border-slate-850 hover:border-amber-500/30 text-amber-500 font-black rounded-xl text-[9px] uppercase tracking-wider text-center hover:bg-slate-800 transition-colors shadow-sm"
-                    >
-                      Support Portal
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        localStorage.setItem('auto_ads_offline_mode', 'true');
-                        localStorage.setItem('auto_ads_offline_role', 'CUSTOMER');
-                        window.location.reload();
-                      }}
-                      className="py-3 bg-slate-900 border border-slate-850 hover:border-amber-500/30 text-amber-500 font-black rounded-xl text-[9px] uppercase tracking-wider text-center hover:bg-slate-800 transition-colors shadow-sm"
-                    >
-                      Customer Portal
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        localStorage.setItem('auto_ads_offline_mode', 'true');
-                        localStorage.setItem('auto_ads_offline_role', 'DRIVER');
-                        localStorage.setItem('auto_ads_terminal_id', 'TRM-MOBILE-DEV');
-                        localStorage.setItem('temp_terminal_id', 'TRM-MOBILE-DEV');
-                        localStorage.setItem('temp_access_key', 'OFFLINE-KEY');
-                        window.location.reload();
-                      }}
-                      className="py-3 bg-slate-900 border border-slate-850 hover:border-amber-500/30 text-amber-500 font-black rounded-xl text-[9px] uppercase tracking-wider text-center hover:bg-slate-800 transition-colors shadow-sm"
-                    >
-                      Auto Driver
-                    </button>
-                  </div>
-                </div>
+
               </div>
             )}
             

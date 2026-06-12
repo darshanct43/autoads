@@ -36,6 +36,7 @@ import QuotesReviewTab from './tabs/QuotesReviewTab';
 // HQ Tabs
 import { PricingProposalsTab } from './tabs/PricingProposalsTab';
 import { PricingApprovalsTab } from './tabs/PricingApprovalsTab';
+import { PlanManager } from './tabs/PlanManager';
 import RevenueCenter from './hq/RevenueCenter';
 import TerritoryCommandCenter from './hq/TerritoryCommandCenter';
 import DriverKYCApproval from '@/components/admin/DriverKYCApproval';
@@ -65,36 +66,11 @@ const clauses = [
 ];
 
 const DEFAULT_PLANS = [
-  {
-    id: "BASIC",
-    name: "Elite Starter",
-    price: 999,
-    designerPrice: 400,
-    videoMakerPrice: 600,
-    features: ["3 Auto Displays", "1 Day Assigned", "Ad Policy Help"],
-    description: "3 Auto Displays • 1 Day Assigned • Ad Policy Help",
-    type: "PLAN"
-  },
-  {
-    id: "STARTER",
-    name: "Brand Velocity",
-    price: 1999,
-    designerPrice: 800,
-    videoMakerPrice: 1200,
-    features: ["7 Auto Displays", "2 Days", "High Retention"],
-    description: "7 Auto Displays • 2 Days • High Retention",
-    type: "PLAN"
-  },
-  {
-    id: "PRO",
-    name: "Dominion Pro",
-    price: 4999,
-    designerPrice: 1500,
-    videoMakerPrice: 2000,
-    features: ["Priority Network", "7 Days", "Pro Strategy"],
-    description: "Priority Network • 7 Days • Pro Strategy",
-    type: "PLAN"
-  }
+  { id: 'BASIC', name: 'Basic Plan', price: 999, durationDays: 1, maxScreens: 3, isDesignerService: false, description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help' },
+  { id: 'STARTER', name: 'Starter Plan', price: 1999, durationDays: 5, maxScreens: 5, isDesignerService: false, description: '7 Auto Displays • 2 Days • High Retention' },
+  { id: 'PRO', name: 'Pro Plan', price: 4999, durationDays: 7, maxScreens: 10, isDesignerService: false, description: 'Priority Network • 7 Days • Pro Strategy' },
+  { id: 'DESIGNER', name: 'Designer Plan', price: 1000, durationDays: 0, maxScreens: 0, isDesignerService: true, description: 'Professional Graphic Design Service' },
+  { id: 'VIDEOMAK', name: 'Video Ad Service', price: 2000, durationDays: 0, maxScreens: 0, isDesignerService: true, description: 'Professional Video Ad Creation' },
 ];
 
 const generateMissingPDF = async (driverData: any) => {
@@ -331,6 +307,11 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
   const [terminals, setTerminals] = useState<any[]>([]);
   const [planProposals, setPlanProposals] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+
+  const mergedPlans = DEFAULT_PLANS.map(def => {
+    const dbPlan = plans.find(p => p.id === def.id);
+    return dbPlan ? { ...def, ...dbPlan } : def;
+  });
   const [paymentSubTab, setPaymentSubTab] = useState<'INCOME' | 'EXPENSE'>('INCOME');
 
   // UI / Action States
@@ -424,7 +405,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
 
   // Sync plans from firebase to keep local and database aligned
   useEffect(() => {
-    firebaseService.getPlans().then(setPlans).catch(console.error);
+    return firebaseService.subscribeToPlans(setPlans);
   }, []);
 
   // Set default active tab for Support Manager
@@ -1579,20 +1560,47 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                         <h2 className="text-xl font-bold tracking-tight text-slate-900">Pricing Controls</h2>
                       </div>
                     </div>
-                    <PricingApprovalsTab
-                      planProposals={planProposals}
-                      plans={plans.length > 0 ? plans : DEFAULT_PLANS}
-                      showApprovalModal={pricingShowModal}
-                      setShowApprovalModal={setPricingShowModal}
-                      setApprovingCampaignId={setPricingApprovingId}
-                      setApprovalForm={setPricingForm}
-                      approvalForm={pricingForm}
-                      handleRejectPlan={handleRejectPlan}
-                      handleApprovePlan={handleApprovePlan}
-                      pricingSubTab={pricingSubTab}
-                      setPricingSubTab={setPricingSubTab}
-                      isSubmitting={isSubmittingPricing}
-                    />
+
+                    {/* Subtab selection */}
+                    <div className="flex items-center gap-2 mb-6 bg-slate-50 p-1.5 rounded-2xl w-fit border border-slate-150/80">
+                      <button
+                        onClick={() => setPricingSubTab('PLANS')}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer",
+                          pricingSubTab === 'PLANS' ? "bg-amber-500 text-slate-950 shadow-md" : "text-slate-500 hover:text-slate-800"
+                        )}
+                      >
+                        Plan Manager
+                      </button>
+                      <button
+                        onClick={() => setPricingSubTab('PROPOSALS')}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer",
+                          pricingSubTab === 'PROPOSALS' ? "bg-amber-500 text-slate-950 shadow-md" : "text-slate-500 hover:text-slate-800"
+                        )}
+                      >
+                        Approval Queue
+                      </button>
+                    </div>
+
+                    {pricingSubTab === 'PLANS' ? (
+                      <PlanManager />
+                    ) : (
+                      <PricingApprovalsTab
+                        planProposals={planProposals}
+                        plans={plans.length > 0 ? plans : DEFAULT_PLANS}
+                        showApprovalModal={pricingShowModal}
+                        setShowApprovalModal={setPricingShowModal}
+                        setApprovingCampaignId={setPricingApprovingId}
+                        setApprovalForm={setPricingForm}
+                        approvalForm={pricingForm}
+                        handleRejectPlan={handleRejectPlan}
+                        handleApprovePlan={handleApprovePlan}
+                        pricingSubTab={pricingSubTab}
+                        setPricingSubTab={setPricingSubTab}
+                        isSubmitting={isSubmittingPricing}
+                      />
+                    )}
                   </div>
                 </ErrorBoundary>
               )}
@@ -1853,7 +1861,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                 <ErrorBoundary componentName="Pricing Control">
                   <div className="bg-white border border-slate-150 p-8 rounded-[2.5rem] shadow-sm">
                     <PricingProposalsTab
-                      plans={plans.length > 0 ? plans : DEFAULT_PLANS}
+                      plans={mergedPlans}
                       showToast={showToast}
                     />
                   </div>
