@@ -10,7 +10,7 @@ import systemMetricsHandler from './api/system-metrics.js';
 import debugRazorpayHandler from './api/debug-razorpay.js';
 
 import * as dotenv from 'dotenv';
-dotenv.config({ path: path.join(process.cwd(), '.env'), override: false });
+dotenv.config({ path: path.join(process.cwd(), '.env'), override: true });
 dotenv.config({ path: path.join(process.cwd(), '.env.example'), override: false });
 
 // Print loaded Razorpay details at startup
