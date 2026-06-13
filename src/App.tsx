@@ -8,7 +8,6 @@ import { UserRole } from './types';
 import Auth from './components/Auth';
 import BootAnimation from './components/common/BootAnimation';
 import AutoLoader from './components/common/AutoLoader';
-import RuntimeDiagnostics from './components/common/RuntimeDiagnostics';
 
 // Lazy Loaded Portals for Performance Optimization
 const AdminPortal = lazy(() => import('./components/portals/AdminPortal'));
@@ -124,7 +123,6 @@ export default function App() {
   // Render components according to user auth state and role
   return (
     <ErrorBoundary componentName="Network Core">
-      <RuntimeDiagnostics />
       {showBoot ? (
         <BootAnimation onComplete={() => setShowBoot(false)} />
       ) : loading ? (
