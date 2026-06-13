@@ -20,6 +20,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SupportTicket } from '@/types';
 import { doc, updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
+import { copyToClipboard } from '@/lib/utils';
 
 interface SupportTicketsProps {
   tickets: SupportTicket[];
@@ -324,7 +325,7 @@ export default function SupportTickets({ tickets, onUpdateStatus, onEscalate }: 
                             </span>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(selectedTicket.id || "");
+                                copyToClipboard(selectedTicket.id || "");
                                 setCopiedId(true);
                                 setTimeout(() => setCopiedId(false), 2000);
                               }}

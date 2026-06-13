@@ -27,6 +27,7 @@ import { firebaseService } from "@/services/firebaseService";
 import { db } from "@/lib/firebase";
 import { doc, deleteDoc, writeBatch, collection } from "firebase/firestore";
 import { INITIAL_CITIES } from "@/modules/cityManagement/cities";
+import { copyToClipboard } from "@/lib/utils";
 
 interface FranchisesTabProps {
   setActiveTab: (tab: string) => void;
@@ -293,7 +294,7 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
   });
 
   return (
-    <div className="fixed inset-0 left-0 md:left-20 z-20 bg-[#f8fafc] p-6 md:p-10 overflow-y-auto min-h-[100dvh] pb-32 custom-scrollbar">
+    <div className="fixed inset-0 left-0 md:left-20 z-20 bg-[#f8fafc] p-6 md:p-10 overflow-y-auto min-h-screen pb-32 custom-scrollbar">
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* Title Header Bar */}
@@ -596,7 +597,7 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
                                   <button
                                     onClick={() => {
                                       const claimLink = `${window.location.origin}/#claim?code=${invite.id}`;
-                                      navigator.clipboard.writeText(claimLink);
+                                      copyToClipboard(claimLink);
                                       showToast("Copied secure claim link to clipboard!", "success");
                                     }}
                                     className="px-3 py-2 bg-white hover:bg-amber-500 hover:text-slate-950 border border-slate-200 hover:border-amber-400 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer text-slate-600 font-sans shadow-sm"
@@ -1126,7 +1127,7 @@ export const FranchisesTab: React.FC<FranchisesTabProps> = ({ setActiveTab, show
                         type="button" 
                         onClick={() => {
                           const link = `${window.location.origin}/#claim?code=${generatedInviteCode}`;
-                          navigator.clipboard.writeText(link);
+                          copyToClipboard(link);
                           showToast("Copied secure link to clipboard!", "success");
                         }}
                         className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-black uppercase tracking-wider font-sans transition-all flex items-center justify-center gap-1.5"

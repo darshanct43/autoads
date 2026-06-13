@@ -40,7 +40,7 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-55 p-6 md:p-10 overflow-y-auto min-h-[100dvh] pb-42" style={{ backgroundColor: "#f8fafc" }}>
+    <div className="fixed inset-0 left-0 md:left-20 z-20 bg-slate-55 p-6 md:p-10 overflow-y-auto min-h-screen pb-42" style={{ backgroundColor: "#f8fafc" }}>
       <div className="max-w-6xl mx-auto space-y-8 text-left">
         <div className="bg-slate-900 p-6 md:p-8 rounded-2xl text-white flex justify-between items-center bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.1),transparent)]">
           <div>

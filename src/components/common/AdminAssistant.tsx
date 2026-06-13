@@ -126,7 +126,7 @@ export default function AdminAssistant({ activeTab, role, systemContext }: Admin
             initial={{ opacity: 0, y: 100, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 100, scale: 0.9 }}
-            className="fixed inset-0 md:inset-auto md:bottom-28 md:right-8 z-[1001] w-full md:w-[400px] h-[100dvh] md:h-[520px] bg-slate-950 border-t md:border border-slate-800 rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+            className="fixed inset-0 md:inset-auto md:bottom-28 md:right-8 z-[1001] w-full md:w-[400px] h-screen md:h-[520px] bg-slate-950 border-t md:border border-slate-800 rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Header */}
             <div className="pt-10 pb-3 px-4 md:p-5 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 animate-fadeIn">

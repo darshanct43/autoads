@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { storage } from '../lib/firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { copyToClipboard } from '@/lib/utils';
 
 export const FirebaseStorageTester: React.FC = () => {
     const [status, setStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
@@ -92,8 +93,8 @@ export const FirebaseStorageTester: React.FC = () => {
                     <p className="mb-2">Run this in your Google Cloud Shell to enable uploads:</p>
                     <button 
                         onClick={() => {
-                            navigator.clipboard.writeText(`gsutil cors set - gs://autoads-18b26.appspot.com <<EOF\n[{"origin": ["*"], "method": ["GET", "PUT", "POST", "DELETE", "HEAD"], "responseHeader": ["Content-Type"], "maxAgeSeconds": 3600}]\nEOF`);
-                            alert("Command copied!");
+                            copyToClipboard(`gsutil cors set - gs://autoads-18b26.appspot.com <<EOF\n[{"origin": ["*"], "method": ["GET", "PUT", "POST", "DELETE", "HEAD"], "responseHeader": ["Content-Type"], "maxAgeSeconds": 3600}]\nEOF`);
+                            console.log("CORS command copied!");
                         }}
                         className="mb-2 px-2 py-1 bg-slate-700 text-white rounded text-[10px] hover:bg-slate-600 block w-full"
                     >

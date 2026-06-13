@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 export default defineConfig({
@@ -10,8 +9,7 @@ export default defineConfig({
     target: 'chrome91',
   },
   plugins: [
-    react(),
-    tailwindcss()
+    react()
   ],
   resolve: {
     alias: {
