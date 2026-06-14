@@ -54,7 +54,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <RotateCcw size={14} />
             Reboot Interface
           </button>
-          {process.env.NODE_ENV !== 'production' && (
+          {import.meta.env.MODE !== 'production' && (
             <pre className="mt-6 p-4 bg-slate-900 text-red-400 text-[8px] font-mono rounded-lg overflow-auto max-w-full text-left">
               {this.state.error?.toString()}
             </pre>

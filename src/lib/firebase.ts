@@ -26,6 +26,8 @@ import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 setLogLevel('error'); // Suppress verbose warning logs
 
+console.log("[FORENSIC] [Firebase] File loading started");
+
 const firebaseConfig = {
   apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey) as string,
   authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain) as string,
@@ -35,42 +37,79 @@ const firebaseConfig = {
   appId: (import.meta.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId) as string,
 };
 
-console.log("[Firebase] Initializing with project:", firebaseConfig.projectId);
+console.log("[FORENSIC] [Firebase] Config keys resolved. Project ID:", firebaseConfig.projectId);
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-(window as any)._firebaseApp = app;
+let app;
+try {
+  console.log("[FORENSIC] [Firebase] Getting or initializing App instance...");
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  (window as any)._firebaseApp = app;
+  console.log("[FORENSIC] [Firebase] App instance initialized successfully");
+} catch (appErr) {
+  console.error("[FORENSIC] [Firebase] CRITICAL App initialization failed!", appErr);
+  throw appErr;
+}
 
 const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || (firebaseAppletConfig as any).firestoreDatabaseId || '(default)');
+console.log("[FORENSIC] [Firebase] Database ID resolved as:", firestoreDbId);
 
-const dbInstance: Firestore = initializeFirestore(app, {
-  localCache: memoryLocalCache()
-}, firestoreDbId === '(default)' ? undefined : firestoreDbId);
+let dbInstance: Firestore;
+try {
+  console.log("[FORENSIC] [Firebase] Initializing Firestore...");
+  dbInstance = initializeFirestore(app, {
+    localCache: memoryLocalCache()
+  }, firestoreDbId === '(default)' ? undefined : firestoreDbId);
+  console.log("[FORENSIC] [Firebase] Firestore initialized successfully");
+} catch (dbErr) {
+  console.error("[FORENSIC] [Firebase] CRITICAL Firestore initialization failed!", dbErr);
+  throw dbErr;
+}
 
 export const db: Firestore = dbInstance;
-console.log("[Firebase] Firestore initialized with memory cache. Database ID:", firestoreDbId);
 
 // Verify connectivity gracefully
-if (typeof window !== 'undefined' && localStorage.getItem('auto_ads_offline_mode') !== 'true') {
+let initialOfflineMode = false;
+try {
+  if (typeof window !== 'undefined') {
+    initialOfflineMode = localStorage.getItem('auto_ads_offline_mode') === 'true';
+    console.log("[FORENSIC] [Firebase] Read offline mode flag:", initialOfflineMode);
+  }
+} catch (e) {
+  console.warn("[FORENSIC] [Firebase] localStorage access restricted or blocked in this environment:", e);
+}
+
+if (typeof window !== 'undefined' && !initialOfflineMode) {
+  console.log("[FORENSIC] [Firebase] Launching async drivers probe...");
   getDocs(collection(db, 'drivers')).then(snap => {
-    console.log("[CHECK] Drivers collection size at startup:", snap.size);
+    console.log("[FORENSIC] [Firebase] Async probe succeeded. Drivers count:", snap.size);
   }).catch(err => {
-    console.warn("[CHECK] Drivers collection read status (ignore if not logged in):", (err as any).message || err);
+    console.warn("[FORENSIC] [Firebase] Async probe warning (usually expected before login):", (err as any).message || err);
   });
 }
 
 // Explicitly initialize Auth with local persistence and popup resolver
 let authInstance: Auth;
 try {
+  console.log("[FORENSIC] [Firebase] Initializing Auth with local persistence...");
   authInstance = initializeAuth(app, {
     persistence: browserLocalPersistence,
     popupRedirectResolver: browserPopupRedirectResolver,
   });
+  console.log("[FORENSIC] [Firebase] Auth initialized with persistence");
 } catch (e) {
-  authInstance = getAuth(app);
+  console.warn("[FORENSIC] [Firebase] Auth persistence initialization failed, falling back to standard getAuth", e);
+  try {
+    authInstance = getAuth(app);
+    console.log("[FORENSIC] [Firebase] Auth fallback getAuth succeeded");
+  } catch (fallbackErr) {
+    console.error("[FORENSIC] [Firebase] CRITICAL Auth initialization failed completely!", fallbackErr);
+    throw fallbackErr;
+  }
 }
 
 export const auth = authInstance;
 export const storage: FirebaseStorage = getStorage(app);
+console.log("[FORENSIC] [Firebase] Module loading completed!");
 
 // Connection verification test with higher resilience
 let loginInProgress = false;

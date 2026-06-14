@@ -281,7 +281,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   const errMessage = (error as any)?.message || String(error);
-  const isOffline = typeof window !== 'undefined' && localStorage.getItem('auto_ads_offline_mode') === 'true';
+  let isOffline = false;
+  try {
+    isOffline = typeof window !== 'undefined' && localStorage.getItem('auto_ads_offline_mode') === 'true';
+  } catch (e) {
+    console.warn("[FirebaseService] localStorage read blocked:", e);
+  }
   const isPermissionError = errMessage.toLowerCase().includes('permission') || errMessage.toLowerCase().includes('insufficient');
   
   console.warn(`[Firebase Error] [${operationType}] at [${path}]: ${errMessage}`);

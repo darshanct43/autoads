@@ -21,33 +21,60 @@ import FranchisePortal from './components/portals/FranchisePortal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 
+// Safe storage helpers for platform sandbox resilience
+const safeGetItem = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.warn("[Storage] Read access blocked or unsupported in this container", e);
+    return null;
+  }
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn("[Storage] Write access blocked or unsupported in this container", e);
+  }
+};
+
+const safeRemoveItem = (key: string): void => {
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {
+    console.warn("[Storage] Delete access blocked or unsupported in this container", e);
+  }
+};
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [showBoot, setShowBoot] = useState(true);
 
-  console.log("[DEBUG] App render state:", { user: user?.email, userRole, loading, showBoot });
+  console.log("[FORENSIC] [App] Rendering app with state:", { userExists: !!user, email: user?.email, userRole, loading, showBoot });
 
   useEffect(() => {
-    // Safety Force Start: If still stuck in boot or loading after 7 seconds, force continue
+    // Safety Force Start: If still stuck in boot or loading after 3.5 seconds, force continue
+    console.log("[FORENSIC] [App] Registering 3.5s safety load timeout hook");
     const timer = setTimeout(() => {
       if (showBoot || loading) {
-        console.warn("[DEBUG] Safety timeout triggered: forcing showBoot=false, loading=false");
+        console.warn("[FORENSIC] [App] SAFETY TRIGGERED: Loading had stalled. Forcing main interface activation!");
         setShowBoot(false);
         setLoading(false);
       }
-    }, 7000);
+    }, 3500);
     return () => clearTimeout(timer);
   }, [showBoot, loading]);
 
   useEffect(() => {
+    console.log("[FORENSIC] [App] Initialization hook launched");
     // Check for offline debug bypass session
-    console.log("[DEBUG] App initialization hook started");
-    const isOffline = localStorage.getItem('auto_ads_offline_mode') === 'true';
+    const isOffline = safeGetItem('auto_ads_offline_mode') === 'true';
     if (isOffline) {
-      console.log("[DEBUG] Offline mode detected");
-      const offlineRole = (localStorage.getItem('auto_ads_offline_role') as UserRole) || 'CUSTOMER';
+      const offlineRole = (safeGetItem('auto_ads_offline_role') as UserRole) || 'CUSTOMER';
+      console.log("[FORENSIC] [App] BYPASS ACTIVED: Offline mode enabled for role:", offlineRole);
       setUser({ uid: 'OFFLINE_UID', email: `${offlineRole.toLowerCase()}@autoads.in` } as any);
       setUserRole(offlineRole);
       setLoading(false);
@@ -55,17 +82,18 @@ export default function App() {
       return;
     }
 
+    console.log("[FORENSIC] [App] Registering Firebase Auth state change subscriber");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      console.log("[DEBUG] Auth state changed:", firebaseUser?.email || "No user");
+      console.log("[FORENSIC] [App] Firebase Auth state changed event received. User authenticated:", !!firebaseUser, firebaseUser?.email);
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
           const emailLower = firebaseUser.email?.toLowerCase() || '';
           
-          console.log("[DEBUG] Fetching profile for:", firebaseUser.uid);
+          console.log("[FORENSIC] [App] Profile check task starting for user UID:", firebaseUser.uid);
           const profile = await firebaseService.getUserProfile(firebaseUser.uid);
           const driverProfile = await firebaseService.getDriverProfile(firebaseUser.uid);
-          console.log("[DEBUG] Profile fetched:", profile?.role, "Driver profile:", !!driverProfile);
+          console.log("[FORENSIC] [App] User records fetched. Applet system profile role:", profile?.role, "Driver record exists:", !!driverProfile);
           
           let role: UserRole = 'CUSTOMER';
           
@@ -85,29 +113,35 @@ export default function App() {
             role = profile.role as UserRole;
           }
 
-          if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
+          if (safeGetItem('auto_ads_is_terminal') === 'true') {
+            console.log("[FORENSIC] [App] Overriding role to DEVICE due to is_terminal flat");
             role = 'DEVICE';
           }
           
+          console.log("[FORENSIC] [App] Determined role outcome:", role);
           setUserRole(role);
         } catch (err) {
-          console.error("Error fetching user profile or determining role:", err);
+          console.error("[FORENSIC] [App] Non-fatal error while fetching profile, falling back gracefully to CUSTOMER:", err);
           setUserRole('CUSTOMER');
         }
       } else {
+        console.log("[FORENSIC] [App] No authenticated user detected, cleaning role state");
         setUserRole(null);
       }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      console.log("[FORENSIC] [App] Cleanup hook triggered, unsubscribing from auth state updates");
+      unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
     try {
-      localStorage.removeItem('auto_ads_is_terminal');
-      localStorage.removeItem('auto_ads_offline_mode');
-      localStorage.removeItem('auto_ads_offline_role');
+      safeRemoveItem('auto_ads_is_terminal');
+      safeRemoveItem('auto_ads_offline_mode');
+      safeRemoveItem('auto_ads_offline_role');
       await signOut(auth).catch(() => {});
       setUser(null);
       setUserRole(null);

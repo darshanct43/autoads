@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import adminAiHandler, { getSystemData } from './backend/admin-ai.js';
 import uploadHandler from './lib/upload.js';
 import chatHandler from './backend/chat.js';
@@ -75,14 +76,37 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    console.log(`[Server] Serving static files from: ${distPath}`);
+    // Highly robust path resolution to prevent ENOENT errors
+    // Since server.cjs is built to the 'dist' folder, __dirname refers directly to 'dist'.
+    const possiblePaths = [
+      typeof __dirname !== 'undefined' ? path.resolve(__dirname) : '',
+      path.join(process.cwd(), 'dist'),
+      path.resolve('./dist')
+    ].filter(p => !!p);
+
+    let distPath = path.join(process.cwd(), 'dist');
+    for (const p of possiblePaths) {
+      if (fs.existsSync(path.join(p, 'index.html'))) {
+        distPath = p;
+        break;
+      }
+    }
+
+    console.log(`[Server] Production Mode Active. Selected distPath: ${distPath}`);
+    const indexHtmlExists = fs.existsSync(path.join(distPath, 'index.html'));
+    console.log(`[Server] index.html exists verification at target: ${indexHtmlExists}`);
+
     app.use(express.static(distPath));
     app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
     app.use('/videos', express.static(path.join(process.cwd(), 'videos')));
+    
     app.get('*', (req, res) => {
       console.log(`[Server] Serving index.html for request: ${req.url}`);
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (indexHtmlExists) {
+        res.sendFile(path.join(distPath, 'index.html'));
+      } else {
+        res.status(404).send('Application build is in progress or index.html is missing. Please reload.');
+      }
     });
   }
 
