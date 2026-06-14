@@ -14,7 +14,11 @@ dist/
 Thumbs.db
 
 # Mobile/Android/Flutter Junk (Previously leaked)
-android/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.iml
 ios/
 flutter/
 .gradle/
