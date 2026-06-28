@@ -12,12 +12,13 @@ interface SupportSidebarProps {
   setActiveTab: (tab: any) => void;
   onLogout: () => void;
   userRole?: string;
+  userEmail?: string;
   badgeCounts?: Record<string, number>;
   hasPermission?: (key: string) => boolean;
 }
 
-export default function SupportSidebar({ activeTab, setActiveTab, onLogout, userRole, badgeCounts = {}, hasPermission = () => true }: SupportSidebarProps) {
-  const isManager = userRole === 'SUPPORT_MANAGER' || userRole === 'SUPPORT_TEAM' || userRole === 'ADMIN' || auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com';
+export default function SupportSidebar({ activeTab, setActiveTab, onLogout, userRole, userEmail, badgeCounts = {}, hasPermission = () => true }: SupportSidebarProps) {
+  const isManager = userRole === 'SUPPORT_MANAGER' || userRole === 'SUPPORT_TEAM' || userRole === 'ADMIN' || auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com' || userEmail?.toLowerCase() === 'vijayathrishu@gmail.com';
   const isAdmin = userRole === 'ADMIN';
   const [isExpanded, setIsExpanded] = React.useState(true);
 

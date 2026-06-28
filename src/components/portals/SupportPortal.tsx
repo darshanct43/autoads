@@ -405,7 +405,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
   }, []);
 
   const hasPermission = (permKey: string) => {
-    if (auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com') return true;
+    if (auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com' || userProfile?.email?.toLowerCase() === 'vijayathrishu@gmail.com') return true;
     if (userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'ADMIN') return true;
     if (userProfile?.role === 'SUPPORT_TEAM') {
       if (!userProfile?.permissions || Object.keys(userProfile.permissions).length === 0) {
@@ -430,7 +430,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
       }
       return !!userProfile?.permissions?.[permKey];
     }
-    return true; 
+    return false; 
   };
 
   // Sync plans from firebase to keep local and database aligned
@@ -1202,6 +1202,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
         setActiveTab={setActiveTab} 
         onLogout={onLogout} 
         userRole={userProfile?.role}
+        userEmail={userProfile?.email}
         badgeCounts={badgeCounts}
         hasPermission={hasPermission}
       />
