@@ -11,6 +11,7 @@ import SafeRideView from './components/public/SafeRideView';
 import DevicePortal from './components/portals/DevicePortal';
 import LoaderPage from './components/public/LoaderPage';
 import BrandIntroduction from './components/common/BrandIntroduction';
+import BootAnimation from './components/common/BootAnimation';
 import { UserRole } from './types';
 import { firebaseService } from './services/firebaseService';
 import { MotionConfig } from 'motion/react';
@@ -19,12 +20,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showIntro, setShowIntro] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('auto_ads_intro_completed') !== 'true';
-    }
-    return true;
-  });
+  const [showBoot, setShowBoot] = useState(true);
+  const [showIntro, setShowIntro] = useState(true);
 
   useEffect(() => {
     // Robust offline-first recovery: check if offline session is active
@@ -264,6 +261,10 @@ export default function App() {
 
     // Require Auth for all other routes
     if (!user || !role) {
+       if (showBoot) {
+          console.log("ACTUAL_COMPONENT_RENDERED = BootAnimation");
+          return <BootAnimation onComplete={() => setShowBoot(false)} />;
+       }
        console.log("[FORENSIC] No user/role, checking showIntro:", showIntro);
        if (showIntro) {
           console.log("ACTUAL_COMPONENT_RENDERED = BrandIntroduction");

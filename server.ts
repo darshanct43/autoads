@@ -12,6 +12,7 @@ import debugRazorpayHandler from './api/debug-razorpay.js';
 import razorpayHealthHandler from './api/razorpay-health.js';
 import createStaffHandler from './api/create-staff.js';
 import razorpayWebhookHandler from './api/razorpay-webhook.js';
+import envSecurityHandler from './api/env-security.js';
 
 import * as dotenv from 'dotenv';
 // Load .env only if it exists, otherwise trust the system environment
@@ -67,6 +68,7 @@ async function startServer() {
   app.get('/api/system-metrics', systemMetricsHandler as any);
   app.post('/api/create-staff', createStaffHandler as any);
   app.post('/api/razorpay-webhook', razorpayWebhookHandler as any);
+  app.post('/api/env-security', envSecurityHandler as any);
 
   app.get('/api/payment-config', (req, res) => {
     // Determine configured gateway: favor database/environment

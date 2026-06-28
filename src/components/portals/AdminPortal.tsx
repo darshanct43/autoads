@@ -29,6 +29,7 @@ import {
   Video,
   ShieldCheck,
   Shield,
+  ShieldAlert,
   FileText,
   Lock,
   Gift,
@@ -100,6 +101,7 @@ import { WithdrawalsTab } from "./tabs/WithdrawalsTab";
 import { PaymentsTab } from "./tabs/PaymentsTab";
 import { TicketsTab } from "./tabs/TicketsTab";
 import { UsersTab } from "./tabs/UsersTab";
+import { EnvSecurityTab } from "./tabs/EnvSecurityTab";
 import RemoteConnectCenter from "./hq/RemoteConnectCenter";
 import OperationsCenter from "./hq/OperationsCenter";
 import TerritoryCommandCenter from "./hq/TerritoryCommandCenter";
@@ -2294,6 +2296,8 @@ export default function AdminPortal({
             </div>
           </div>
         );
+      case "ENV_SECURITY":
+        return <EnvSecurityTab user={auth.currentUser} activeRole="ADMIN" />;
       default:
         console.log('DEFAULT TAB HIT', activeTab);
         return (
@@ -2443,6 +2447,7 @@ export default function AdminPortal({
             // { id: "FRANCHISES", icon: Shield, title: "Franchises" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
+            { id: "ENV_SECURITY", icon: ShieldAlert, title: "Env Security" },
             { id: "SETTINGS", icon: Settings, title: "System Settings" },
           ].map((tab) => (
             <button
@@ -2588,6 +2593,7 @@ export default function AdminPortal({
                   // { id: "FRANCHISES", icon: Shield, title: "Franchises" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
+                  { id: "ENV_SECURITY", icon: ShieldAlert, title: "Env Security" },
                   { id: "SETTINGS", icon: Settings, title: "System Settings" },
                 ].map((item) => (
                   <button
