@@ -871,18 +871,14 @@ async function startServer() {
     const indexHtmlExists = fs.existsSync(path.join(distPath, 'index.html'));
     console.log(`[Server] index.html exists verification at target: ${indexHtmlExists}`);
 
-    if (indexHtmlExists) {
-      app.use(express.static(distPath));
-    } else {
-      console.warn(`[Server] WARNING: index.html not found in ${distPath}. Build might be incomplete.`);
-    }
-
+    app.use(express.static(distPath));
     app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
     app.use('/videos', express.static(path.join(process.cwd(), 'videos')));
     
     app.get('*', (req, res) => {
-      if (indexHtmlExists) {
-        res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
       } else {
         res.status(404).send('Application build is in progress or index.html is missing. Please reload.');
       }

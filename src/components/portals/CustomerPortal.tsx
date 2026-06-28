@@ -1092,6 +1092,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       if (!currentOrderData) return;
       console.log("ORDER_CREATED");
 
+      /*if (currentOrderData.is_simulated) {
+        setShowSandboxOverlay(true);
+        return;
+      }*/
+
       const rawRazorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || "";
       const razorpayKey = String(rawRazorpayKey).trim().replace(/^["']|["']$/g, '');
       
@@ -2000,8 +2005,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           <div
             className="space-y-8 min-h-[500px]"
           >
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-6">
+            <div className="space-y-6">
                 <div className="flex items-center justify-between bg-white px-8 py-10 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-xl relative overflow-hidden group">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-3xl group-hover:bg-amber-500/10 transition-all pointer-events-none" />
                   <div className="space-y-2 relative z-10">
@@ -2215,7 +2219,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         className={cn(
                           "relative rounded-2xl p-5 cursor-pointer transition-all duration-500 overflow-hidden group border",
                           activeCategory === cat.id 
-                            ? `border-${cat.color}-500/50 bg-[#12141c] shadow-[0_0_30px_-5px_rgba(var(--${cat.color}-500),0.3)]` 
+                            ? (cat.id === 'BASIC' ? 'border-emerald-500/50 bg-[#12141c] shadow-[0_0_30px_-5px_rgba(16,185,129,0.3)]' :
+                               cat.id === 'ENTERPRISE' ? 'border-orange-500/50 bg-[#12141c] shadow-[0_0_30px_-5px_rgba(249,115,22,0.3)]' :
+                               'border-purple-500/50 bg-[#12141c] shadow-[0_0_30px_-5px_rgba(168,85,247,0.3)]')
                             : "border-slate-800/50 bg-[#0f111a] hover:bg-[#151722] hover:border-slate-700"
                         )}
                       >
@@ -2223,7 +2229,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         {activeCategory === cat.id && (
                           <motion.div
                             layoutId="activeCategoryGlow"
-                            className={cn("absolute inset-0 bg-gradient-to-b opacity-50", cat.glow)}
+                            className={cn("absolute inset-0 bg-gradient-to-b opacity-50", 
+                              cat.id === 'BASIC' ? 'from-emerald-500/20 to-transparent' :
+                              cat.id === 'ENTERPRISE' ? 'from-orange-500/20 to-transparent' :
+                              'from-purple-500/20 to-transparent'
+                            )}
                             initial={false}
                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
                           />
@@ -2233,7 +2243,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           <div className={cn(
                             "w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-300",
                             activeCategory === cat.id 
-                              ? `bg-${cat.color}-500/20 text-${cat.color}-400 ring-1 ring-${cat.color}-500/50` 
+                              ? (cat.id === 'BASIC' ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/50' :
+                                 cat.id === 'ENTERPRISE' ? 'bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/50' :
+                                 'bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/50')
                               : "bg-slate-800/50 text-slate-500 group-hover:text-slate-300 group-hover:bg-slate-800"
                           )}>
                             {cat.icon === 'store' && <Store size={24} className={activeCategory === cat.id ? "drop-shadow-[0_0_10px_rgba(52,211,153,0.8)]" : ""} />}
@@ -2243,7 +2255,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           <div>
                             <h4 className={cn(
                               "text-xs font-black tracking-widest uppercase mb-1 transition-colors",
-                              activeCategory === cat.id ? `text-${cat.color}-400` : "text-slate-300"
+                              activeCategory === cat.id 
+                                ? (cat.id === 'BASIC' ? 'text-emerald-400' :
+                                   cat.id === 'ENTERPRISE' ? 'text-orange-400' :
+                                   'text-purple-400')
+                                : "text-slate-300"
                             )}>
                               {cat.label}
                             </h4>
@@ -2272,6 +2288,21 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                           const categoryTheme = activeCategory === 'BASIC' ? 'emerald' : activeCategory === 'ENTERPRISE' ? 'orange' : 'purple';
                           const isSelected = activePlan === plan.id;
                           
+                          // Static compiled class names for Tailwind matching
+                          const checkmarkColorClass = activeCategory === 'BASIC' ? 'text-emerald-500' : activeCategory === 'ENTERPRISE' ? 'text-orange-500' : 'text-purple-500';
+                          const cardBorderClass = isSelected && !isMiddle
+                            ? (activeCategory === 'BASIC' ? 'border-emerald-500/50 shadow-[0_0_30px_-10px_rgba(16,185,129,0.3)]' :
+                               activeCategory === 'ENTERPRISE' ? 'border-orange-500/50 shadow-[0_0_30px_-10px_rgba(249,115,22,0.3)]' :
+                               'border-purple-500/50 shadow-[0_0_30px_-10px_rgba(168,85,247,0.3)]')
+                            : "";
+                          const buttonThemeClass = isMiddle
+                            ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]'
+                            : isSelected
+                              ? (activeCategory === 'BASIC' ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.4)]' :
+                                 activeCategory === 'ENTERPRISE' ? 'bg-orange-600 hover:bg-orange-500 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)]' :
+                                 'bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]')
+                              : 'bg-slate-800/50 hover:bg-slate-700 text-slate-300';
+                          
                           return (
                           <div
                             key={plan.id}
@@ -2279,7 +2310,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             className={cn(
                               "relative rounded-[2rem] p-6 transition-all duration-300 cursor-pointer border flex flex-col text-center",
                               isMiddle ? "bg-gradient-to-b from-[#1a1525] to-[#0f0c16] border-purple-500/30 shadow-2xl lg:-translate-y-4 lg:scale-105" : "bg-[#11131a] border-slate-800/60 hover:bg-[#151822]",
-                              isSelected && !isMiddle ? `border-${categoryTheme}-500/50 shadow-[0_0_30px_-10px_rgba(var(--${categoryTheme}-500),0.3)]` : ""
+                              cardBorderClass
                             )}
                           >
                             {isMiddle && (
@@ -2309,23 +2340,23 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                             <div className="space-y-3 mb-8 flex-1 text-left px-2">
                                {activeCategory === 'BASIC' && (
                                  <>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.maxScreens} Autos</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'Basic Analytics'}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[1] || 'Email Support'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.maxScreens} Autos</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.features?.[0] || 'Basic Analytics'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.features?.[1] || 'Email Support'}</div>
                                  </>
                                )}
                                {activeCategory === 'ENTERPRISE' && (
                                  <>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.fleetSize || plan.maxScreens + ' Autos'}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.citiesSupported || 'Multi City'}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'Advanced Analytics'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.fleetSize || plan.maxScreens + ' Autos'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.citiesSupported || 'Multi City'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.features?.[0] || 'Advanced Analytics'}</div>
                                  </>
                                )}
                                {activeCategory === 'AGENCY' && (
                                  <>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.clients || 'Clients'}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.revenueShare || 'Revenue Share'}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'White Label'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.clients || 'Clients'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.revenueShare || 'Revenue Share'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={checkmarkColorClass} /> {plan.features?.[0] || 'White Label'}</div>
                                  </>
                                )}
                             </div>
@@ -2339,9 +2370,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                               }}
                               className={cn(
                                 "w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                                isSelected || isMiddle 
-                                  ? `bg-${isMiddle ? 'purple' : categoryTheme}-600 hover:bg-${isMiddle ? 'purple' : categoryTheme}-500 text-white shadow-[0_0_20px_rgba(var(--${isMiddle ? 'purple' : categoryTheme}-500),0.4)]`
-                                  : "bg-slate-800/50 hover:bg-slate-700 text-slate-300"
+                                buttonThemeClass
                               )}
                             >
                               CHOOSE PLAN
@@ -2352,7 +2381,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     </AnimatePresence>
                   </div>
                 </div>
-            </div>
           </div>
         )}
 
