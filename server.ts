@@ -16,7 +16,7 @@ import razorpayWebhookHandler from './api/razorpay-webhook.js';
 import * as dotenv from 'dotenv';
 // Load .env only if it exists, otherwise trust the system environment
 if (fs.existsSync(path.join(process.cwd(), '.env'))) {
-  dotenv.config();
+  dotenv.config({ override: true });
 }
 
 import { getCredential, printAudit } from './lib/env.js';

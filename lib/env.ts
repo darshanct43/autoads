@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 
 // Initialize dotenv to load environment variables from the .env file
-dotenv.config();
+dotenv.config({ override: true });
 
 export function loadEnvConfig(): Record<string, string> {
   return (process.env as Record<string, string>) || {};
