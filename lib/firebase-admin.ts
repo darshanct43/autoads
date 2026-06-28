@@ -25,6 +25,41 @@ let serviceAccount = parseServiceAccount(rawSA);
 
 if (!serviceAccount) {
   try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const lines = content.split('\n');
+      let saJsonLines: string[] = [];
+      let insideSA = false;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('FIREBASE_SERVICE_ACCOUNT=')) {
+          insideSA = true;
+          const val = line.substring(line.indexOf('=') + 1).trim();
+          saJsonLines.push(val);
+          if (val.endsWith('}')) break;
+          continue;
+        }
+        if (insideSA) {
+          saJsonLines.push(line);
+          if (trimmed === '}') {
+            break;
+          }
+        }
+      }
+      if (saJsonLines.length > 0) {
+        const rawJson = saJsonLines.join('\n');
+        serviceAccount = JSON.parse(rawJson);
+        console.log('[FIREBASE] Admin SDK parsed service account via multi-line .env fallback reader.');
+      }
+    }
+  } catch (e: any) {
+    console.warn('[FIREBASE] Fallback multi-line .env service account parsing failed:', e.message);
+  }
+}
+
+if (!serviceAccount) {
+  try {
     const saPath = path.resolve(process.cwd(), 'firebase-service-account.json');
     if (fs.existsSync(saPath)) {
       rawSA = fs.readFileSync(saPath, 'utf8');
