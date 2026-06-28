@@ -56,10 +56,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     console.log(`[RAZORPAY] Signature verified successfully.`);
+    console.log("LOG_1_SIGNATURE_VERIFIED");
 
     // CAPTURE PAYMENT USING THE MATCHING SECRET
     const razorpay = new Razorpay({ key_id, key_secret });
     console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
+    console.log("LOG_2_BEFORE_CAPTURE");
     try {
       await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
     } catch (err: any) {
@@ -82,6 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         throw err;
       }
     }
+    console.log("LOG_3_AFTER_CAPTURE");
 
     const { FieldValue } = admin.firestore;
 
@@ -101,7 +104,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     
     // Write to payments/{paymentId}
+    console.log("LOG_4_BEFORE_PAYMENT_WRITE");
     await dbAdm.collection('payments').doc(razorpay_payment_id).set(paymentRecord);
+    console.log("LOG_5_AFTER_PAYMENT_WRITE");
     console.log("[LOG] [PAYMENT_WRITE] Payment document successfully written to payments/" + razorpay_payment_id);
 
     let resolvedCampaignId = finalCampaignId;
@@ -124,12 +129,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error("Error fetching campaign data:", fetchErr);
         }
 
+        console.log("LOG_6_BEFORE_CAMPAIGN_UPDATE");
         await dbAdm.collection('campaigns').doc(finalCampaignId).set({
           status: 'ACTIVE',
           paymentStatus: 'PAID',
           paymentReceived: true,
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
+        console.log("LOG_7_AFTER_CAMPAIGN_UPDATE");
         console.log("[LOG] [CAMPAIGN_UPDATE] Campaign updated to status ACTIVE and paymentStatus PAID:", finalCampaignId);
     } else if (campaignData) {
         const campaignDataToSave = {
@@ -174,12 +181,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createdAt: FieldValue.serverTimestamp()
     };
 
+    console.log("LOG_8_BEFORE_LEDGER_WRITE");
     const ledgerRef = await dbAdm.collection('revenueLedger').add(ledgerRecord);
+    console.log("LOG_9_AFTER_LEDGER_WRITE");
     console.log("LOG_FIREBASE_REVENUE_LEDGER_WRITE_RESULT: Revenue ledger record added with ID:", ledgerRef.id);
 
+    console.log("LOG_10_SUCCESS_RESPONSE");
     console.log("[LOG] [VERIFY_PAYMENT] All payments and campaign documents updated successfully. Returning SUCCESS.");
     res.status(200).json({ success: true, status: "SUCCESS" });
   } catch (error: any) {
+    console.error("ACTUAL_ERROR_NAME=", error.name);
+    console.error("ACTUAL_ERROR_MESSAGE=", error.message);
+    console.error("ACTUAL_ERROR_STACK=", error.stack);
+    
     console.error("[RAZORPAY] Verify error:", error);
     let errorMsg = error?.message || "Credential mismatch";
     if (errorMsg.toString().toLowerCase().includes("authentication") || errorMsg.toString().toLowerCase().includes("auth")) {
