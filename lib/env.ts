@@ -1,41 +1,20 @@
-import fs from 'fs';
-import path from 'path';
+import * as dotenv from 'dotenv';
 
-let _envConfig: Record<string, string> | null = null;
+// Initialize dotenv to load environment variables from the .env file
+dotenv.config();
 
 export function loadEnvConfig(): Record<string, string> {
-  if (_envConfig) return _envConfig;
-
-  _envConfig = {};
-  const envPath = path.join(process.cwd(), '.env.example');
-
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    content.split('\n').forEach(line => {
-      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
-      if (match) {
-        const key = match[1];
-        let value = match[2] || '';
-        value = value.trim().replace(/^["']|["']$/g, '');
-        _envConfig![key] = value;
-      }
-    });
-  } else {
-    console.warn("[EnvLoader] .env.example not found");
-  }
-
-  return _envConfig;
+  return (process.env as Record<string, string>) || {};
 }
 
 export function getCredential(key: string): string {
-  const config = loadEnvConfig();
-  return config[key] || '';
+  return process.env[key] || '';
 }
 
 // Audit helpers
 export function printAudit() {
-  console.log("RAZORPAY_KEY_SOURCE = .env.example");
-  console.log("FIREBASE_KEY_SOURCE = .env.example");
-  console.log("GEMINI_KEY_SOURCE = .env.example");
-  console.log("SOURCE_OF_TRUTH = .env.example");
+  console.log("RAZORPAY_KEY_SOURCE = process.env");
+  console.log("FIREBASE_KEY_SOURCE = process.env");
+  console.log("GEMINI_KEY_SOURCE = process.env");
+  console.log("SOURCE_OF_TRUTH = process.env");
 }
