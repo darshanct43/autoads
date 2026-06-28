@@ -64,6 +64,17 @@ async function startServer() {
   app.post('/api/razorpay-webhook', razorpayWebhookHandler as any);
   app.post('/api/env-security', envSecurityHandler as any);
 
+  app.get('/api/env-check', (req, res) => {
+    res.json({
+      nodeEnv: process.env.NODE_ENV,
+      hasRazorpayKey: !!process.env.RAZORPAY_KEY_ID,
+      hasRazorpaySecret: !!process.env.RAZORPAY_KEY_SECRET,
+      getCredentialKey: getCredential('RAZORPAY_KEY_ID'),
+      cwd: process.cwd(),
+      timestamp: new Date().toISOString()
+    });
+  });
+
   app.get('/api/payment-config', (req, res) => {
     // Determine configured gateway: favor database/environment
     res.json({
