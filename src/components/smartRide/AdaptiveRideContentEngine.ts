@@ -25,8 +25,8 @@ export const KIDS_ENTERTAINMENT_COLLECTION: RideContentItem[] = [
     id: "kids_cartoon_01",
     title: "Chuggington Train Ride Adventure 🚂",
     category: "kids-entertainment",
-    type: "VIDEO",
-    url: "/uploads/1779860520885-1000434856.mp4",
+    type: "IMAGE",
+    url: "https://placehold.co/800x600/png?text=Safe+Ride",
     duration: 15,
     safeForChildren: true,
     familySafe: true,
@@ -36,8 +36,8 @@ export const KIDS_ENTERTAINMENT_COLLECTION: RideContentItem[] = [
     id: "kids_funny_02",
     title: "Funny Mascot Forest Run 🐿️",
     category: "kids-entertainment",
-    type: "VIDEO",
-    url: "/uploads/1779860520885-1000434856.mp4",
+    type: "IMAGE",
+    url: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?q=80&w=800&auto=format&fit=crop",
     duration: 12,
     safeForChildren: true,
     familySafe: true,
@@ -160,8 +160,8 @@ export const QUIET_CONTENT_COLLECTION: RideContentItem[] = [
     id: "quiet_ocean",
     title: "Serene Waves & Calming Breeze 🌊",
     category: "quiet-ambient",
-    type: "VIDEO",
-    url: "/uploads/friends_ipl_v2.mp4",
+    type: "IMAGE",
+    url: "https://images.unsplash.com/photo-1518837640240-62287c05051a?q=80&w=800&auto=format&fit=crop",
     duration: 15,
     safeForChildren: true,
     familySafe: true,
@@ -222,6 +222,11 @@ export class AdaptiveRideContentEngine {
     isSchoolTime: boolean,
     customBlockedCategories: string[] = []
   ): RideContentItem[] {
+    // PRODUCTION RULE: Strictly no fallback media injection for unassigned terminals
+    if (!rawAdvertisements || rawAdvertisements.length === 0) {
+      return [];
+    }
+
     const finalMode = overrideMode.toUpperCase();
 
     // 1. If Kids Mode is selected (either CHILDREN, SCHOOL_TRIP, or KIDS override)
@@ -258,7 +263,7 @@ export class AdaptiveRideContentEngine {
           combined.push(poolEntertainment[index]);
         }
       }
-      return combined.length > 0 ? combined : KIDS_ENTERTAINMENT_COLLECTION;
+      return combined;
     }
 
     // 2. If Family Mode is selected
@@ -286,7 +291,7 @@ export class AdaptiveRideContentEngine {
           list.push(poolFamily[i % poolFamily.length]);
         }
       }
-      return list.length > 0 ? list : FAMILY_CONTENT_COLLECTION;
+      return list;
     }
 
     // 3. If Quiet/Silent Ride is selected
@@ -309,8 +314,8 @@ export class AdaptiveRideContentEngine {
 
     // 5. Normal Mode or Default Scheduler School Mode
     if (isSchoolTime) {
-      // Re-trigger School children prioritisation logic automatically
-      return [...KIDS_ENTERTAINMENT_COLLECTION, ...KIDS_SAFE_ADS_COLLECTION].slice(0, 8);
+      // PRODUCTION RULE: No fallback media even during school hours
+      return [];
     }
 
     // Fallback: Default mapped raw ad list to keep continuous streaming alive
@@ -319,10 +324,7 @@ export class AdaptiveRideContentEngine {
     }
 
     // Complete fallback if queue completely empty (Avoids blank client screen)
-    return [
-      ...KIDS_ENTERTAINMENT_COLLECTION,
-      ...FAMILY_CONTENT_COLLECTION
-    ];
+    return [];
   }
 
   /**

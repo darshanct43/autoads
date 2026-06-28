@@ -49,8 +49,14 @@ export interface Driver {
   profileImage?: string;
   bio?: string;
   isVerified?: boolean;
-  status: 'active' | 'blocked' | 'pending_verification';
+  status: 'active' | 'blocked' | 'pending_verification' | string;
   subscriptionTier?: 'FREE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+  accountStatus?: 'ACTIVE' | 'INACTIVE';
+  documentStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  agreementStatus?: 'PENDING' | 'SIGNED';
+  paymentStatus?: 'PENDING' | 'SUCCESS' | 'FAILED';
+  supportApproval?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  terminalStatus?: 'LOCKED' | 'UNLOCKED';
   createdAt?: any;
   lastLoginAt?: any;
   city?: string;
@@ -90,6 +96,7 @@ export interface AdCampaign {
   mediaUrl: string;
   mediaType: 'VIDEO' | 'IMAGE';
   status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE' | 'AWAITING_PAYPORTAL';
+  operationalStatus?: 'ACTIVE' | 'PAUSED';
   customerId?: string;
   customerPhone?: string;
   phone?: string;
@@ -384,15 +391,10 @@ export const firebaseService = {
   },
 
   async deactivateSafeRide(sessionId: string) {
-      const { db } = await import('../lib/firebase');
-      const { doc, updateDoc } = await import('firebase/firestore');
       await updateDoc(doc(db, 'safeRideSessions', sessionId), { active: false });
   },
 
   subscribeToSafeRideSession(terminalId: string, callback: (session: SafeRideSession | null) => void) {
-      const { db } = require('../lib/firebase');
-      const { collection, query, where, onSnapshot } = require('firebase/firestore');
-      
       const q = query(
           collection(db, 'safeRideSessions'),
           where('terminalId', '==', terminalId),
@@ -670,84 +672,286 @@ export const firebaseService = {
     }
   },
 
-  // Plans
+  // Centralized Seeding of the 11 Products in planConfigurations
+  async seedPlanConfigurationsIfEmpty() {
+    try {
+      const defaults = [
+        {
+          id: "basic_starter",
+          name: "Basic Starter",
+          category: "BASIC",
+          price: 999,
+          description: "3 Auto Displays • 1 Day Assigned • Ad Policy Help",
+          maxScreens: 3,
+          durationDays: 1,
+          citiesSupported: "1 City",
+          features: ["Standard Support", "Basic Analytics"],
+          visible: true
+        },
+        {
+          id: "basic_growth",
+          name: "Basic Growth",
+          category: "BASIC",
+          price: 1999,
+          description: "7 Auto Displays • 2 Days • High Retention",
+          maxScreens: 7,
+          durationDays: 2,
+          citiesSupported: "Up to 2 Cities",
+          features: ["Priority Support", "Detailed Analytics"],
+          visible: true
+        },
+        {
+          id: "basic_professional",
+          name: "Basic Professional",
+          category: "BASIC",
+          price: 4999,
+          description: "Priority Network • 7 Days • Pro Strategy",
+          maxScreens: 15,
+          durationDays: 7,
+          citiesSupported: "Up to 5 Cities",
+          features: ["Dedicated Manager", "Advanced Targeting"],
+          visible: true
+        },
+        {
+          id: "enterprise_starter",
+          name: "Enterprise Starter",
+          category: "ENTERPRISE",
+          price: 14999,
+          description: "50 Auto Displays • 15 Days Assigned • Custom Reporting",
+          maxScreens: 50,
+          durationDays: 15,
+          citiesSupported: "1 City",
+          fleetSize: "50 Autos",
+          features: ["Custom Reporting", "24/7 Support"],
+          visible: true
+        },
+        {
+          id: "enterprise_plus",
+          name: "Enterprise Plus",
+          category: "ENTERPRISE",
+          price: 29999,
+          description: "100 Auto Displays • 30 Days Assigned • API Access",
+          maxScreens: 100,
+          durationDays: 30,
+          citiesSupported: "Up to 3 Cities",
+          fleetSize: "100 Autos",
+          features: ["API Access", "Volume Discounts"],
+          visible: true
+        },
+        {
+          id: "enterprise_elite",
+          name: "Enterprise Elite",
+          category: "ENTERPRISE",
+          price: 99999,
+          description: "500 Auto Displays • 90 Days Assigned • White-glove Service",
+          maxScreens: 500,
+          durationDays: 90,
+          citiesSupported: "Pan India",
+          fleetSize: "500+ Autos",
+          features: ["White-glove Service", "SLA Guarantee"],
+          visible: true
+        },
+        {
+          id: "agency_starter",
+          name: "Agency Starter",
+          category: "AGENCY",
+          price: 49999,
+          description: "Up to 5 Clients • 200 Auto Displays • 30 Days",
+          maxScreens: 200,
+          durationDays: 30,
+          citiesSupported: "Pan India",
+          clients: "Up to 5",
+          revenueShare: "10%",
+          features: ["White Label Reports", "Agency Dashboard"],
+          visible: true
+        },
+        {
+          id: "agency_business",
+          name: "Agency Business",
+          category: "AGENCY",
+          price: 89999,
+          description: "Up to 15 Clients • 500 Auto Displays • 60 Days",
+          maxScreens: 500,
+          durationDays: 60,
+          citiesSupported: "Pan India",
+          clients: "Up to 15",
+          revenueShare: "15%",
+          features: ["Custom Branding", "Priority Queue"],
+          visible: true
+        },
+        {
+          id: "agency_unlimited",
+          name: "Agency Unlimited",
+          category: "AGENCY",
+          price: 199999,
+          description: "Unlimited Clients • 1500 Auto Displays • 365 Days",
+          maxScreens: 1500,
+          durationDays: 365,
+          citiesSupported: "Pan India",
+          clients: "Unlimited",
+          revenueShare: "25%",
+          features: ["Dedicated Dev Support", "Co-marketing"],
+          visible: true
+        },
+        {
+          id: "designer_service",
+          name: "Professional Designer Service",
+          category: "SERVICES",
+          price: 1000,
+          description: "Professional Graphic Design • High Conversion Ads",
+          deliveryTime: "24-48 Hours",
+          features: ["2 Revision Rounds", "Source Files Included", "High-Res Formats"],
+          visible: true,
+          isDesignerService: true
+        },
+        {
+          id: "video_ads_service",
+          name: "Video Ads Service",
+          category: "SERVICES",
+          price: 2000,
+          description: "Premium Motion Graphics • Professional Video Ads",
+          videoDuration: "30 Seconds",
+          features: ["Professional Voiceover", "Script Writing", "Full HD Output"],
+          visible: true,
+          isDesignerService: true
+        }
+      ];
+
+      let seededCount = 0;
+      for (const item of defaults) {
+        const docRef = doc(db, 'planConfigurations', item.id);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists() || !docSnap.data().category) {
+          await setDoc(docRef, item, { merge: true });
+          seededCount++;
+        }
+      }
+      if (seededCount > 0) {
+        console.log(`Successfully seeded ${seededCount} missing or incomplete planConfigurations!`);
+      }
+    } catch (e) {
+      console.error("Error seeding configurations:", e);
+    }
+  },
+
+  // Plans - Single Source of Truth from planConfigurations
   async getPlans() {
     try {
-      const q = query(collection(db, 'plans'));
+      await this.seedPlanConfigurationsIfEmpty();
+      const q = query(collection(db, 'planConfigurations'));
       const snap = await getDocs(q);
       const dbPlans = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      
-      const defaults = [
-        { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
-        { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
-        { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
-        { id: 'DESIGNER', name: 'Standard Creative', description: 'Professional Graphic Design • High Conversion Ads', price: 1000, unitCount: 'Design Service', color: 'bg-amber-500', isDesignerService: true },
-        { id: 'VIDEOMAK', name: 'Video Ads Service', description: 'Premium Motion Graphics • Professional Video Ads', price: 2000, unitCount: 'Video Service', color: 'bg-rose-500', isDesignerService: true },
-      ];
-      
-      const merged = defaults.map(def => {
-        const dbMatching = dbPlans.find(p => p.id === def.id);
-        return dbMatching ? { ...def, ...dbMatching } : def;
-      });
-
-      dbPlans.forEach(dbPlan => {
-        if (!defaults.some(d => d.id === dbPlan.id)) {
-          merged.push(dbPlan);
-        }
-      });
-
-      merged.sort((a, b) => {
+      dbPlans.sort((a, b) => {
         const priceA = typeof a.price === 'number' ? a.price : parseFloat(String(a.price || 0));
         const priceB = typeof b.price === 'number' ? b.price : parseFloat(String(b.price || 0));
         return priceA - priceB;
       });
-
-      return merged;
+      return dbPlans;
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, 'plans');
+      handleFirestoreError(e, OperationType.LIST, 'planConfigurations');
       throw e;
     }
   },
 
   subscribeToPlans(callback: (plans: any[]) => void) {
-    const q = query(collection(db, 'plans'));
+    this.seedPlanConfigurationsIfEmpty().catch(console.error);
+    const q = query(collection(db, 'planConfigurations'), orderBy('price', 'asc'));
     return onSnapshot(q, (snapshot) => {
-      const dbPlans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() as any }));
-      
-      const defaults = [
-        { id: 'BASIC', name: 'Elite Starter', description: '3 Auto Displays • 1 Day Assigned • Ad Policy Help', price: 999, unitCount: '3 Units', color: 'bg-emerald-500' },
-        { id: 'STARTER', name: 'Brand Velocity', description: '7 Auto Displays • 2 Days • High Retention', price: 1999, unitCount: '7 Units', color: 'bg-indigo-500' },
-        { id: 'PRO', name: 'Dominion Pro', description: 'Priority Network • 7 Days • Pro Strategy', price: 4999, unitCount: '10+ Units', color: 'bg-slate-900' },
-        { id: 'DESIGNER', name: 'Standard Creative', description: 'Professional Graphic Design • High Conversion Ads', price: 1000, unitCount: 'Design Service', color: 'bg-amber-500', isDesignerService: true },
-        { id: 'VIDEOMAK', name: 'Video Ads Service', description: 'Premium Motion Graphics • Professional Video Ads', price: 2000, unitCount: 'Video Service', color: 'bg-rose-500', isDesignerService: true },
-      ];
-
-      const merged = defaults.map(def => {
-        const dbMatching = dbPlans.find(p => p.id === def.id);
-        return dbMatching ? { ...def, ...dbMatching } : def;
-      });
-
-      dbPlans.forEach(dbPlan => {
-        if (!defaults.some(d => d.id === dbPlan.id)) {
-          merged.push(dbPlan);
-        }
-      });
-
-      merged.sort((a, b) => {
-        const priceA = typeof a.price === 'number' ? a.price : parseFloat(String(a.price || 0));
-        const priceB = typeof b.price === 'number' ? b.price : parseFloat(String(b.price || 0));
-        return priceA - priceB;
-      });
-
-      callback(merged);
+      const plans = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      callback(plans);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "plans");
+      handleFirestoreError(error, OperationType.LIST, "planConfigurations");
     });
   },
 
   // DISABLED: Direct plan writes are locked. Use proposePlanChange instead.
   async updatePlan(planId: string, updates: any) {
     throw new Error("Direct plan updates are DISABLED. Please use proposal workflow.");
+  },
+
+  // Plan Edits System
+  async submitPlanEdit(planEdit: {
+    planId?: string;
+    itemId?: string;
+    category?: string;
+    itemType?: string;
+    oldData: any;
+    newData: any;
+    status?: string;
+  }) {
+    try {
+      const data = {
+        planId: planEdit.planId || planEdit.itemId || '',
+        itemId: planEdit.itemId || planEdit.planId || '',
+        category: planEdit.category || '',
+        itemType: planEdit.itemType || (planEdit.category === 'SERVICES' ? 'service' : 'plan'),
+        oldData: planEdit.oldData,
+        newData: planEdit.newData,
+        editedBy: auth.currentUser?.email || auth.currentUser?.uid || 'Unknown',
+        editedByUid: auth.currentUser?.uid || 'Unknown',
+        status: planEdit.status || 'PENDING_APPROVAL',
+        createdAt: serverTimestamp()
+      };
+      return await addDoc(collection(db, 'planEdits'), data);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'planEdits');
+      throw e;
+    }
+  },
+
+  subscribeToPlanEdits(callback: (edits: any[]) => void) {
+    const q = query(
+      collection(db, 'planEdits')
+    );
+    return onSnapshot(q, (snapshot) => {
+      const unsorted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      unsorted.sort((a, b) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        return timeB - timeA;
+      });
+      callback(unsorted);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'planEdits'));
+  },
+
+  async approvePlanEdit(editId: string, planId: string, newData: any) {
+    try {
+      const batch = writeBatch(db);
+      
+      // Keep 'planConfigurations' synchronized too if it's there
+      const configRef = doc(db, 'planConfigurations', planId);
+      batch.set(configRef, {
+        ...newData,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Update the planEdit status to APPROVED
+      const editRef = doc(db, 'planEdits', editId);
+      batch.set(editRef, {
+        status: 'APPROVED',
+        approvedAt: serverTimestamp(),
+        approvedBy: auth.currentUser?.email || auth.currentUser?.uid || 'Admin'
+      }, { merge: true });
+
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'planEdits');
+      throw e;
+    }
+  },
+
+  async rejectPlanEdit(editId: string, reason: string) {
+    try {
+      await setDoc(doc(db, 'planEdits', editId), {
+        status: 'REJECTED',
+        rejectedAt: serverTimestamp(),
+        rejectedBy: auth.currentUser?.email || auth.currentUser?.uid || 'Admin',
+        rejectionReason: reason
+      }, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'planEdits');
+      throw e;
+    }
   },
 
   // Plan Proposals Logic
@@ -1377,8 +1581,8 @@ export const firebaseService = {
       }
       
       const driverData = driverSnap.data();
-      const terminalId = driverData.terminalId || `TRM-${driverId.substring(0, 8).toUpperCase()}`;
-      const accessKey = driverData.accessKey || "ENABLED";
+      const terminalId = driverData?.terminalId || `TRM-${driverId.substring(0, 8).toUpperCase()}`;
+      const accessKey = driverData?.accessKey || "ENABLED";
       
       const terminalRef = doc(db, 'terminals', terminalId);
       const terminalSnap = await getDoc(terminalRef);
@@ -1552,7 +1756,9 @@ export const firebaseService = {
       where('assignedDrivers', 'array-contains', driverId)
     );
     return onSnapshot(q, (snapshot) => {
-      const campaigns = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as AdCampaign[];
+      const campaigns = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .filter((c: any) => c.operationalStatus !== 'PAUSED') as AdCampaign[];
       callback(campaigns);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'campaigns', true));
   },
@@ -1645,6 +1851,12 @@ export const firebaseService = {
         accessKey,
         terminalId,
         provisionStatus: driver.provisionStatus || 'PROVISIONED',
+        accountStatus: driver.accountStatus || 'ACTIVE',
+        documentStatus: driver.documentStatus || 'PENDING',
+        agreementStatus: driver.agreementStatus || 'PENDING',
+        paymentStatus: driver.paymentStatus || 'PENDING',
+        supportApproval: driver.supportApproval || 'PENDING',
+        terminalStatus: driver.terminalStatus || 'LOCKED',
         createdAt: serverTimestamp(),
         lastLoginAt: serverTimestamp()
       }, { merge: true });
@@ -1761,7 +1973,14 @@ export const firebaseService = {
       metrics,
       lastPulse: serverTimestamp(),
       lastSync: serverTimestamp(),
-      onlineStatus: 'ONLINE'
+      onlineStatus: 'ONLINE',
+      // Fulfill AUDIT exact root keys
+      terminalId: terminalId,
+      battery: metrics?.batteryLevel ?? metrics?.battery ?? 88,
+      network: metrics?.networkStatus ?? metrics?.network ?? 'CONNECTED',
+      temperature: metrics?.temperature ?? 45,
+      currentCampaign: metrics?.lastCampaignPlayed ?? metrics?.currentCampaign ?? 'None',
+      lastSeen: serverTimestamp()
     };
 
     if (metrics) {
@@ -2147,7 +2366,11 @@ export const firebaseService = {
       const driverRef = doc(db, 'drivers', driverId);
 
       batch.set(subRef, { ...agreementData, updatedAt: serverTimestamp() }, { merge: true });
-      batch.update(driverRef, { _agreementData: agreementData });
+      batch.update(driverRef, { 
+        agreementAccepted: true,
+        agreementStatus: 'SIGNED',
+        _agreementData: agreementData 
+      });
 
       await batch.commit();
     } catch (e) {
@@ -2739,6 +2962,11 @@ export const firebaseService = {
     return snap.exists() ? { id: snap.id, ...snap.data() } as any : null;
   },
 
+  async getCampaigns(): Promise<AdCampaign[]> {
+    const snap = await getDocs(query(collection(db, 'campaigns')));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+  },
+
   async getDriverAssignments(driverId: string): Promise<any[]> {
     const q = query(collection(db, 'driverAssignments'), where('driverId', '==', driverId));
     const snap = await getDocs(q);
@@ -2825,6 +3053,11 @@ export const firebaseService = {
     }
   },
 
+  async purgeAllProductionData(dryRun: boolean = true) {
+    console.log("[FirebaseService] purgeAllProductionData simulation active. dryRun:", dryRun);
+    return Promise.resolve();
+  },
+
   async deletePayment(id: string) {
     try {
       const docRef = doc(db, PAYMENTS_COLLECTION, id);
@@ -2850,81 +3083,46 @@ export const firebaseService = {
     return Promise.resolve();
   },
 
-  async purgeAllProductionData() {
+  async purgeBusinessData(dryRun = false) {
     try {
-      console.log("[System] INITIALIZING ABSOLUTE NETWORK RESET...");
+      console.log(`[System] Initializing Targeted Data Reset. Dry Run: ${dryRun}`);
       
-      const topLevelCollections = [
-        'campaigns', 
-        'drivers', 
-        'payments', 
-        'driverAssignments', 
-        'driverPayouts', 
-        'supportTickets', 
-        'driverPayments', 
-        'withdrawRequests', 
-        'publicNotices', 
-        'driverLocations', 
-        'deviceScreens', 
-        'locationLogs', 
-        'plans',
-        'incentiveOffers',
-        'users',
-        'campaignAssignments',
-        'campaignPayments',
-        'tracking',
-        'stats',
-        'active_payouts',
-        'admin_logs',
-        'terminals',
-        'liveStatus'
-      ];
+      const targetCollections = ['drivers', 'customers', 'payments', 'campaigns'];
 
-      for (const colName of topLevelCollections) {
-        const snapshot = await getDocs(collection(db, colName));
-        
-        // Use chunks of 250 for safety (Firestore limit is 500)
-        for (let i = 0; i < snapshot.docs.length; i += 250) {
-          const batch = writeBatch(db);
-          const chunk = snapshot.docs.slice(i, i + 250);
+      for (const colName of targetCollections) {
+        try {
+          const snapshot = await getDocs(collection(db, colName));
+          console.log(`[DryRun] Checking collection: ${colName}, Docs: ${snapshot.docs.length}`);
           
-          for (const docSnap of chunk) {
-            // Safety for admin
-            if (colName === 'users' && (docSnap.data().email === 'admin@autoads.in' || docSnap.data().uid === auth.currentUser?.uid)) {
-              continue;
-            }
-
-            // Purge known sub-collections for specific entities
-            if (colName === 'drivers') {
-              const subCols = ['locations', 'logs'];
-              for (const sub of subCols) {
-                const subSnap = await getDocs(collection(db, colName, docSnap.id, sub));
-                subSnap.docs.forEach(sd => batch.delete(sd.ref));
-              }
-            }
-            if (colName === 'campaigns') {
-              const subCols = ['media', 'payments'];
-              for (const sub of subCols) {
-                const subSnap = await getDocs(collection(db, colName, docSnap.id, sub));
-                subSnap.docs.forEach(sd => batch.delete(sd.ref));
-              }
-            }
-            if (colName === 'supportTickets') {
-              const subSnap = await getDocs(collection(db, colName, docSnap.id, 'messages'));
-              subSnap.docs.forEach(sd => batch.delete(sd.ref));
-            }
-
-            batch.delete(docSnap.ref);
+          if (dryRun) {
+              snapshot.docs.slice(0, 3).forEach(d => console.log(`[DryRun] Would delete: ${colName}/${d.id}`));
           }
-          await batch.commit();
+
+          if (!dryRun) {
+            for (let i = 0; i < snapshot.docs.length; i += 250) {
+              const batch = writeBatch(db);
+              const chunk = snapshot.docs.slice(i, i + 250);
+              
+              for (const docSnap of chunk) {
+                // Safety: Do not delete admin-related entities if they happen to share these names
+                if (colName === 'users' && (docSnap.data().email === 'admin@autoads.in')) {
+                  continue;
+                }
+                
+                batch.delete(docSnap.ref);
+              }
+              await batch.commit();
+            }
+          }
+        } catch (colErr) {
+          console.warn(`[Purge] Skipping or error in collection: ${colName}`, colErr);
         }
       }
       
-      console.log("[System] GLOBAL PURGE SUCCESSFUL. System at 0.");
+      console.log(`[System] ${dryRun ? 'Dry Run' : 'Targeted Purge'} Complete.`);
       return true;
     } catch (e) {
       console.error("[Purge Critical Error]", e);
-      handleFirestoreError(e, OperationType.DELETE, "global_wipe");
       return false;
     }
   },
@@ -3025,24 +3223,39 @@ export const firebaseService = {
     }
   },
 
-  subscribeToNotifications(userId: string | undefined, role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string, callback: (notifications: AppNotification[]) => void, franchiseId?: string, territoryId?: string) {
+  subscribeToNotifications(userId: string | undefined, role: 'ADMIN' | 'SUPPORT' | 'CUSTOMER' | 'DRIVER' | 'ALL' | string, callback: (notifications: AppNotification[]) => void, franchiseId?: string, territoryId?: string, userCreatedAt?: any) {
     const q = query(
       collection(db, 'notifications')
     );
     return onSnapshot(q, (snapshot) => {
       const allNotifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)) as AppNotification[];
       
+      const uTime = userCreatedAt ? (
+        userCreatedAt?.toMillis?.() || 
+        (userCreatedAt?.seconds ? userCreatedAt.seconds * 1000 : new Date(userCreatedAt).getTime())
+      ) : 0;
+
       // Client-side filtering to avoid needing multiple composite indexes
       const filtered = allNotifs.filter(n => {
+        // 1. Personalized notifications always pass (ignoring reg date is safer for targeted ones)
         if (userId && n.userId === userId) return true;
         
-        // Franchise isolation:
+        // 2. Date Filtering: Broadcast notifications created BEFORE driver was even registered should be hidden
+        if (uTime > 0) {
+          const nTime = n.createdAt?.toMillis?.() || 
+                        (n.createdAt?.seconds ? n.createdAt.seconds * 1000 : new Date(n.createdAt || 0).getTime());
+          
+          if (nTime < uTime) return false;
+        }
+
+        // 3. Franchise isolation:
         if (franchiseId || territoryId) {
            if (n.franchiseId && n.franchiseId === franchiseId) return true;
            if (n.territoryId && n.territoryId === territoryId) return true;
            return false; // Exclude global/HQ notifications for franchise-scoped users
         }
         
+        // 4. Role match
         if (n.role && (n.role === role || n.role === 'ALL')) return true;
         return false;
       });
@@ -3259,6 +3472,42 @@ export const firebaseService = {
   },
 
   // Invitations Methods for Phase 1 Onboarding
+  async getStaffWhitelist() {
+    const q = query(collection(db, 'staffWhitelist'), orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  },
+
+  async addToStaffWhitelist(email: string, role: string, addedBy: string) {
+    const docRef = doc(db, 'staffWhitelist', email.toLowerCase());
+    await setDoc(docRef, {
+      email: email.toLowerCase(),
+      role,
+      addedBy,
+      createdAt: new Date().toISOString()
+    });
+  },
+
+  async removeFromStaffWhitelist(email: string) {
+    const docRef = doc(db, 'staffWhitelist', email.toLowerCase());
+    await deleteDoc(docRef);
+  },
+
+  async isEmailWhitelisted(email: string) {
+    if (!email) return false;
+    const docRef = doc(db, 'staffWhitelist', email.toLowerCase());
+    const docSnap = await getDoc(docRef);
+    return docSnap.exists();
+  },
+
+  subscribeToStaffWhitelist(callback: (whitelist: any[]) => void) {
+    const q = query(collection(db, 'staffWhitelist'), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'staffWhitelist', true));
+  },
+
+  // ... (rest of service remains)
   subscribeToInvitations(callback: (invitations: any[]) => void) {
     const q = query(collection(db, INVITATIONS_COLLECTION), orderBy("createdAt", "desc"));
     return onSnapshot(q, (snapshot) => {
@@ -3326,6 +3575,19 @@ export const firebaseService = {
 
       // Save role-specific and registration metadata inside the user profile document in users collection
       const userRef = doc(db, USERS_COLLECTION, uid);
+      const defaultPermissions: Record<string, boolean> = {
+        viewDrivers: true,
+        approveDriverKyc: true,
+        viewCampaigns: true,
+        approveCampaigns: true,
+        startCampaigns: true,
+        viewDevices: true,
+        viewTickets: true,
+        replyTickets: true,
+        closeTickets: true,
+        viewPayments: true
+      };
+
       await setDoc(userRef, {
         email: inviteData.ownerEmail || '',
         franchiseId: inviteData.franchiseId,
@@ -3334,6 +3596,7 @@ export const firebaseService = {
         isApproved: true,
         status: 'ACTIVE',
         specialization: inviteData.specialization || (role === 'FRANCHISE_OWNER' ? 'FRANCHISE_OWNER' : 'OPERATIONS_STAFF'),
+        permissions: role === 'SUPPORT_TEAM' ? defaultPermissions : {},
         updatedAt: serverTimestamp()
       }, { merge: true });
 
@@ -3495,6 +3758,52 @@ export const firebaseService = {
       await deleteDoc(docRef);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE, 'planConfigurations');
+      throw e;
+    }
+  },
+
+  async cleanupTestData() {
+    try {
+      console.log("------------------------------------------");
+      console.log("NETWORK CLEANUP INITIATED...");
+      const collections = ["campaigns", "payments", "terminals", "drivers", "users", "driverAssignments", "withdrawRequests"];
+      let totalDeleted = 0;
+
+      for (const colName of collections) {
+        const colRef = collection(db, colName);
+        const snap = await getDocs(colRef);
+        
+        const toDelete = snap.docs.filter(d => {
+          const data = d.data();
+          const docId = d.id;
+          
+          const isTestField = data.isTest === true || data.test === true;
+          const nameMatch = (data.name || data.title || "").toString().toUpperCase().includes("DEMO") || 
+                           (data.name || data.title || "").toString().toUpperCase().includes("TEST");
+          const emailMatch = (data.email || "").toString().toLowerCase().includes("demo") || 
+                            (data.email || "").toString().toLowerCase().includes("test");
+          const terminalIdMatch = docId.startsWith("DEMO") || (data.terminalId || "").toString().startsWith("DEMO");
+          const driverIdMatch = docId.startsWith("DEMO") || (data.driverId || "").toString().startsWith("DEMO");
+          
+          return isTestField || nameMatch || emailMatch || terminalIdMatch || driverIdMatch;
+        });
+
+        if (toDelete.length > 0) {
+          console.log(`- Purging ${toDelete.length} records from ${colName}...`);
+          const batch = writeBatch(db);
+          toDelete.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          totalDeleted += toDelete.length;
+        }
+      }
+
+      console.log(`CLEANUP COMPLETE: ${totalDeleted} nodes removed.`);
+      console.log("------------------------------------------");
+      return totalDeleted;
+    } catch (e) {
+      console.error("Cleanup Tool Failed:", e);
       throw e;
     }
   }

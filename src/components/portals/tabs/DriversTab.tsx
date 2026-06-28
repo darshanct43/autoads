@@ -95,23 +95,26 @@ export const DriversTab: React.FC<DriversTabProps> = ({
   });
 
   // Render high-contrast status badge
-  const renderStatusBadge = (status: string | undefined) => {
-    const s = (status || "pending_verification").toLowerCase();
-    if (s === "active") {
+  const renderStatusBadge = (driver: Driver) => {
+    const kyc = (driver.kycStatus || "").toLowerCase();
+    const status = (driver.status || "").toLowerCase();
+    
+    // Prioritize APPROVED kycStatus
+    if (kyc === "approved" || status === "active") {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/10 border border-emerald-500/20 text-emerald-600">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           Active / Approved
         </span>
       );
-    } else if (s === "pending_verification" || s === "pending") {
+    } else if (kyc === "pending" || kyc === "submitted" || status === "pending_verification") {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-500/10 border border-amber-500/20 text-amber-600">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
           Pending Verification
         </span>
       );
-    } else if (s === "disabled" || s === "blocked") {
+    } else if (kyc === "rejected" || status === "disabled" || status === "blocked") {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-rose-500/10 border border-rose-500/20 text-rose-600">
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
@@ -119,10 +122,11 @@ export const DriversTab: React.FC<DriversTabProps> = ({
         </span>
       );
     } else {
+      const displayStatus = kyc || status || "Pending";
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-500/10 border border-slate-500/20 text-slate-600">
           <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-          {s.replace("_", " ")}
+          {displayStatus.replace("_", " ")}
         </span>
       );
     }
@@ -277,7 +281,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                           </div>
                         </td>
                         <td className="py-5 px-6">
-                          {renderStatusBadge(driver.status)}
+                          {renderStatusBadge(driver)}
                         </td>
                         <td className="py-5 px-6 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -358,7 +362,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                         </div>
                       </div>
                       <div>
-                        {renderStatusBadge(driver.status)}
+                        {renderStatusBadge(driver)}
                       </div>
                     </div>
 

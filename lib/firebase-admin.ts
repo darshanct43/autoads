@@ -3,6 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import admin from 'firebase-admin';
 import fs from 'fs';
 import path from 'path';
+import { getCredential } from './env.js';
 
 let adminApp;
 
@@ -16,10 +17,10 @@ try {
   // ignore
 }
 
-const firebaseProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || appletConfig.projectId;
-const firebaseDatabaseId = appletConfig.firestoreDatabaseId || process.env.FIRESTORE_DATABASE_ID || '(default)';
+const firebaseProjectId = getCredential('GOOGLE_CLOUD_PROJECT') || getCredential('FIREBASE_PROJECT_ID') || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || appletConfig.projectId;
+const firebaseDatabaseId = appletConfig.firestoreDatabaseId || getCredential('FIRESTORE_DATABASE_ID') || process.env.FIRESTORE_DATABASE_ID || '(default)';
 
-let rawSA = process.env.FIREBASE_SERVICE_ACCOUNT;
+let rawSA = getCredential('FIREBASE_SERVICE_ACCOUNT') || process.env.FIREBASE_SERVICE_ACCOUNT;
 let serviceAccount = parseServiceAccount(rawSA);
 
 if (!serviceAccount) {
@@ -47,6 +48,12 @@ function parseServiceAccount(raw: string | undefined): any {
   try {
     return JSON.parse(clean);
   } catch (e) {
+    // Check for common truncation symbols if dotenv failed to read multi-line
+    if (clean === '{' || clean === '"{' || clean === "'{") {
+      console.warn('[FIREBASE] FIREBASE_SERVICE_ACCOUNT appears truncated in environment. Check for missing quotes.');
+      return null;
+    }
+
     // Try 2: Strip outer quotes if any and parse
     try {
       const dequoted = clean.replace(/^["']|["']$/g, '').trim();

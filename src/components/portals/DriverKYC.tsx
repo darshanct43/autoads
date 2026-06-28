@@ -19,6 +19,7 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
   const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Partial<DriverDocument>>({});
   const [upiId, setUpiId] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverData, setDriverData] = useState<any>(null);
 
   useEffect(() => {
@@ -32,9 +33,11 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
         setDocuments({
           aadhaar: data.aadharPhoto || '',
           drivingLicense: data.dlPhoto || '',
-          selfie: data.selfiePhoto || ''
+          selfie: data.selfiePhoto || '',
+          rc: data.rcPhoto || ''
         });
         setUpiId(data.upiId || '');
+        setVehicleNumber(data.vehicleNumber || '');
       }
     });
     return unsub;
@@ -63,8 +66,13 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
 
   const handleSubmit = async () => {
     setError(null);
-    if (!documents.aadhaar || !documents.drivingLicense || !documents.selfie) {
-      setError("Please upload all three required documents (Aadhaar, Driving License, and Selfie).");
+    if (!documents.aadhaar || !documents.drivingLicense || !documents.selfie || !documents.rc) {
+      setError("Please upload all four required documents (Aadhaar, Driving License, Selfie, and RC).");
+      return;
+    }
+    
+    if (!vehicleNumber.trim()) {
+      setError("Please enter your vehicle number.");
       return;
     }
     
@@ -72,6 +80,7 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
     try {
       const profile: any = {
         kycStatus: 'PENDING',
+        documentStatus: 'PENDING',
         payoutEnabled: false,
         adminApproved: false,
         documents: documents as DriverDocument,
@@ -79,7 +88,9 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
         dlPhoto: documents.drivingLicense,
         profileImage: documents.selfie,
         selfiePhoto: documents.selfie,
-        upiId: upiId
+        rcPhoto: documents.rc,
+        upiId: upiId,
+        vehicleNumber: vehicleNumber.trim()
       };
       await firebaseService.updateDriverProfile(driverId, profile);
       onSuccess();
@@ -107,10 +118,10 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
       
       <div className="space-y-4">
           <p className="text-xs font-black uppercase tracking-widest text-slate-500">Required Documents</p>
-          {(['aadhaar', 'drivingLicense', 'selfie'] as const).map(doc => (
+          {(['aadhaar', 'drivingLicense', 'selfie', 'rc'] as const).map(doc => (
             <div key={doc} className="flex flex-col gap-2 p-4 bg-white rounded-2xl border border-slate-200">
                <div className="flex items-center justify-between">
-                 <span className="text-sm font-bold text-slate-800 capitalize">{doc.replace(/([A-Z])/g, ' $1')}</span>
+                 <span className="text-sm font-bold text-slate-800 capitalize">{doc.replace(/([A-Z])/g, ' $1').replace('rc', 'RC (Registration Certificate)')}</span>
                  <input type="file" onChange={(e) => e.target.files && handleUpload(doc, e.target.files[0])} className="hidden" id={doc} />
                  <label htmlFor={doc} className={cn("px-6 py-3 rounded-2xl cursor-pointer text-[10px] font-black uppercase tracking-widest transition-all shadow-sm border active:scale-95 flex items-center gap-2", documents[doc] ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-900 text-amber-500 border-slate-800")}>
                     <CloudUpload size={14} />
@@ -127,6 +138,12 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
       </div>
       
       <div className="space-y-3">
+          <input 
+            placeholder="Enter Vehicle Number (e.g. KA 01 AB 1234)" 
+            className="w-full p-3.5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm focus:outline-none focus:border-amber-500 transition-all uppercase" 
+            value={vehicleNumber} 
+            onChange={e => setVehicleNumber(e.target.value)} 
+          />
           <input 
             placeholder="Enter UPI ID" 
             className="w-full p-3.5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm focus:outline-none focus:border-amber-500 transition-all" 

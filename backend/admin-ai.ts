@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import { dbAdm, admin } from '../lib/firebase-admin.js';
+import { getCredential } from '../lib/env.js';
 
 
 async function trackAiMetric(engine: 'gemini' | 'openai', state: 'request' | 'failure') {
@@ -173,12 +174,12 @@ export default async function handler(req: any, res: any) {
     let geminiError: any = null;
 
     // 1. Attempt Gemini 3.5 Flash first if key is present (standard build integrations)
-    if (process.env.GEMINI_API_KEY) {
+    if (getCredential('GEMINI_API_KEY')) {
       await trackAiMetric('gemini', 'request');
       try {
         console.log("[AI Assistant] Accessing Gemini-3.5-Flash backend...");
         const ai = new GoogleGenAI({
-          apiKey: process.env.GEMINI_API_KEY,
+          apiKey: getCredential('GEMINI_API_KEY'),
           httpOptions: {
             headers: {
               'User-Agent': 'aistudio-build',
@@ -204,11 +205,11 @@ export default async function handler(req: any, res: any) {
     }
 
     // 2. Fallback to OpenAI if key is present
-    if (process.env.OPENAI_API_KEY) {
+    if (getCredential('OPENAI_API_KEY')) {
       await trackAiMetric('openai', 'request');
       try {
         console.log("[AI Assistant] Accessing OpenAI GPT-4o backend...");
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const openai = new OpenAI({ apiKey: getCredential('OPENAI_API_KEY') });
         const completion = await openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [

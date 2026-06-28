@@ -26,6 +26,8 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
   editUploadProgress,
   handleUpdateMedia,
   isUpdatingMedia,
+  handleUpdateOperationalStatus,
+  isUpdatingOperationalStatus,
   searchTerm,
   setSearchTerm,
   selectedArea,
@@ -61,7 +63,7 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
             <div className="hidden sm:flex items-center gap-4">
               <div className="text-right">
                 <p className="text-[10px] font-bold text-white uppercase tracking-widest">
-                  {campaigns.filter((c) => c.status === "ACTIVE").length}
+                  {campaigns.filter((c: any) => c.status === "ACTIVE").length}
                 </p>
                 <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
                   Active nodes
@@ -81,14 +83,14 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
               Deployment Inventory
             </h3>
             <span className="text-[11px] font-bold text-slate-400">
-              {campaigns.filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase")).length}{" "}
+              {campaigns.filter((c: any) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase")).length}{" "}
               Active
             </span>
           </div>
           <div className="divide-y divide-slate-50 overflow-y-auto">
             {campaigns
-              .filter((c) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase"))
-              .map((c) => (
+              .filter((c: any) => c.status === "ACTIVE" && !c.title.toLowerCase().includes("showcase"))
+              .map((c: any) => (
                 <div
                   key={c.id}
                   className={cn(
@@ -296,6 +298,36 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
             </div>
 
             <div className="flex gap-2">
+              <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.15em]">Playback Control</h4>
+                  <div className={cn(
+                    "px-2 py-0.5 rounded text-[8px] font-bold uppercase",
+                    selectedCampaign?.operationalStatus === 'PAUSED' ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"
+                  )}>
+                    {selectedCampaign?.operationalStatus || 'ACTIVE'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleUpdateOperationalStatus(selectedCampaign.id, 'ACTIVE')}
+                    disabled={isUpdatingOperationalStatus || selectedCampaign?.operationalStatus !== 'PAUSED'}
+                    className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-30 disabled:grayscale transition-all"
+                  >
+                    Start
+                  </button>
+                  <button
+                    onClick={() => handleUpdateOperationalStatus(selectedCampaign.id, 'PAUSED')}
+                    disabled={isUpdatingOperationalStatus || selectedCampaign?.operationalStatus === 'PAUSED'}
+                    className="flex-1 py-2.5 bg-rose-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-30 disabled:grayscale transition-all"
+                  >
+                    Pause
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
               <div className="relative flex-1 font-sans">
                 <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -312,7 +344,7 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                 onChange={(e) => setSelectedArea(e.target.value)}
               >
                 <option value="ALL">All Areas</option>
-                {Array.from(new Set(drivers.map(d => d.city).filter(Boolean))).map((city: any) => (
+                {Array.from(new Set(drivers.map((d: any) => d.city).filter(Boolean))).map((city: any) => (
                   <option key={city} value={city}>{city?.toUpperCase()}</option>
                 ))}
               </select>
@@ -320,7 +352,7 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-2">
-            {filteredDrivers.map((d) => (
+            {filteredDrivers.map((d: any) => (
               <label
                 key={d.uid}
                 className={cn(
@@ -338,7 +370,7 @@ export const CampaignsTab: React.FC<CampaignsTabProps> = ({
                     onChange={(e) =>
                       e.target.checked
                         ? setSelectedDriverIds([...selectedDriverIds, d.uid])
-                        : setSelectedDriverIds(selectedDriverIds.filter((id) => id !== d.uid))
+                        : setSelectedDriverIds(selectedDriverIds.filter((id: any) => id !== d.uid))
                     }
                   />
                   <div className="flex items-center gap-3">

@@ -1,407 +1,200 @@
-export type UserRole = 
-  | 'CUSTOMER' 
-  | 'DRIVER' 
-  | 'ADMIN' 
-  | 'SUPPORT' 
-  | 'STAFF' 
-  | 'DEVICE' 
-  | 'FRANCHISE_OWNER' 
-  | 'FRANCHISE_STAFF'
-  | 'SUPPORT_MANAGER' 
-  | 'SUPPORT_AGENT'
-  | 'HQ_ADMIN'
-  | 'HQ_SUPPORT'
-  | 'SUPPORT_TEAM';
+export type UserRole = 'ADMIN' | 'CUSTOMER' | 'SUPPORT_TEAM' | 'FRANCHISE_STAFF' | 'FRANCHISE_OWNER' | 'DRIVER' | 'DEVICE' | 'SUPPORT_MANAGER' | 'SUPPORT_AGENT' | 'SUPPORT' | 'STAFF' | 'HQ_ADMIN' | 'HQ_SUPPORT';
 
-export interface User {
+export interface Driver {
   id: string;
+  uid?: string;
+  phone: string;
   name: string;
-  email: string;
-  role: UserRole;
-  phone?: string;
-  avatar?: string;
-  stateId?: string;
-  territoryId?: string;
+  email?: string;
+  vehicleNo?: string;
+  vehicleNumber?: string;
+  vNo?: string;
+  aadhaarNo?: string;
+  aadharNumber?: string;
+  aadhaarUrl?: string;
+  aadharPhoto?: string;
+  licenseNo?: string;
+  dlNumber?: string;
+  licenseUrl?: string;
+  dlPhoto?: string;
+  selfieUrl?: string;
+  selfiePhoto?: string;
+  signatureUrl?: string;
+  rcUrl?: string;
+  rcNumber?: string;
+  rcPhoto?: string;
+  panUrl?: string;
+  panPhoto?: string;
+  insuranceUrl?: string;
+  profileImage?: string;
+  driverCode?: string;
+  password?: string;
+  deviceId?: string;
+  gpsId?: string;
+  bio?: string;
+  isRegistered?: boolean;
+  isLoggedIn?: boolean;
+  isVerified?: boolean;
+  agreementAccepted?: boolean;
+  verificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  accountStatus: 'ACTIVE' | 'INACTIVE';
+  documentStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
+  agreementStatus: 'PENDING' | 'SIGNED';
+  paymentStatus: 'PENDING' | 'SUCCESS' | 'FAILED';
+  supportApproval: 'PENDING' | 'APPROVED' | 'REJECTED';
+  terminalStatus: 'LOCKED' | 'UNLOCKED';
+  provisionStatus?: 'IDLE' | 'PROVISIONED' | 'ACTIVE';
+  status?: 'active' | 'blocked' | 'pending_verification' | string;
+  subscriptionTier?: 'FREE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+  terminalId?: string;
+  accessKey?: string;
+  kycStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW';
+  createdAt?: any;
+  lastLoginAt?: any;
+  city?: string;
   cityId?: string;
   franchiseId?: string;
-  status?: 'PENDING' | 'VERIFIED' | 'APPROVED' | 'ACTIVE' | 'SUSPENDED';
-  approvedBy?: string;
-  createdAt?: string;
 }
 
-export type KYCStatus = 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED';
+export type DriverProfile = Driver;
 
 export interface DriverDocument {
-  aadhaar: string;
-  drivingLicense: string;
-  selfie: string;
+  aadhaar?: string;
+  drivingLicense?: string;
+  selfie?: string;
+  rc?: string;
+  pan?: string;
+  insurance?: string;
 }
 
-export interface DriverProfile {
+export interface Wallet {
   driverId: string;
-  stateId?: string;
-  territoryId?: string;
-  cityId?: string;
-  franchiseId?: string;
-  kycStatus: KYCStatus;
-  payoutEnabled: boolean;
-  adminApproved: boolean;
-  status: 'PENDING' | 'VERIFIED' | 'APPROVED' | 'ACTIVE' | 'SUSPENDED';
-  approvedBy?: string;
-  documents: DriverDocument;
-  upiId?: string;
+  balance: number;
+  creditsAssigned: number;
+  withdrawals: WithdrawalRequest[];
 }
 
-export interface AdCampaign {
+export interface WithdrawalRequest {
   id: string;
-  title: string;
-  clientName?: string;
-  mediaUrl: string;
-  mediaType: 'VIDEO' | 'IMAGE';
-  status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'PENDING_VERIFICATION' | 'APPROVED' | 'LIVE' | 'AWAITING_PAYPORTAL';
-  createdBy: string; // User ID
-  approvedBy?: string; // Admin User ID/Support Agent ID
-  assignedDrivers: string[]; // Driver IDs
-  createdAt: string;
-  cityId?: string; // Targeted city for franchise filtering
-  territoryIds?: string[]; // Phase 4 targeting
-  franchiseId?: string; // Scoping franchise ID
-  categoryTags?: string[];
-  safeContent?: boolean;
-  kidsSafe?: boolean;
-  mediaSource?: 'UPLOAD' | 'CANVA';
-  mediaAssetId?: string;
-  paymentStatus?: string;
-  spend?: number;
-  description?: string;
-  type?: 'PLAN' | 'CAMPAIGN';
-}
-
-export interface AutoDevice {
-  id: string;
-  deviceId: string;
-  serialNumber?: string;
-  imei?: string;
-  simNumber?: string;
-  firmwareVersion?: string;
-  driverId: string | null;
-  vehicleId?: string | null;
-  location: { lat: number; lng: number };
-  status: 'IN_STOCK' | 'ASSIGNED' | 'ACTIVE' | 'OFFLINE' | 'MAINTENANCE' | 'RETIRED' | 'PENDING' | 'REPAIR';
-  currentAdId?: string;
-  todayRides: number;
-  earnings: number;
-  cityId?: string; // Scoped city
-  territoryId?: string;
-  franchiseId?: string; // Scoped franchise
-  approvedBy?: string;
-  autoNumber?: string;
-  driverName?: string;
-  remoteUrl?: string;
-  vncSessionId?: string;
-  screenVersion?: string;
-  batteryLevel?: number;
-  healthScore?: number;
-  lastHeartbeat?: string;
-  appVersion?: string;
-  storageUsedPercent?: number;
-  ramUsedPercent?: number;
-  cpuUsagePercent?: number;
-  deviceTemperature?: number;
-  chargingStatus?: string;
-  networkType?: string;
-  signalStrength?: number;
-}
-
-export interface Vehicle {
-  vehicleId: string;
-  registrationNumber: string;
-  vehicleType: string;
-  ownerName: string;
-  ownerPhone: string;
-  territoryId: string | null;
-  franchiseId: string | null;
-  assignedDriverId: string | null;
-  assignedDeviceId: string | null;
-  status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE' | 'RETIRED';
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DeploymentAudit {
-  deploymentId: string;
-  campaignId: string;
-  territoryId: string;
-  deviceId: string;
-  status: 'SUCCESS' | 'FAILED' | 'RETRY';
-  failureReason?: string;
-  deployedAt: string;
-}
-
-export interface DeviceTelemetry {
-  deviceId: string;
-  timestamp: string;
-  batteryLevel: number;
-  cpuUsagePercent: number;
-  ramUsedPercent: number;
-  storageUsedPercent: number;
-  temperature: number;
-  networkType: string;
-  signalStrength: number;
-}
-
-export interface Territory {
-  territoryId: string;
-  territoryName: string;
-  stateId: string;
-  district?: string;
-  managedBy: 'HQ' | 'FRANCHISE';
-  franchiseId: string | null;
-  franchiseIds?: string[]; // Multiple mapping if needed
-  status: 'ACTIVE' | 'INACTIVE';
-  activeDrivers?: number;
-  activeDevices?: number;
-  activeCampaigns?: number;
-  totalRevenue?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Settlement {
-  settlementId: string;
-  stateId?: string;
-  territoryId: string;
-  franchiseId: string | null;
-  grossRevenue: number;
-  franchiseShare: number;
-  hqShare: number;
-  status: 'PENDING' | 'PROCESSING' | 'SETTLED' | 'FAILED';
-  createdAt: string;
-  settledAt?: string;
-}
-
-export interface RevenueDistribution {
-  distributionId: string;
-  campaignId: string;
   amount: number;
-  hqShare: number;
-  franchiseShare: number;
-  driverShare: number;
-  territoryId: string;
-  status: 'PENDING' | 'PROCESSED';
-  createdAt: string;
+  timestamp: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export interface TerritoryMetrics {
-  territoryId: string;
-  territoryName: string;
-  managedBy?: 'HQ' | 'FRANCHISE';
-  franchiseId: string | null;
-  healthStatus?: 'HEALTHY' | 'AT_RISK' | 'CRITICAL';
-  driversCount?: number;
-  customersCount?: number;
-  campaignsCount?: number;
-  workersCount?: number;
-  openTicketsCount?: number;
-  totalRevenue: number;
-  lastActivityAt?: string;
-  drivers?: { total: number; active: number; inactive: number; pendingApproval: number; };
-  campaigns?: { total: number; active: number; completed: number; rejected: number; };
-  settlements?: { pending: number; processing: number; settled: number; failed: number; };
-  support?: { open: number; resolved: number; escalated: number; };
-  revenue?: { gross: number; hqShare: number; franchiseShare: number; };
-  devices?: { online: number; offline: number; };
-  updatedAt?: string;
+export interface IoTDevice {
+  id: string;
+  name: string;
+  activeStatus: 'ONLINE' | 'OFFLINE';
+  lastSyncedAt: number;
+  metrics: {
+    lat: number;
+    lng: number;
+    speed: number;
+    battery: number;
+  };
 }
 
-export interface FranchiseMetrics {
-  franchiseId: string;
-  franchiseName: string;
-  status: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
-  territoriesAssigned: number;
-  drivers: { total: number; active: number; };
-  campaigns: { total: number; active: number; completed: number; };
-  revenue: { gross: number; pending: number; settled: number; };
-  support: { openTickets: number; };
-  healthScore: number;
-  updatedAt: string;
+export interface Transaction {
+  id: string;
+  type: 'INCOME' | 'EXPENSE';
+  category: string;
+  amount: number;
+  timestamp: number;
+  description: string;
 }
 
-export interface DriverMetrics {
-  territoryId: string;
-  totalDrivers: number;
-  activeDrivers: number;
-  inactiveDrivers: number;
-  pendingApproval: number;
-  deviceAssigned: number;
-  deviceUnassigned: number;
-  driverApprovalRate: number;
-  activeDriverRate: number;
-  updatedAt: string;
-}
-
-export interface CampaignMetrics {
-  territoryId: string;
-  draft: number;
-  pendingApproval: number;
-  active: number;
-  completed: number;
-  rejected: number;
-  expired: number;
-  grossRevenue: number;
-  averageCPM: number;
-  totalImpressions: number;
-  campaignCompletionRate: number;
-  updatedAt: string;
-}
-
-export interface SettlementMetrics {
-  territoryId: string;
-  pending: number;
-  processing: number;
-  settled: number;
-  failed: number;
-  pendingRevenue: number;
-  settledRevenue: number;
-  settlementSuccessRate: number;
-  oldestPendingSettlementAgeDays: number;
-  updatedAt: string;
-}
-
-export interface DeviceMetrics {
-  territoryId: string;
-  totalDevices?: number;
-  totalInventory?: number;
-  inStock?: number;
-  assigned?: number;
-  active?: number;
-  offline?: number;
-  maintenance?: number;
-  retired?: number;
-  online?: number;
-  heartbeatFailures?: number;
-  provisioningFailures?: number;
-  deviceHealthScore?: number;
-  averageHealthScore?: number;
-  updatedAt: string;
-}
-
-export interface FleetMetrics {
-  territoryId: string;
-  totalVehicles: number;
-  activeVehicles: number;
-  inactiveVehicles: number;
-  updatedAt: string;
-}
-
-export interface CampaignAnalytics {
-  campaignId: string;
-  advertiserId: string;
-  territoryIds: string[];
-  impressions: number;
-  reach: number;
-  spend: number;
-  cpi: number; 
-  effectiveCpm: number;
-  utilizationRate: number;
-  uptimeRate: number;
-  completionRate: number;
-  roiPercentage: number;
-  updatedAt: string;
-}
-
-export interface AdvertiserAnalytics {
-  advertiserId: string;
-  activeCampaigns: number;
-  completedCampaigns: number;
-  totalSpend: number;
-  totalImpressions: number;
-  totalReach: number;
-  averageRoi: number;
-  bestPerformingTerritoryId: string;
-  updatedAt: string;
-}
-
-export interface RevenueAnalytics {
-  periodId: string;
-  territoryId: string | 'global';
-  grossRevenue: number;
-  hqShare: number;
-  franchiseShare: number;
-  pendingSettlements: number;
-  settledRevenue: number;
-  revenueGrowthRate: number;
-  updatedAt: string;
-}
-
-export interface FranchiseTerritory {
-  territoryId: string;
-  territoryName: string;
-  franchiseId: string | null;
-  franchiseName: string | null;
-  ownershipStatus: 'HQ' | 'ASSIGNED' | 'SUSPENDED';
-  assignedAt?: string;
-  assignedBy?: string;
+export interface ChatMessage {
+  id?: string;
+  text?: string;
+  senderId?: string;
+  senderName: string;
+  senderRole?: string;
+  timestamp: any;
+  role?: string;
+  content?: string;
 }
 
 export interface SupportTicket {
   id: string;
-  userId?: string;
-  subject?: string;
-  title?: string;
-  description?: string;
-  message?: string;
-  status: 'OPEN' | 'IN_PROGRESS' | 'CLOSED' | 'resolved' | 'open' | 'in_progress';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  ticketNumber?: string;
+  type: 'DRIVER' | 'CUSTOMER' | 'SUPPORT_TEAM' | string;
   createdAt: any;
   updatedAt?: any;
-  stateId?: string;
-  territoryId?: string;
   cityId?: string;
-  franchiseId?: string | null;
-  type?: 'CUSTOMER' | 'DRIVER' | 'FRANCHISE' | 'DEVICE';
-  ticketNumber?: string;
-  assignedToHQ?: boolean;
-  driverId?: string;
-  driverName?: string;
-  lat?: number;
-  lng?: number;
-  customerId?: string;
+  franchiseId?: string;
+  subject?: string;
+  message?: string;
+  description?: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | string;
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED' | string;
+  messages?: ChatMessage[];
+  userId?: string;
+  requesterName?: string;
+  requesterPhone?: string;
+  territoryId?: string;
+  designApprovalLink?: string;
+  designPreviewUrl?: string;
+  title?: string;
   customerName?: string;
+  driverName?: string;
+  assignedToHQ?: boolean;
   category?: string;
   lastMessage?: string;
+  driverId?: string;
+  customerId?: string;
   campaignId?: string;
-  migrationStatus?: string;
-  messages?: any[];
-}
-
-export interface DriverPayment {
-  id: string;
-  driverId: string;
-  amount: number;
-  type: 'earning' | 'withdrawal';
-  status: 'pending' | 'success' | 'failed';
-  paymentMethod: string;
-  remark?: string;
-  createdAt: string;
-  updatedAt: string;
-  stateId: string;
-  territoryId: string;
-  cityId: string;
-  franchiseId: string | null;
+  lat?: number;
+  lng?: number;
+  stateId?: string;
 }
 
 export interface DriverQuote {
   id: string;
-  driverId: string;
-  driverName: string;
-  terminalId: string;
   quote: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string;
   submittedAt: string;
-  approvedAt?: string;
-  approvedBy?: string;
+  approvedAt?: string | null;
+  driverId: string;
+  driverName?: string;
   rejectedReason?: string;
-  month: string; // YYYY-MM
+  approvedBy?: string;
+  month?: string;
+  terminalId?: string;
 }
 
+export interface AutoDevice {
+  id: string;
+  status: string;
+  driverName?: string;
+  autoNumber?: string;
+  batteryLevel?: number;
+  signalStrength?: string;
+  franchiseId?: string;
+  lastHeartbeat?: any;
+  remoteUrl?: string;
+}
+
+export type Device = AutoDevice;
+
+export interface User {
+  id: string;
+  uid?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  role?: UserRole;
+  status?: string;
+  isApproved?: boolean;
+  createdAt?: any;
+  cityId?: string;
+  permissions?: Record<string, boolean>;
+}
+
+export interface Settlement {
+  settlementId?: string;
+  driverId: string;
+  amount: number;
+  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | string;
+  createdAt?: any;
+  paymentReference?: string;
+}

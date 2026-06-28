@@ -2,13 +2,447 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- MXQ Android TV Network Recovery Guard -->
+    <script>
+      (function() {
+        var RETRY_INTERVAL = 10000;
+        var PING_TIMEOUT = 3500;
+        var isOffline = false;
+        var retryTimer = null;
+        var countdownTimer = null;
+
+        function pingHost(onSuccess, onFailure) {
+          if (!navigator.onLine) {
+            onFailure();
+            return;
+          }
+          
+          // Use a simpler HEAD request and shorter timeout for less intrusive check
+          var xhr = new XMLHttpRequest();
+          var completed = false;
+          
+          try {
+            xhr.open('HEAD', '/?cb=' + Date.now(), true);
+            xhr.timeout = 2500;
+            
+            xhr.onreadystatechange = function() {
+              if (xhr.readyState >= 2) {
+                if (completed) return;
+                completed = true;
+                if (xhr.status > 0 && xhr.status < 500) {
+                  onSuccess();
+                } else {
+                  onFailure();
+                }
+                try { xhr.abort(); } catch(e) {}
+              }
+            };
+            
+            xhr.onerror = function() {
+              if (!completed) { completed = true; onFailure(); }
+            };
+            
+            xhr.ontimeout = function() {
+              if (!completed) { completed = true; onFailure(); }
+            };
+            
+            xhr.send();
+          } catch (e) {
+            if (!completed) { completed = true; onFailure(); }
+          }
+        }
+
+        function createOverlay() {
+          if (document.getElementById('autoads-network-recovery-overlay')) return;
+          
+          var overlayEl = document.createElement('div');
+          overlayEl.id = 'autoads-network-recovery-overlay';
+          overlayEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background-color:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;z-index:99999999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center;';
+          
+          var card = document.createElement('div');
+          card.style.cssText = 'background-color:#161b22;border:1px solid #30363d;border-radius:16px;padding:32px;width:100%;max-width:480px;box-sizing:border-box;box-shadow:0 12px 32px rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;gap:20px;';
+          
+          // Spinner element
+          var spinnerContainer = document.createElement('div');
+          spinnerContainer.style.cssText = 'width:56px;height:56px;position:relative;margin:10px 0;';
+          
+          var spinner = document.createElement('div');
+          spinner.style.cssText = 'width:48px;height:48px;border:4px solid rgba(245,158,11,0.1);border-top:4px solid #f59e0b;border-radius:50%;animation:autoads-spin-rev 1s linear infinite;';
+          
+          var style = document.createElement('style');
+          style.innerHTML = '@keyframes autoads-spin-rev { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+          document.head.appendChild(style);
+          
+          spinnerContainer.appendChild(spinner);
+          card.appendChild(spinnerContainer);
+          
+          // Heading
+          var title = document.createElement('h2');
+          title.innerText = 'Waiting for internet connection...';
+          title.style.cssText = 'font-size:1.4rem;font-weight:700;color:#f59e0b;margin:0;letter-spacing:0.02em;';
+          card.appendChild(title);
+          
+          // Message Description
+          var desc = document.createElement('p');
+          desc.innerText = 'MXQ Device is connecting to hotspot. The application will resume automatically once connection is established.';
+          desc.style.cssText = 'font-size:13.5px;color:#8b949e;line-height:1.6;margin:0;';
+          card.appendChild(desc);
+          
+          // Status text box
+          var statusText = document.createElement('div');
+          statusText.id = 'autoads-recovery-status';
+          statusText.innerText = 'Retrying in 10s...';
+          statusText.style.cssText = 'font-size:12.5px;color:#c9d1d9;font-weight:600;background-color:#21262d;border:1px solid #30363d;padding:8px 16px;border-radius:24px;min-width:180px;';
+          card.appendChild(statusText);
+          
+          // Retry Now button
+          var retryBtn = document.createElement('button');
+          retryBtn.innerText = 'Retry Now';
+          retryBtn.style.cssText = 'padding:10px 20px;background-color:#f59e0b;color:#0d1117;font-weight:700;border:none;border-radius:8px;cursor:pointer;font-size:12px;text-transform:uppercase;transition:all 0.2s ease;';
+          retryBtn.onclick = function() {
+            performReload();
+          };
+          card.appendChild(retryBtn);
+          
+          overlayEl.appendChild(card);
+          document.body.appendChild(overlayEl);
+          
+          // Countdown UI
+          var count = 10;
+          if (countdownTimer) clearInterval(countdownTimer);
+          countdownTimer = setInterval(function() {
+            count--;
+            if (count <= 0) {
+              clearInterval(countdownTimer);
+              statusText.innerText = 'Blowing reload...';
+            } else {
+              statusText.innerText = 'Retrying in ' + count + 's...';
+            }
+          }, 1000);
+        }
+
+        function removeOverlay() {
+          var overlay = document.getElementById('autoads-network-recovery-overlay');
+          if (overlay) {
+            overlay.parentNode.removeChild(overlay);
+          }
+          if (countdownTimer) clearInterval(countdownTimer);
+        }
+
+        function triggerReload() {
+          console.log('[Network Recovery] Triggering programmatic page reload...');
+          try {
+            window.location.reload(true);
+          } catch (e) {
+            window.location.reload();
+          }
+        }
+
+        function performReload() {
+          if (retryTimer) clearTimeout(retryTimer);
+          if (countdownTimer) clearInterval(countdownTimer);
+          var el = document.getElementById('autoads-recovery-status');
+          if (el) el.innerText = 'Connecting...';
+          triggerReload();
+        }
+
+        function handleOffline() {
+          if (isOffline) return;
+          isOffline = true;
+          console.warn('[Network Recovery] Boot network recovery activated - Connection lost at cold boot.');
+          
+          if (!document.body) {
+            window.addEventListener('DOMContentLoaded', createOverlay);
+          } else {
+            createOverlay();
+          }
+
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = setTimeout(function() {
+            triggerReload();
+          }, RETRY_INTERVAL);
+        }
+
+        function handleOnline() {
+          console.log('[Network Recovery] Internal link verified active. Booting...');
+          removeOverlay();
+        }
+
+        // Initialize Checks
+        if (!navigator.onLine) {
+          handleOffline();
+        } else {
+          pingHost(
+            function() {
+              handleOnline();
+            },
+            function() {
+              handleOffline();
+            }
+          );
+        }
+
+        window.addEventListener('online', function() {
+          console.log('[Network Recovery] Browser online event fired.');
+          triggerReload();
+        });
+        
+        window.addEventListener('offline', function() {
+          console.warn('[Network Recovery] Browser offline event fired.');
+          handleOffline();
+        });
+      })();
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Auto Ads Driver & Fleet</title>
-    <link rel="shortcut icon" href="/ic_launcher_192.png" type="image/png" />
-    <link rel="apple-touch-icon" href="/ic_launcher_192.png" />
+    <link rel="icon" href="/icon.png" type="image/png" />
+    <link rel="shortcut icon" href="/icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
     <link rel="manifest" href="/manifest.json" />
+    <style>
+      #autoads-boot-loader {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        z-index: 999999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        box-sizing: border-box;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+      #autoads-boot-loader.fade-out {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .diag-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 16px;
+        padding: 24px;
+        width: 100%;
+        max-width: 580px;
+        box-sizing: border-box;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      }
+      .diag-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+      .diag-title {
+        font-size: 1.3rem;
+        font-weight: 800;
+        color: #f59e0b; /* Amber */
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-style: italic;
+        margin: 0;
+      }
+      .diag-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 20px;
+        font-size: 12px;
+      }
+      @media (max-width: 520px) {
+        .diag-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .diag-item {
+        background-color: #21262d;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #30363d;
+        border-left: 3px solid #8b949e;
+        box-sizing: border-box;
+      }
+      .diag-item.success { border-left-color: #238636; }
+      .diag-item.warning { border-left-color: #d29922; }
+      .diag-item label {
+        display: block;
+        color: #8b949e;
+        font-size: 9px;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+      }
+      .diag-item span {
+        font-weight: 600;
+        color: #f0f6fc;
+        word-break: break-all;
+      }
+      .checkpoint-list {
+        margin-bottom: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 4px 0;
+      }
+      .checkpoint-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12.5px;
+        padding: 8px 12px;
+        background-color: #0d1117;
+        border-radius: 8px;
+        border: 1px solid #21262d;
+      }
+      .checkpoint-badge {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9.5px;
+        font-weight: bold;
+        color: white;
+        flex-shrink: 0;
+      }
+      .checkpoint-badge.pending { background-color: #484f58; color: #8b949e; }
+      .checkpoint-badge.running { background-color: #1f6feb; color: white; animation: pulse 1.5s infinite; }
+      .checkpoint-badge.completed { background-color: #238636; color: white; }
+      .checkpoint-badge.failed { background-color: #da3633; color: white; }
+      
+      .checkpoint-text {
+        color: #8b949e;
+        font-weight: 500;
+      }
+      
+      .error-panel {
+        display: none;
+        background-color: rgba(248, 81, 73, 0.1);
+        border: 1px solid #f85149;
+        color: #ff7b72;
+        padding: 12px 14px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+        font-size: 11px;
+        word-break: break-all;
+        white-space: pre-wrap;
+        max-height: 140px;
+        overflow-y: auto;
+      }
+      
+      .diag-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+      }
+      .btn {
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-weight: 700;
+        cursor: pointer;
+        border: none;
+        font-size: 11px;
+        text-transform: uppercase;
+        transition: all 0.2s ease;
+        box-sizing: border-box;
+      }
+      .btn-primary {
+        background-color: #f59e0b;
+        color: #0d1117;
+      }
+      .btn-primary:hover:not(:disabled) { background-color: #d97706; }
+      .btn-primary:disabled {
+        background-color: #21262d;
+        color: #484f58;
+        cursor: not-allowed;
+        border: 1px solid #30363d;
+      }
+      .btn-secondary {
+        background-color: #21262d;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+      }
+      .btn-secondary:hover { background-color: #30363d; }
+      
+      .btn-legacy-active {
+        background-color: #238636 !important;
+        color: white !important;
+        border-color: #2ea043 !important;
+      }
+
+      @keyframes pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 1; }
+        100% { opacity: 0.6; }
+      }
+    </style>
+    <script>
+      (function() {
+        window.__BOOT_ERRORS = [];
+        window.__CURRENT_BOOT_STEP = 1;
+        
+        // Safety Catchers for Early Failure
+        window.onerror = function(message, source, lineno, colno, error) {
+          // Ignore benign cross-origin "Script error." messages caused by browser extensions or third-party script blocks
+          var msgStr = String(message || '');
+          if (msgStr.toLowerCase().indexOf('script error') !== -1 || !source) {
+            console.warn('[Global Guard] Ignored cross-origin or extension-related script error:', msgStr, 'Source:', source);
+            return true;
+          }
+
+          var errStr = msgStr + '\nFile: ' + (source ? source.replace(window.location.origin, '') : 'unknown') + ':' + lineno + ':' + colno;
+          if (error && error.stack) {
+            errStr += '\nStack: ' + error.stack;
+          }
+          window.__BOOT_ERRORS.push(errStr);
+          showBootError(errStr);
+          
+          if (window.updateCheckpointUI) {
+            window.updateCheckpointUI(window.__CURRENT_BOOT_STEP || 1, 'failed', 'Startup Interrupted by Syntax/Parse Error');
+          }
+          return false;
+        };
+        
+        window.onunhandledrejection = function(event) {
+          var reason = event.reason;
+          var errStr = 'Unhandled rejection: ' + ((reason && (reason.stack || reason.message || reason)) || 'Unknown Exception');
+          window.__BOOT_ERRORS.push(errStr);
+          showBootError(errStr);
+          
+          if (window.updateCheckpointUI) {
+            window.updateCheckpointUI(window.__CURRENT_BOOT_STEP || 1, 'failed', 'Unhandled Promise Rejection Captured');
+          }
+        };
+        
+        function showBootError(err) {
+          var p = document.getElementById('error-panel');
+          if (p) {
+            p.style.display = 'block';
+            p.innerText = p.innerText ? (p.innerText + '\n---\n' + err) : err;
+          }
+        }
+        window.showBootError = showBootError;
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900">
+    <!-- PRE-LAUNCH DIAGNOSTIC BOOTLOADER PAGE REMOVED -->
+    <!-- 
+    <div id="autoads-boot-loader">
+      ... (rest of the removed code) ...
+    </div> 
+    -->
+    
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>

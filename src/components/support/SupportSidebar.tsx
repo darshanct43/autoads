@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { auth } from '@/lib/firebase';
 import { 
   LayoutDashboard, Send, ClipboardCheck, Radio, Database, FileText, 
   Sliders, Sparkles, Users, Link, ShieldAlert, Monitor, Cpu, 
@@ -12,17 +13,20 @@ interface SupportSidebarProps {
   onLogout: () => void;
   userRole?: string;
   badgeCounts?: Record<string, number>;
+  hasPermission?: (key: string) => boolean;
 }
 
-export default function SupportSidebar({ activeTab, setActiveTab, onLogout, userRole, badgeCounts = {} }: SupportSidebarProps) {
-  const isManager = userRole === 'SUPPORT_MANAGER' || userRole === 'SUPPORT_TEAM';
+export default function SupportSidebar({ activeTab, setActiveTab, onLogout, userRole, badgeCounts = {}, hasPermission = () => true }: SupportSidebarProps) {
+  const isManager = userRole === 'SUPPORT_MANAGER' || userRole === 'SUPPORT_TEAM' || userRole === 'ADMIN' || auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com';
   const isAdmin = userRole === 'ADMIN';
   const [isExpanded, setIsExpanded] = React.useState(true);
 
   const managerGroups = [
     { title: 'Operations', items: [
       { id: 'DASHBOARD', title: 'Dashboard', icon: LayoutDashboard },
-      { id: 'TRANSACTIONS', title: 'Transactions Registry', icon: DollarSign },
+      ...(hasPermission('viewPayments') ? [{ id: 'TRANSACTIONS', title: 'Transactions Registry', icon: DollarSign }] : []),
+      ...(hasPermission('viewDevices') ? [{ id: 'TERMINAL_HUB', title: 'Terminal Fleet Control', icon: Cpu }] : []),
+      ...(hasPermission('managePlans') ? [{ id: 'PLAN_MANAGEMENT', title: 'Plan Management', icon: Sliders }] : []),
       // Restricted Items (Admin only)
       ...(isAdmin ? [
         { id: 'REVENUE_CENTER', title: 'Revenue Hub', icon: DollarSign },
@@ -30,22 +34,18 @@ export default function SupportSidebar({ activeTab, setActiveTab, onLogout, user
       ] : []),
     ]},
     { title: 'Inbound', items: [
-      { id: 'SUPPORT_RELAY', title: 'Support Hub', icon: Ticket },
+      ...(hasPermission('viewTickets') ? [{ id: 'SUPPORT_RELAY', title: 'Support Hub', icon: Ticket }] : []),
       { id: 'FRAUD_ALERTS', title: 'Security & Anomalies', icon: ShieldAlert },
     ]},
     { title: 'Distribution', items: [
-      { id: 'COMPOSE_CAMPAIGN', title: 'Campaign Composer', icon: Send },
-      { id: 'LIVE_CAMPAIGNS', title: 'Live Campaigns', icon: Radio },
-      { id: 'MONITOR_QUEUE', title: 'Monitor Queue', icon: ClipboardCheck },
-      { id: 'GLOBAL_OFFERS', title: 'Global Offers', icon: Sparkles },
+      ...(hasPermission('startCampaigns') ? [{ id: 'COMPOSE_CAMPAIGN', title: 'Campaign Composer', icon: Send }] : []),
+      ...(hasPermission('viewCampaigns') ? [{ id: 'LIVE_CAMPAIGNS', title: 'Live Campaigns', icon: Radio }] : []),
+      ...(hasPermission('approveCampaigns') ? [{ id: 'MONITOR_QUEUE', title: 'Monitor Queue', icon: ClipboardCheck }] : []),
+      ...(hasPermission('viewCampaigns') ? [{ id: 'GLOBAL_OFFERS', title: 'Global Offers', icon: Sparkles }] : []),
     ]},
     { title: 'Registry', items: [
-      { id: 'DRIVER_KYC_BUREAU', title: 'Driver KYC Bureau', icon: Users },
-      { id: 'QUOTES_REVIEW', title: 'Driver Quotes Review', icon: Sparkles },
-      { id: 'PRICING_CONTROL', title: 'Pricing Proposals', icon: Sliders },
-      ...(userRole === 'SUPPORT_MANAGER' || isAdmin ? [
-        { id: 'PRICING_CONFIG', title: 'Rate Approvals', icon: ClipboardCheck },
-      ] : []),
+      ...(hasPermission('viewDrivers') ? [{ id: 'DRIVER_KYC_BUREAU', title: 'Driver KYC Bureau', icon: Users }] : []),
+      ...(hasPermission('viewDrivers') ? [{ id: 'QUOTES_REVIEW', title: 'Driver Quotes Review', icon: Sparkles }] : []),
     ]},
   ];
 

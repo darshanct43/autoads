@@ -1,203 +1,372 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
-import { auth } from './lib/firebase';
-import { firebaseService } from './services/firebaseService';
-import { UserRole } from './types';
-
-// Component Imports
+import { useState, useEffect } from 'react';
+import { auth } from '@/lib/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Auth from './components/Auth';
-import BootAnimation from './components/common/BootAnimation';
-import AutoLoader from './components/common/AutoLoader';
-
-// Lazy Loaded Portals for Performance Optimization
-const AdminPortal = lazy(() => import('./components/portals/AdminPortal'));
-const CustomerPortal = lazy(() => import('./components/portals/CustomerPortal'));
-const DevicePortal = lazy(() => import('./components/portals/DevicePortal'));
-const DriverPortal = lazy(() => import('./components/portals/DriverPortal'));
-const SupportPortal = lazy(() => import('./components/portals/SupportPortal'));
-
-import DriverQuotesExtension from './components/portals/DriverQuotesExtension';
+import AdminPortal from './components/portals/AdminPortal';
+import CustomerPortal from './components/portals/CustomerPortal';
+import SupportPortal from './components/portals/SupportPortal';
 import FranchisePortal from './components/portals/FranchisePortal';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
-
-// Safe storage helpers for platform sandbox resilience
-const safeGetItem = (key: string): string | null => {
-  try {
-    return localStorage.getItem(key);
-  } catch (e) {
-    console.warn("[Storage] Read access blocked or unsupported in this container", e);
-    return null;
-  }
-};
-
-const safeSetItem = (key: string, value: string): void => {
-  try {
-    localStorage.setItem(key, value);
-  } catch (e) {
-    console.warn("[Storage] Write access blocked or unsupported in this container", e);
-  }
-};
-
-const safeRemoveItem = (key: string): void => {
-  try {
-    localStorage.removeItem(key);
-  } catch (e) {
-    console.warn("[Storage] Delete access blocked or unsupported in this container", e);
-  }
-};
+import DriverPortal from './components/portals/DriverPortal';
+import SafeRideView from './components/public/SafeRideView';
+import DevicePortal from './components/portals/DevicePortal';
+import LoaderPage from './components/public/LoaderPage';
+import BrandIntroduction from './components/common/BrandIntroduction';
+import { UserRole } from './types';
+import { firebaseService } from './services/firebaseService';
+import { MotionConfig } from 'motion/react';
 
 export default function App() {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showBoot, setShowBoot] = useState(true);
-
-  console.log("[FORENSIC] [App] Rendering app with state:", { userExists: !!user, email: user?.email, userRole, loading, showBoot });
-
-  useEffect(() => {
-    // Safety Force Start: If still stuck in boot or loading after 3.5 seconds, force continue
-    console.log("[FORENSIC] [App] Registering 3.5s safety load timeout hook");
-    const timer = setTimeout(() => {
-      if (showBoot || loading) {
-        console.warn("[FORENSIC] [App] SAFETY TRIGGERED: Loading had stalled. Forcing main interface activation!");
-        setShowBoot(false);
-        setLoading(false);
-      }
-    }, 3500);
-    return () => clearTimeout(timer);
-  }, [showBoot, loading]);
+  const [showIntro, setShowIntro] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('auto_ads_intro_completed') !== 'true';
+    }
+    return true;
+  });
 
   useEffect(() => {
-    console.log("[FORENSIC] [App] Initialization hook launched");
-    // Check for offline debug bypass session
-    const isOffline = safeGetItem('auto_ads_offline_mode') === 'true';
-    if (isOffline) {
-      const offlineRole = (safeGetItem('auto_ads_offline_role') as UserRole) || 'CUSTOMER';
-      console.log("[FORENSIC] [App] BYPASS ACTIVED: Offline mode enabled for role:", offlineRole);
-      setUser({ uid: 'OFFLINE_UID', email: `${offlineRole.toLowerCase()}@autoads.in` } as any);
-      setUserRole(offlineRole);
+    // Robust offline-first recovery: check if offline session is active
+    const isOfflineMode = localStorage.getItem('auto_ads_offline_mode') === 'true';
+    console.log("[FORENSIC] App useEffect - isOfflineMode:", isOfflineMode);
+    if (isOfflineMode) {
+      console.log("[FORENSIC] [Bypass] Recovering active offline-mode session on boot/refresh");
+      const offlineRole = localStorage.getItem('auto_ads_offline_role') as UserRole || 'CUSTOMER';
+      const isTerminalStored = localStorage.getItem('auto_ads_is_terminal') === 'true';
+      
+      setUser({ uid: 'offline_mock_device_uuid', email: 'offline-device@autoads.in' });
+      setRole(offlineRole === 'DEVICE' || (offlineRole === 'DRIVER' && isTerminalStored) ? 'DEVICE' : offlineRole);
       setLoading(false);
-      setShowBoot(false);
-      return;
+      return () => {};
     }
 
-    console.log("[FORENSIC] [App] Registering Firebase Auth state change subscriber");
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      console.log("[FORENSIC] [App] Firebase Auth state changed event received. User authenticated:", !!firebaseUser, firebaseUser?.email);
+    // Dynamic Firebase Auth bypass strategy for raw Chrome/WebView 66 compatibility validation
+    const bypassFirebase = (typeof window !== 'undefined') && (
+      window.location.search.indexOf('bypass_firebase=true') !== -1 ||
+      localStorage.getItem('auto_ads_bypass_firebase') === 'true'
+    );
+
+    if (bypassFirebase) {
+      console.log("[FORENSIC] [Bypass] Bypassing Firebase Auth entirely for old WebView/MXQ");
+      // Load a direct, responsive mock simulation
+      setUser({ uid: 'legacy_mock_device_uuid', email: 'legacy-device@autoads.in' });
+      setRole('DEVICE'); // Directly boot to DevicePortal (IoT active-status player)
+      setLoading(false);
+      return () => {};
+    }
+
+    const path = typeof window !== 'undefined' ? window.location.pathname : '';
+    const safeRideMatch = path.match(/^\/(?:safe-ride|ride)\/([^/]+)/);
+
+    if (safeRideMatch) {
+       console.log("[FORENSIC] [App] Public path detected. Skipping Auth listener.");
+       setUser({ uid: 'public_view_user' });
+       setLoading(false);
+       return () => {};
+    }
+
+    console.log("[TRACE 5] Before onAuthStateChanged");
+    
+    // Check path for safe ride routes early to skip auth if not needed
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    const isRidePath = /^\/(?:safe-ride|ride|family-ride)\//.test(currentPath);
+    console.log("[FORENSIC] [App] Initial path for Auth check:", currentPath, "isRidePath:", isRidePath);
+    
+    if (isRidePath) {
+       console.log("[FORENSIC] [App] Public path detected during Auth setup. Skipping Auth listener.");
+       setUser({ uid: 'public_view_user' });
+       setLoading(false);
+       return () => {};
+    }
+
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log("[TRACE 5.1] onAuthStateChanged callback triggered. User authenticated?", !!firebaseUser);
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          const emailLower = firebaseUser.email?.toLowerCase() || '';
-          
-          console.log("[FORENSIC] [App] Profile check task starting for user UID:", firebaseUser.uid);
-          const profile = await firebaseService.getUserProfile(firebaseUser.uid);
-          const driverProfile = await firebaseService.getDriverProfile(firebaseUser.uid);
-          console.log("[FORENSIC] [App] User records fetched. Applet system profile role:", profile?.role, "Driver record exists:", !!driverProfile);
-          
-          let role: UserRole = 'CUSTOMER';
-          
-          if (profile?.role === 'ADMIN' || emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
-            role = 'ADMIN';
-          } else if (profile?.role === 'SUPPORT' || profile?.role === 'SUPPORT_AGENT' || profile?.role === 'SUPPORT_MANAGER' || profile?.role === 'SUPPORT_TEAM' || profile?.role === 'STAFF' || emailLower.includes('support')) {
-            role = 'SUPPORT_TEAM';
-          } else if (profile?.role === 'FRANCHISE_STAFF') {
-            role = 'FRANCHISE_STAFF';
-          } else if (profile?.role === 'FRANCHISE_OWNER') {
-            role = 'FRANCHISE_OWNER';
-          } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
-            role = 'FRANCHISE_OWNER';
-          } else if (profile?.role === 'DRIVER' || driverProfile) {
-            role = 'DRIVER';
-          } else if (profile?.role) {
-            role = profile.role as UserRole;
+          // Resolve role with robust fallback to cache under bad connectivity / offline modes
+          let resolvedRole: UserRole | null = null;
+          try {
+            const profile = await firebaseService.getUserProfile(firebaseUser.uid);
+            const email = firebaseUser.email?.toLowerCase() || '';
+            if (profile) {
+              if (email === 'vijayathrishu@gmail.com' && profile.role !== 'SUPPORT_MANAGER') {
+                console.log("[FORENSIC] vijayathrishu@gmail.com profile exists but with wrong role:", profile.role, "- updating to SUPPORT_MANAGER");
+                try {
+                  await firebaseService.updateUserRole(firebaseUser.uid, 'SUPPORT_MANAGER');
+                  profile.role = 'SUPPORT_MANAGER';
+                } catch (updErr) {
+                  console.error("[FORENSIC] Failed to update role for vijayathrishu:", updErr);
+                }
+              }
+              resolvedRole = profile.role as UserRole;
+              console.log("[FORENSIC] Firestore user profile found. Using profile.role only:", resolvedRole);
+            } else {
+              // Self-heal: If profile is missing for a privileged email, create it in USERS_COLLECTION
+              if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
+                console.log("[FORENSIC] Missing ADMIN profile detected during auth listener for email:", email, "Saving profile...");
+                try {
+                  await firebaseService.saveUserProfile(
+                    firebaseUser.uid,
+                    firebaseUser.displayName || 'Admin Darshan',
+                    firebaseUser.phoneNumber || '+919999999999',
+                    'ADMIN',
+                    'ENTERPRISE',
+                    { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
+                  );
+                  resolvedRole = 'ADMIN';
+                  console.log("[FORENSIC] Successfully created missing ADMIN profile.");
+                } catch (saveErr) {
+                  console.error("[FORENSIC] Failed to save ADMIN profile:", saveErr);
+                }
+              } else if (email === 'vijayathrishu@gmail.com') {
+                console.log("[FORENSIC] Missing SUPPORT_MANAGER profile detected during auth listener for email:", email, "Saving profile...");
+                try {
+                  await firebaseService.saveUserProfile(
+                    firebaseUser.uid,
+                    firebaseUser.displayName || 'Vijayathrishu Support',
+                    firebaseUser.phoneNumber || '+919999999999',
+                    'SUPPORT_MANAGER',
+                    'FREE',
+                    { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
+                  );
+                  resolvedRole = 'SUPPORT_MANAGER';
+                  console.log("[FORENSIC] Successfully created missing SUPPORT_MANAGER profile for vijayathrishu.");
+                } catch (saveErr) {
+                  console.error("[FORENSIC] Failed to save SUPPORT_MANAGER profile:", saveErr);
+                }
+              }
+            }
+            
+            if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
+              console.log("[FORENSIC] Role forced to DEVICE due to Terminal Mode toggle. Previous resolvedRole =", resolvedRole);
+              resolvedRole = 'DEVICE';
+              console.log("[FORENSIC] Role now =", resolvedRole);
+            }
+          } catch (e) {
+            console.warn("[FORENSIC] App profile fetch failed. Recovering cached role fallback.", e);
           }
 
-          if (safeGetItem('auto_ads_is_terminal') === 'true') {
-            console.log("[FORENSIC] [App] Overriding role to DEVICE due to is_terminal flat");
-            role = 'DEVICE';
+          if (!resolvedRole) {
+            resolvedRole = localStorage.getItem('auto_ads_last_role') as UserRole || 'CUSTOMER';
+            console.log("[FORENSIC] Role forced to fallback =", resolvedRole);
+          } else {
+            localStorage.setItem('auto_ads_last_role', resolvedRole);
+            console.log("[FORENSIC] Role stored in auto_ads_last_role =", resolvedRole);
           }
           
-          console.log("[FORENSIC] [App] Determined role outcome:", role);
-          setUserRole(role);
-        } catch (err) {
-          console.error("[FORENSIC] [App] Non-fatal error while fetching profile, falling back gracefully to CUSTOMER:", err);
-          setUserRole('CUSTOMER');
+          const email = firebaseUser.email?.toLowerCase() || '';
+          let role: UserRole = resolvedRole;
+          
+          // Fallback logic for emails without pre-existing user profiles or when offline/cache-fallback is active
+          if (email === 'vijayathrishu@gmail.com') {
+            role = 'SUPPORT_MANAGER';
+            localStorage.setItem('auto_ads_last_role', 'SUPPORT_MANAGER');
+          } else if (!resolvedRole) {
+            if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
+              role = 'ADMIN';
+              localStorage.setItem('auto_ads_last_role', 'ADMIN');
+            } else if (email.includes('support')) {
+              role = 'SUPPORT_TEAM';
+              localStorage.setItem('auto_ads_last_role', 'SUPPORT_TEAM');
+            } else if (email === 'franchise@autoads.in' || email.includes('franchise')) {
+              role = 'FRANCHISE_OWNER';
+              localStorage.setItem('auto_ads_last_role', 'FRANCHISE_OWNER');
+            }
+          }
+          
+          // Debug role resolution
+          const isTerminalStored = typeof window !== 'undefined' && localStorage.getItem('auto_ads_is_terminal') === 'true';
+          const allLocalStorage = typeof window !== 'undefined' ? JSON.stringify(localStorage) : 'undefined';
+          console.log("[FORENSIC] Auth Resolution - User:", firebaseUser.uid, "Email:", email, "Profile Role:", resolvedRole, "Final Assigned Role:", role, "Stored Terminal Mode:", isTerminalStored, "All LocalStorage:", allLocalStorage);
+          
+          if (role === 'DEVICE') {
+            localStorage.removeItem('auto_ads_tv_mode');
+            localStorage.removeItem('auto_ads_device_mode');
+            if (typeof window !== 'undefined' && window.location.search) {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('tv');
+              url.searchParams.delete('tv_mode');
+              url.searchParams.delete('device');
+              url.searchParams.delete('device_mode');
+              window.history.replaceState({}, '', url.pathname + url.search);
+            }
+          }
+          setRole(role);
+        } catch (err: any) {
+          console.error("Auth role resolution failed:", err);
+          // Fallback to customer instead of locking screen on parsing details error
+          setRole('CUSTOMER');
         }
       } else {
-        console.log("[FORENSIC] [App] No authenticated user detected, cleaning role state");
-        setUserRole(null);
+        setRole(null);
       }
       setLoading(false);
     });
-
-    return () => {
-      console.log("[FORENSIC] [App] Cleanup hook triggered, unsubscribing from auth state updates");
-      unsubscribe();
-    };
+    console.log("[TRACE 6] After onAuthStateChanged registration");
+    return unsub;
   }, []);
 
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  console.log("[FORENSIC] [App] Current Pathname:", path);
+
+  // Consolidated path detection
+  // Try both path and fallback
+  const safeRideMatch = path.match(/^\/(?:safe-ride|ride|family-ride)\/([^/?#]+)/) || 
+                        window.location.hash.match(/(?:safe-ride|ride|family-ride)\/([^/?#]+)/) ||
+                        window.location.search.match(/[?&]terminalId=([^&]+)/);
+  const terminalId = safeRideMatch ? decodeURIComponent(safeRideMatch[1]) : null;
+  console.log("[FORENSIC] [App] Detected terminalId:", terminalId, "from path:", path);
+
+  if (loading) return <div className="text-white bg-[#0b0f19] min-h-screen flex items-center justify-center font-mono text-xs">Verifying Security Session...</div>;
+
   const handleLogout = async () => {
+    console.log("[FORENSIC] App handleLogout started");
+    localStorage.removeItem('auto_ads_is_terminal');
+    localStorage.removeItem('auto_ads_terminal_id');
+    localStorage.removeItem('auto_ads_access_key');
+    localStorage.removeItem('auto_ads_offline_mode');
+    localStorage.removeItem('auto_ads_offline_role');
+    localStorage.removeItem('auto_ads_last_role');
+    localStorage.removeItem('auto_ads_tv_mode');
+    localStorage.removeItem('auto_ads_device_mode');
     try {
-      safeRemoveItem('auto_ads_is_terminal');
-      safeRemoveItem('auto_ads_offline_mode');
-      safeRemoveItem('auto_ads_offline_role');
-      await signOut(auth).catch(() => {});
-      setUser(null);
-      setUserRole(null);
-    } catch (err) {
-      console.error("Logout failed:", err);
+      await signOut(auth);
+    } catch (e) {
+      console.warn("[FORENSIC] App signOut failed/timed out, forcing client cleanup:", e);
     }
+    console.log("[FORENSIC] App handleLogout finished, setting state");
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/');
+    }
+    setRole(null);
+    setUser(null);
   };
 
-  const handleRoleJump = (role: UserRole) => {
-    setUserRole(role);
-  };
+  const content = (() => {
+    console.log("[FORENSIC RUNTIME MATRIX LOG]");
+    console.log("ROLE =", role);
+    console.log("PATH =", path);
+    console.log("loading =", loading);
+    console.log("isTerminalStored =", localStorage.getItem('auto_ads_is_terminal'));
 
-  // Render components according to user auth state and role
-  return (
-    <ErrorBoundary componentName="Network Core">
-      {showBoot ? (
-        <BootAnimation onComplete={() => setShowBoot(false)} />
-      ) : loading ? (
-        <div id="app-root-loader" className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
-          <AutoLoader />
-        </div>
-      ) : !user || !userRole ? (
-        <Auth onLogin={(role: UserRole) => setUserRole(role)} />
-      ) : (
-        <React.Fragment>
-          <PWAInstallPrompt />
-          <Suspense fallback={
-            <div id="portal-lazy-loader" className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
-              <AutoLoader />
+    if (path === '/loader') {
+      console.log("ACTUAL_COMPONENT_RENDERED = LoaderPage");
+      return <LoaderPage />;
+    }
+
+    if (terminalId) {
+       console.log("[FORENSIC] Returning SafeRideView");
+       console.log("ACTUAL_COMPONENT_RENDERED = SafeRideView");
+       return <SafeRideView terminalId={terminalId} />;
+    }
+
+    // Require Auth for all other routes
+    if (!user || !role) {
+       console.log("[FORENSIC] No user/role, checking showIntro:", showIntro);
+       if (showIntro) {
+          console.log("ACTUAL_COMPONENT_RENDERED = BrandIntroduction");
+          return (
+            <BrandIntroduction 
+              onComplete={() => {
+                localStorage.setItem('auto_ads_intro_completed', 'true');
+                setShowIntro(false);
+              }} 
+            />
+          );
+       }
+       console.log("[FORENSIC] No user/role, returning Auth");
+       console.log("ACTUAL_COMPONENT_RENDERED = Auth");
+       return <Auth onLogin={(r) => setRole(r)} />;
+    }
+
+    // Role-based routing for other authenticated users
+    console.log("[FORENSIC] App routing. TOGGLE =", localStorage.getItem("auto_ads_is_terminal"), "ROLE =", role, "PATH =", path);
+    if (path === '/support' && (role === 'SUPPORT_TEAM' || role === 'SUPPORT' || role === 'SUPPORT_AGENT' || role === 'SUPPORT_MANAGER' || role === 'HQ_SUPPORT' || role === 'STAFF')) {
+      console.log("ACTUAL_COMPONENT_RENDERED = SupportPortal");
+      return <SupportPortal onLogout={handleLogout} />;
+    }
+    if (path === '/admin' && (role === 'ADMIN' || role === 'HQ_ADMIN')) {
+      console.log("ACTUAL_COMPONENT_RENDERED = AdminPortal");
+      return <AdminPortal onLogout={handleLogout} />;
+    }
+    if (path === '/driver' && role === 'DRIVER') {
+      console.log("ACTUAL_COMPONENT_RENDERED = DriverPortal");
+      return <DriverPortal onLogout={handleLogout} />;
+    }
+    if (path === '/customer' && role === 'CUSTOMER') {
+      console.log("ACTUAL_COMPONENT_RENDERED = CustomerPortal");
+      return <CustomerPortal onLogout={handleLogout} />;
+    }
+    if (path === '/franchise' && (role === 'FRANCHISE_OWNER' || role === 'FRANCHISE_STAFF')) {
+      console.log("ACTUAL_COMPONENT_RENDERED = FranchisePortal");
+      return <FranchisePortal onLogout={handleLogout} />;
+    }
+
+    switch(role) {
+      case 'HQ_ADMIN':
+      case 'ADMIN': 
+        window.history.replaceState({}, '', '/admin'); 
+        console.log("ACTUAL_COMPONENT_RENDERED = AdminPortal");
+        return <AdminPortal onLogout={handleLogout} />;
+      case 'HQ_SUPPORT':
+      case 'SUPPORT':
+      case 'SUPPORT_AGENT':
+      case 'SUPPORT_MANAGER':
+      case 'STAFF':
+      case 'SUPPORT_TEAM': 
+        window.history.replaceState({}, '', '/support'); 
+        console.log("ACTUAL_COMPONENT_RENDERED = SupportPortal");
+        return <SupportPortal onLogout={handleLogout} />;
+      case 'FRANCHISE_OWNER':
+      case 'FRANCHISE_STAFF': 
+        window.history.replaceState({}, '', '/franchise'); 
+        console.log("ACTUAL_COMPONENT_RENDERED = FranchisePortal");
+        return <FranchisePortal onLogout={handleLogout} />;
+      case 'DRIVER': 
+        if (typeof window !== 'undefined' && localStorage.getItem('auto_ads_is_terminal') === 'true') {
+          window.history.replaceState({}, '', '/terminal');
+          console.log("ACTUAL_COMPONENT_RENDERED = DevicePortal (via Driver)");
+          return <DevicePortal onLogout={handleLogout} />;
+        }
+        window.history.replaceState({}, '', '/driver'); 
+        console.log("ACTUAL_COMPONENT_RENDERED = DriverPortal");
+        return <DriverPortal onLogout={handleLogout} />;
+      case 'DEVICE':
+        window.history.replaceState({}, '', '/terminal');
+        console.log("ACTUAL_COMPONENT_RENDERED = DevicePortal");
+        return <DevicePortal onLogout={handleLogout} />;
+      case 'CUSTOMER': 
+        window.history.replaceState({}, '', '/customer'); 
+        console.log("ACTUAL_COMPONENT_RENDERED = CustomerPortal");
+        return <CustomerPortal onLogout={handleLogout} />;
+      default: 
+        console.log("ACTUAL_COMPONENT_RENDERED = UnknownRoleScreen");
+        return (
+          <div className="text-white bg-[#0b0f19] min-h-screen flex flex-col items-center justify-center gap-6 p-4 text-center">
+            <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl max-w-sm w-full">
+              <h2 className="text-lg font-black uppercase tracking-widest text-red-500 mb-2">ACCESS RESTRICTED</h2>
+              <p className="text-slate-400 text-xs font-bold leading-relaxed mb-8 uppercase tracking-widest">
+                Unknown role: {role || 'undefined'}.<br/>
+                Your account type is not recognized.
+              </p>
+              
+              <button 
+                onClick={handleLogout}
+                className="w-full py-4 bg-white text-black font-black uppercase tracking-widest text-[10px] rounded-xl hover:bg-slate-200 transition-all cursor-pointer"
+              >
+                Sign Out & Return
+              </button>
             </div>
-          }>
-            {userRole === 'ADMIN' && (
-              <AdminPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
-            )}
-            {['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(userRole) && (
-              <SupportPortal onLogout={handleLogout} onRoleJump={handleRoleJump} />
-            )}
-            {userRole === 'DRIVER' && (
-              <React.Fragment>
-                <DriverPortal onLogout={handleLogout} />
-                <DriverQuotesExtension />
-              </React.Fragment>
-            )}
-            {userRole === 'CUSTOMER' && (
-              <CustomerPortal onLogout={handleLogout} />
-            )}
-            {userRole === 'DEVICE' && (
-              <DevicePortal onLogout={handleLogout} />
-            )}
-            {/* Fallback standard route */}
-            {!['ADMIN', 'SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM', 'DRIVER', 'CUSTOMER', 'DEVICE'].includes(userRole) && (
-              <CustomerPortal onLogout={handleLogout} />
-            )}
-          </Suspense>
-        </React.Fragment>
-      )}
-    </ErrorBoundary>
+            
+            <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.4em]">Autoads Enterprise Distribution</p>
+          </div>
+        );
+    }
+  })();
+
+  return (
+    content
   );
 }

@@ -87,9 +87,9 @@ export default function BrandIntroduction({ onComplete }: BrandIntroductionProps
           >
             
             <img 
-              src={`${import.meta.env.BASE_URL}mayaan_logo.svg`} 
+              src="/mayaan_logo.svg" 
               alt="Mayaan Logo" 
-              className="w-full h-auto object-contain relative z-10 drop-shadow-[0_20px_60px_rgba(0,0,0,0.6)] scale-110" 
+              className="w-full h-auto object-contain relative z-10 drop-shadow-[0_20px_60px_rgba(0,0,0,0.6)] scale-130" 
             />
           </motion.div>
   
@@ -147,7 +147,10 @@ export default function BrandIntroduction({ onComplete }: BrandIntroductionProps
               transition={{ delay: 0.2 }}
               className="relative z-10"
             >
-              <current.icon size={80} strokeWidth={1} className="text-amber-500 drop-shadow-[0_0_20px_rgba(245,158,11,0.5)]" />
+              {(() => {
+                const IconComponent = current.icon || Truck;
+                return <IconComponent size={80} strokeWidth={1} className="text-amber-500 drop-shadow-[0_0_20px_rgba(245,158,11,0.5)]" />;
+              })()}
             </motion.div>
             
             {/* Geometric accents */}
@@ -171,7 +174,7 @@ export default function BrandIntroduction({ onComplete }: BrandIntroductionProps
             </p>
 
             <div className="space-y-3 flex-1 text-left px-4">
-              {current.points.map((point, idx) => (
+              {(current.points || []).map((point, idx) => (
                 <motion.div 
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}

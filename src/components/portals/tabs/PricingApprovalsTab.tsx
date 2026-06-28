@@ -29,8 +29,8 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
             <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pricing Queue Empty</h3>
           </div>
         ) : (
-          planProposals.map((prop) => {
-            const plan = plans.find(p => p.id === prop.planId);
+          planProposals.map((prop: any) => {
+            const plan = plans.find((p: any) => p.id === prop.planId);
             const finalNewVal = prop.proposedPrice || prop.newValue || 0;
             const finalCurrentVal = prop.currentPrice || 0;
             return (
@@ -66,13 +66,13 @@ export const PricingApprovalsTab: React.FC<PricingApprovalsTabProps> = ({
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleRejectPlan(prop.id)}
-                    className="flex-1 px-3 py-2 bg-slate-50 text-slate-400 hover:bg-slate-100 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+                    className="flex-1 px-3 py-2 bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
                   >
                     Discard
                   </button>
                   <button
                     onClick={() => handleApprovePlan(prop.id, prop.planId, finalNewVal, prop.type || "price")}
-                    className="flex-[1.5] bg-slate-900 text-amber-500 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest hover:brightness-110 transition-all font-mono"
+                    className="flex-1 bg-slate-900 text-amber-500 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest hover:brightness-110 transition-all font-mono"
                   >
                     Approve
                   </button>

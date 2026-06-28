@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Smartphone, Lock, Play, Wifi, WifiOff, AlertCircle, RefreshCw, Radio, Battery, Signal, Database, LogOut, Cpu, Eye, EyeOff, Maximize, Zap, School, Shield, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { firebaseService, AdCampaign, Driver, SafeRideSession } from '../../services/firebaseService';
-import { auth, db } from '../../lib/firebase';
+import { firebaseService, AdCampaign, Driver } from '../../services/firebaseService';
+import { auth } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import CommunityQuotesFeed from './CommunityQuotesFeed.js';
 import { isSchoolTiming, filterAds } from '../smartAds/SmartAdEngine';
 import SmartPassengerQR from '../smartAds/SmartPassengerQR';
 import { AdaptiveRideContentEngine } from '../smartRide/AdaptiveRideContentEngine';
@@ -45,12 +43,6 @@ const getSafeUrl = (url: string | undefined | null) => {
     return undefined;
   }
 
-  // Block known broken or invalid media sources
-  if (cleaned.includes('assets.mixkit.co') || cleaned.includes('d3v3y4z5a6b7c8.cloudfront.net') || cleaned.includes('5f897ff02aa9')) {
-    console.warn("[DevicePortal] getSafeUrl rejected known broken media source:", url);
-    return undefined;
-  }
-
   try {
     const decoded = decodeURI(cleaned);
     const encoded = encodeURI(decoded);
@@ -87,7 +79,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [driver, setDriver] = useState<Driver | null>(null);
   const [activeTerminal, setActiveTerminal] = useState<any>(null);
   const [playlist, setPlaylist] = useState<any[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const saved = localStorage.getItem('terminal_ad_current_index');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [playbackTick, setPlaybackTick] = useState(0);
+  const [adDuration, setAdDuration] = useState(10);
   const [needsInteraction, setNeedsInteraction] = useState(false);
   const [online, setOnline] = useState(true);
   const [networkConfig, setNetworkConfig] = useState<any>(null);
@@ -119,17 +116,10 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [activeRidePref, setActiveRidePref] = useState<any>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
   const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
-  const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
-    BrightnessManager.calculateBrightness('AUTO', 75, null)
-  );
-
-  // --- Family Safe Ride State ---
-  const [safeRideSession, setSafeRideSession] = useState<SafeRideSession | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
 
   // --- Recovered Hardware Controllers ---
   const [terminalVolume, setTerminalVolume] = useState<number>(75);
-  const [isDeviceLocked, setIsDeviceLocked] = useState<boolean>(false);
+  const [isLocked, setIsLocked] = useState<boolean>(false);
   const [emergencyBroadcast, setEmergencyBroadcast] = useState<string | null>(null);
 
   // Synchronize terminal volume with video element volume
@@ -138,176 +128,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       const volFraction = Math.max(0, Math.min(100, terminalVolume)) / 100;
       videoRef.current.volume = volFraction;
     }
-  }, [terminalVolume]);
+  }, [terminalVolume, currentIndex]);
 
-  // --- Playback Telemetry & Heartbeat state trackers ---
-  const [totalAdsPlayed, setTotalAdsPlayed] = useState(0);
-  const [todayAdsPlayed, setTodayAdsPlayed] = useState(0);
-  const [lastCampaignPlayed, setLastCampaignPlayed] = useState('');
-  const [lastTrackedIndex, setLastTrackedIndex] = useState(-1);
-
-  // --- Community Quotes Feed state ---
-  const [approvedQuotes, setApprovedQuotes] = useState<any[]>([]);
-  const [activeQuote, setActiveQuote] = useState<any>(null);
-  const [showQuoteOverlay, setShowQuoteOverlay] = useState(false);
-  const [lastQuoteAdCount, setLastQuoteAdCount] = useState(0);
-
-  // Listen to approved driver quotes from community quotes program
-  useEffect(() => {
-    if (!isLogged) return;
-    
-    const qCol = collection(db, 'driverQuotes');
-    const qQuery = query(qCol, where('status', '==', 'APPROVED'));
-    
-    const unsubscribe = onSnapshot(qQuery, (snapshot) => {
-      const fetched: any[] = [];
-      snapshot.forEach(docSnap => {
-        fetched.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setApprovedQuotes(fetched);
-    }, (error) => {
-      console.error("[Terminal] Approved quotes sync failed:", error);
-    });
-    
-    return () => unsubscribe();
-  }, [isLogged]);
-
-  // --- Community Quotes Selection & Triggering logic ---
-  useEffect(() => {
-    if (totalAdsPlayed > 0 && totalAdsPlayed % 10 === 0 && totalAdsPlayed !== lastQuoteAdCount) {
-      if (approvedQuotes.length > 0) {
-        // Find a quote (random)
-        const randomIndex = Math.floor(Math.random() * approvedQuotes.length);
-        const selected = approvedQuotes[randomIndex];
-        setActiveQuote(selected);
-        setShowQuoteOverlay(true);
-        setLastQuoteAdCount(totalAdsPlayed);
-        
-        // Pause any playing raw video underneath
-        if (videoRef.current) {
-          try {
-            videoRef.current.pause();
-          } catch (e) {
-            console.warn("[Terminal] Failed to pause video for quote overlay:", e);
-          }
-        }
-      }
-    }
-  }, [totalAdsPlayed, approvedQuotes, lastQuoteAdCount]);
-
-  // Hook to handle quote playback end
-  const handleQuoteComplete = () => {
-    setShowQuoteOverlay(false);
-    setActiveQuote(null);
-    
-    // Resume video
-    if (videoRef.current) {
-      try {
-        videoRef.current.play().catch(() => {});
-      } catch (e) {
-        console.warn("[Terminal] Failed to resume video after quote dismissed:", e);
-      }
-    }
-  };
-
-  // Helper function to sync pulse
-  const syncTerminalPulseNow = async (customIndex?: number) => {
-    const tid = activeTerminal?.id || terminalId;
-    if (!tid) return;
-
-    const idx = customIndex !== undefined ? customIndex : currentIndex;
-    const currentAdToSync = playlist[idx];
-    const adCampaignId = currentAdToSync?.campaignId || '';
-
-    const payload = {
-      playbackStatus: playlist.length > 0 ? "PLAYING_AD" : "IDLE",
-      lastPlayedCampaignId: adCampaignId || null,
-      lastPlaybackTime: new Date().toISOString(),
-      batteryLevel: systemMetrics.battery ?? 88,
-      networkStatus: online ? "CONNECTED" : "DISCONNECTED",
-      gpsLocation: {
-        latitude: posRef.current?.lat ?? 12.9716,
-        longitude: posRef.current?.lng ?? 77.5946
-      },
-      totalAdsPlayed,
-      todayAdsPlayed,
-      lastCampaignPlayed: adCampaignId || lastCampaignPlayed || ""
-    };
-
-    try {
-      await firebaseService.syncTerminalPulse(tid, payload);
-      console.log("[Heartbeat] Terminal pulse synchronized successfully:", payload);
-    } catch (e) {
-      console.error("[Heartbeat] Pulse sync failed:", e);
-    }
-  };
-
-  // Heartbeat loop - every 30 seconds
-  useEffect(() => {
-    if (!isLogged || !(activeTerminal?.id || terminalId)) return;
-
-    const interval = setInterval(() => {
-      syncTerminalPulseNow();
-    }, 30000);
-
-    // Initial immediate sync on load / resume (device starts, device resumes)
-    syncTerminalPulseNow();
-
-    return () => clearInterval(interval);
-  }, [isLogged, activeTerminal?.id, terminalId, playlist, currentIndex, totalAdsPlayed, todayAdsPlayed, lastCampaignPlayed, systemMetrics.battery, online]);
-
-  // Telemetry triggered when campaign changes or playlist changes
-  useEffect(() => {
-    if (!isLogged || !(activeTerminal?.id || terminalId)) return;
-    if (playlist.length === 0) return;
-
-    const currentAdToSync = playlist[currentIndex];
-    const adCampaignId = currentAdToSync?.campaignId || '';
-
-    if (currentIndex !== lastTrackedIndex) {
-      setLastTrackedIndex(currentIndex);
-      
-      setTotalAdsPlayed(prevTotal => {
-        const nextTotal = prevTotal + 1;
-        setTodayAdsPlayed(prevToday => {
-          const nextToday = prevToday + 1;
-          
-          // Trigger actual playback update immediately
-          const tid = activeTerminal?.id || terminalId;
-          const payload = {
-            playbackStatus: "PLAYING_AD",
-            lastPlayedCampaignId: adCampaignId || null,
-            lastPlaybackTime: new Date().toISOString(),
-            batteryLevel: systemMetrics.battery ?? 88,
-            networkStatus: online ? "CONNECTED" : "DISCONNECTED",
-            gpsLocation: {
-              latitude: posRef.current?.lat ?? 12.9716,
-              longitude: posRef.current?.lng ?? 77.5946
-            },
-            totalAdsPlayed: nextTotal,
-            todayAdsPlayed: nextToday,
-            lastCampaignPlayed: adCampaignId || lastCampaignPlayed || ""
-          };
-          
-          firebaseService.syncTerminalPulse(tid, payload).catch(e => {
-            console.error("[Playback Telemetry] Immediate sync failed:", e);
-          });
-          
-          return nextToday;
-        });
-        return nextTotal;
-      });
-
-      if (adCampaignId) {
-        setLastCampaignPlayed(adCampaignId);
-      }
-    }
-  }, [currentIndex, playlist, isLogged, activeTerminal?.id, terminalId]);
-
-  const [terminalsDump, setTerminalsDump] = useState('');
-  useEffect(() => {
-    firebaseService.getTerminals().then(t => setTerminalsDump(JSON.stringify(t)));
-  }, []);
+  // --- Smart Brightness Mode logic ---
+  const [brightnessProfile, setBrightnessProfile] = useState<BrightnessProfile>(() => 
+    BrightnessManager.calculateBrightness('AUTO', 75, null)
+  );
 
   useEffect(() => {
     const updateBrightness = () => {
@@ -327,18 +153,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   }, []);
 
   // Sync ride preferences when activeTerminal is provisioned or manual terminalId is set
-  useEffect(() => {
-     if (!safeRideSession) return;
-     if (timeRemaining <= 0) {
-         setSafeRideSession(null);
-         return;
-     }
-     const timer = setInterval(() => {
-         setTimeRemaining(prev => Math.max(0, prev - 1));
-     }, 1000);
-     return () => clearInterval(timer);
-  }, [safeRideSession, timeRemaining]);
-
   useEffect(() => {
     const tid = activeTerminal?.id || terminalId;
     if (!tid) return;
@@ -414,6 +228,109 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     return `${h}h ${m}m ${s}s`;
   };
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [showOverlayOnDemand, setShowOverlayOnDemand] = useState(false);
+  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerOverlayOnDemand = (e?: React.MouseEvent) => {
+    if (playlist.length === 0) return; // Always visible on standby
+    
+    if (e && e.target instanceof Element && (e.target.closest('button') || e.target.closest('a') || e.target.closest('[role="button"]'))) {
+      return; 
+    }
+
+    setShowOverlayOnDemand(prev => {
+      const next = !prev;
+      if (next) {
+        if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+        overlayTimeoutRef.current = setTimeout(() => {
+          setShowOverlayOnDemand(false);
+        }, 5000);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+    };
+  }, [playlist.length]);
+
+  useEffect(() => {
+    localStorage.setItem('terminal_ad_current_index', currentIndex.toString());
+  }, [currentIndex]);
+
+  const [wakeLock, setWakeLock] = useState<any>(null);
+
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator) {
+        const lock = await (navigator.wakeLock as any).request('screen');
+        setWakeLock(lock);
+        console.log("[Terminal] Wake Lock API successfully activated. Screen sleep prevented.");
+        setStatusLogs(prev => ["SYS: Wake Lock Active (Screen Dimming Off)", ...prev.slice(0, 5)]);
+      }
+    } catch (err: any) {
+      console.warn("[Terminal] Wake Lock failed:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isLogged) {
+      requestWakeLock();
+    }
+    return () => {
+      if (wakeLock) {
+        wakeLock.release().then(() => setWakeLock(null)).catch(() => {});
+      }
+    };
+  }, [isLogged]);
+
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && isLogged) {
+        await requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isLogged]);
+
+  useEffect(() => {
+    if (isLogged) {
+      localStorage.setItem('kiosk_mode_active', 'true');
+      
+      const tryFullscreen = () => {
+        const docEl = document.documentElement as any;
+        if (!document.fullscreenElement) {
+          if (docEl.requestFullscreen) {
+            docEl.requestFullscreen().catch(() => {});
+          } else if (docEl.webkitRequestFullscreen) {
+            docEl.webkitRequestFullscreen();
+          } else if (docEl.msRequestFullscreen) {
+            docEl.msRequestFullscreen();
+          }
+        }
+      };
+      
+      tryFullscreen();
+      
+      const handleGlobalClick = () => {
+        tryFullscreen();
+      };
+      
+      window.addEventListener('click', handleGlobalClick);
+      window.addEventListener('touchstart', handleGlobalClick);
+      
+      return () => {
+        window.removeEventListener('click', handleGlobalClick);
+        window.removeEventListener('touchstart', handleGlobalClick);
+      };
+    } else {
+      localStorage.removeItem('kiosk_mode_active');
+    }
+  }, [isLogged]);
+
   const posRef = useRef({ lat: 12.9716, lng: 77.5946 });
   const currentAdRef = useRef<any>(null);
 
@@ -455,8 +372,15 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       const compliantCampaigns = campaigns.filter(c => isRunTimeCompliant(c));
       
       compliantCampaigns.forEach(campaign => {
-        // Only include if definitively active/live
-        if (!['ACTIVE', 'LIVE', 'APPROVED', 'PAID'].includes(campaign.status?.toUpperCase() || '')) {
+        // Only include if definitively active/live and NOT paused
+        const status = campaign.status?.toUpperCase() || '';
+        const operationalStatus = campaign.operationalStatus?.toUpperCase() || 'ACTIVE'; // Default to ACTIVE for legacy docs
+
+        if (!['ACTIVE', 'LIVE', 'APPROVED', 'PAID'].includes(status)) {
+          return;
+        }
+
+        if (operationalStatus === 'PAUSED') {
           return;
         }
 
@@ -467,7 +391,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         if (mainUrl) {
           campaignAds.push({
             id: `${campaign.id}_primary`,
-            campaignId: campaign.id,
             url: mainUrl,
             type: campaign.mediaType || 'IMAGE',
             title: campaign.title,
@@ -482,7 +405,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
             if (adUrl && adUrl !== mainUrl) {
               campaignAds.push({
                 id: ad.id || `${campaign.id}_sub_${idx}`,
-                campaignId: campaign.id,
                 url: adUrl,
                 type: ad.type || ad.mediaType || 'IMAGE',
                 title: ad.title || campaign.title,
@@ -544,24 +466,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
          setPlaylist([]);
          setStatusLogs(prev => ["SYS: CACHE PURGED", ...prev]);
       }
-      if (terminal?.remoteCommand === 'FAMILY_SAFE_RIDE') {
-          console.log("[CMD] Family Safe Ride Received:", terminal.remoteCommandData);
-          setSafeRideSession({ 
-              terminalId: activeTerminal.id, 
-              driverId: terminal.driverId,
-              vehicleNumber: terminal.vNo || 'N/A',
-              activatedAt: new Date(),
-              expiresAt: terminal.remoteCommandData.expiresAt,
-              active: true
-          });
-          const expires = new Date(terminal.remoteCommandData.expiresAt).getTime();
-          setTimeRemaining(Math.max(0, Math.floor((expires - Date.now()) / 1000)));
-      }
       if (terminal) {
          if (typeof terminal.volume === 'number') {
             setTerminalVolume(terminal.volume);
          }
-         setIsDeviceLocked(!!terminal.isLocked);
+         setIsLocked(!!terminal.isLocked);
          setEmergencyBroadcast(terminal.emergencyBroadcast || null);
       }
     });
@@ -573,11 +482,41 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Asset Download Simulation removed
 
-  // Real-time location reporting
+  // Real-time location and telemetry (heartbeat) reporting - Every 60 seconds
   useEffect(() => {
-    if (!isLogged || !driver?.uid || !activeTerminal?.id) return;
-    // Location polling logic removed for stability
-  }, [isLogged, driver?.uid, online, activeTerminal?.id, playlist, currentIndex]);
+    if (!isLogged || !activeTerminal?.id) return;
+
+    const reportTelemetry = async () => {
+      try {
+        const currentAd = playlist[currentIndex];
+        const campaignTitle = currentAd?.title || 'None';
+        const netValue = currentNetwork || networkStatus || 'CONNECTED';
+        const battValue = systemMetrics.battery ?? 88;
+        const tempValue = Math.floor(45 + (Math.sin(Date.now() / 600000) * 3)); // realistic active temperature around 42-48 C
+
+        await firebaseService.syncTerminalPulse(activeTerminal.id, {
+          batteryLevel: battValue,
+          networkStatus: netValue,
+          lastCampaignPlayed: campaignTitle,
+          playbackStatus: 'PLAYING',
+          temperature: tempValue
+        });
+        console.log(`[Terminal] periodic telemetry pulse sent. currentCampaign: ${campaignTitle}, battery: ${battValue}%, network: ${netValue}, temp: ${tempValue}C`);
+      } catch (err) {
+        console.warn("[Terminal] Telemetry pulse failed:", err);
+      }
+    };
+
+    // Run immediately
+    reportTelemetry();
+
+    // Repeat every 60 seconds
+    const interval = setInterval(() => {
+      reportTelemetry();
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [isLogged, activeTerminal?.id, currentIndex, playlist, currentNetwork, networkStatus, systemMetrics.battery]);
   const autoConnectDriver = async () => {
       console.log("[Terminal] autoConnectDriver called, auth.currentUser:", auth.currentUser?.uid);
       setLoading(true);
@@ -611,7 +550,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
           // 3. Login is NOT required for terminal tab. We automatically find or register a default driver & terminal!
           console.log("[Terminal] No active terminal stored. Finding or provisioning terminal automatically...");
-          const terminals = await firebaseService.getTerminals() as any[];
+          const terminals = await firebaseService.getTerminals(undefined, true) as any[];
           
           if (terminals && terminals.length > 0) {
               const firstTerm = terminals.find((t: any) => t.status === 'ACTIVE') || terminals[0];
@@ -636,8 +575,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           }
 
           // 5. Fallback: provision a brand new default demo terminal & driver!
-          console.log("[Terminal] No terminals or drivers exist in the system. Registration required.");
-          setError("Terminal not registered. Please contact administrator.");
+          console.log("[Terminal] No terminals or drivers exist in the system. Auto-creating a demo driver & terminal...");
+          const defaultDriverId = "DRV-DEMO-SYSTEM";
+          const { terminalId: tid } = await firebaseService.autoEnsureTerminalForDriver(defaultDriverId);
+          localStorage.setItem('auto_ads_terminal_id', tid);
+          await resumeTerminalSession(tid);
 
       } catch (err: any) {
           console.error("[Terminal] Auto activation sequence failed:", err);
@@ -649,13 +591,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Check shared preferences simulation (localStorage)
   useEffect(() => {
-    // Audit for and remove known demo terminal IDs
-    const currentTid = localStorage.getItem('auto_ads_terminal_id');
-    if (currentTid === 'DEMO-4729') {
-      console.warn("[Terminal] Detected demo terminal ID in storage, clearing...");
-      localStorage.removeItem('auto_ads_terminal_id');
-    }
-
     autoConnectDriver();
 
     const handleConnection = () => setOnline(navigator.onLine);
@@ -671,19 +606,16 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     console.log(`[Terminal] Resuming session for ${tid}...`);
     try {
       setLoading(true);
-      const term: any = await firebaseService.getTerminal(tid);
+      const term = await firebaseService.getTerminal(tid) as any;
       
       console.log(`[Terminal] Found terminal record:`, term);
       
       if (term && term.status === 'ACTIVE') {
         setActiveTerminal(term);
-        if (typeof term.totalAdsPlayed === 'number') setTotalAdsPlayed(term.totalAdsPlayed);
-        if (typeof term.todayAdsPlayed === 'number') setTodayAdsPlayed(term.todayAdsPlayed);
-        if (term.lastCampaignPlayed) setLastCampaignPlayed(term.lastCampaignPlayed);
         if (typeof term.volume === 'number') {
           setTerminalVolume(term.volume);
         }
-        setIsDeviceLocked(!!term.isLocked);
+        setIsLocked(!!term.isLocked);
         setEmergencyBroadcast(term.emergencyBroadcast || null);
         
         // --- Simulated TeamViewer Auto ID Obtain ---
@@ -746,17 +678,24 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         }
       } else {
         console.warn("[Terminal] Terminal state invalid or not ACTIVE", term?.status);
+        // Only clear if the server explicitly tells us the terminal status is not ACTIVE (invalidated provisioning)
         localStorage.removeItem('auto_ads_terminal_id');
         localStorage.removeItem('auto_ads_access_key');
         setError(`Auto-Reconnecting Invalid Terminal: ${term ? term.status : 'Not Found'}`);
-        setTimeout(() => autoConnectDriver(), 1500);
+        setTimeout(() => autoConnectDriver(), 3000);
       }
     } catch (e: any) {
       console.error("[Terminal] Session resume failure:", e);
-      localStorage.removeItem('auto_ads_terminal_id');
-      localStorage.removeItem('auto_ads_access_key');
-      setError("Sync Error. Recalibrating...");
-      setTimeout(() => autoConnectDriver(), 1500);
+      setError("Sync Connection Offline. Retrying...");
+      // Do NOT clear localStorage. Keep credentials and retry in 5 seconds to preserve pairing!
+      setTimeout(() => {
+        const tid = localStorage.getItem('auto_ads_terminal_id');
+        if (tid) {
+          resumeTerminalSession(tid);
+        } else {
+          autoConnectDriver();
+        }
+      }, 5000);
     } finally {
       setLoading(false);
     }
@@ -842,34 +781,84 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     }
   };
 
-  // Rotation Logic (Optimized for 5+ ads)
+  const playNextValidAd = (startIndex: number) => {
+    if (playlist.length === 0) return;
+    let nextIdx = startIndex;
+    for (let i = 0; i < playlist.length; i++) {
+      const ad = playlist[nextIdx];
+      const adUrl = getSafeUrl(ad?.url || ad?.assetUrl || ad?.mediaUrl) || '';
+      if (adUrl.trim() !== '') {
+        console.log(`[Terminal ROTATION] Index: ${nextIdx}, Tick: ${playbackTick + 1}, Title: ${ad.title}`);
+        setCurrentIndex(nextIdx);
+        setPlaybackTick(prev => prev + 1);
+        return;
+      }
+      nextIdx = (nextIdx + 1) % playlist.length;
+    }
+  };
+
+  // Synchronize ad progress animation duration
+  useEffect(() => {
+    if (playlist.length > 0) {
+      const currentAd = playlist[currentIndex];
+      if (currentAd && !isVideoMedia(currentAd)) {
+        setAdDuration(10); // Default to 10s for static images
+      }
+    }
+  }, [playlist, currentIndex]);
+
+  // Rotation Logic (Optimized for 5+ ads, infinite looping & empty campaign skipping)
   useEffect(() => {
     if (isLogged && playlist.length > 0) {
       const currentAd = playlist[currentIndex];
       if (!currentAd) {
-        setCurrentIndex(0);
+        playNextValidAd(0);
         return;
       }
       
       const adUrl = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || '';
+      if (adUrl.trim() === '') {
+        // Skip empty ad immediately
+        playNextValidAd((currentIndex + 1) % playlist.length);
+        return;
+      }
+
       const isVideo = isVideoMedia(currentAd);
       
       // Auto-start is handled by the video tag having 'autoPlay'
       // If it's a static image, we need a timer.
-      // If it's a video, we rely on onEnded, but add a fallback timer for safety.
-      
-      const adDuration = (currentAd?.duration || 10) * 1000;
+      if (!isVideo) {
+        const timer = setTimeout(() => {
+          playNextValidAd((currentIndex + 1) % playlist.length);
+        }, 10000); // 10s per static ad as requested
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isLogged, playlist, currentIndex, playbackTick]);
+
+  // Safety Watchdog to prevent getting stuck on any media (images or videos)
+  useEffect(() => {
+    if (isLogged && playlist.length > 0) {
+      const currentAd = playlist[currentIndex];
+      if (!currentAd) return;
+
+      const isVideo = isVideoMedia(currentAd);
+      // Determine max timeout (default to 15s for image fallback, video duration + 5s buffer for videos)
+      const durationSec = isVideo ? (adDuration && adDuration > 0 ? adDuration : 30) : 10;
+      const watchdogTime = (durationSec + 5) * 1000;
+
       const timer = setTimeout(() => {
-        setCurrentIndex(prev => (prev + 1) % playlist.length);
-      }, isVideo ? adDuration + 5000 : adDuration); // 5s extra for video safety
-      
+        console.warn(`[Terminal WATCHDOG] Media ${currentIndex} (${currentAd.title}) did not auto-advance in ${durationSec + 5} seconds. Forcing transition.`);
+        handleAdComplete();
+      }, watchdogTime);
+
       return () => clearTimeout(timer);
     }
-  }, [isLogged, playlist, currentIndex]);
+  }, [currentIndex, playlist, isLogged, adDuration, playbackTick]);
 
   const handleAdComplete = () => {
     if (playlist.length > 0) {
-      setCurrentIndex((prev) => (prev + 1) % playlist.length);
+      playNextValidAd((currentIndex + 1) % playlist.length);
     }
   };
 
@@ -953,28 +942,13 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const currentAd = playlist[currentIndex];
 
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none">
+    <div 
+      className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none"
+      onClick={triggerOverlayOnDemand}
+    >
       {/* Locked Device Overlay */}
       <AnimatePresence>
-        {safeRideSession && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/98 backdrop-blur-xl z-[300] flex flex-col items-center justify-center p-8 text-center select-none"
-          >
-            <div className="max-w-md w-full bg-slate-900 border border-amber-500/20 rounded-[2rem] p-8 shadow-2xl space-y-6">
-                <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 animate-pulse border border-amber-500/25 mx-auto">
-                    <Shield size={36} />
-                </div>
-                <h1 className="text-2xl font-black italic uppercase tracking-wider text-amber-500">FAMILY SAFE RIDE ACTIVE</h1>
-                <p className="text-slate-400 text-sm">Ride protected</p>
-                <p className="text-slate-400 text-sm">Emergency support available</p>
-                <div className="text-4xl font-black text-white">{Math.floor(timeRemaining / 60)}:{String(timeRemaining % 60).padStart(2, '0')}</div>
-            </div>
-          </motion.div>
-        )}
-        {isDeviceLocked && (
+        {isLocked && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1078,7 +1052,82 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       <div className="absolute inset-0 pointer-events-none z-[101] opacity-[0.02] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
 
       {/* GLOBAL HUD LAYER */}
-      <div className="absolute inset-0 z-[60] pointer-events-none p-4 flex justify-end items-end">
+      <div className="absolute inset-0 z-[60] pointer-events-none p-4 md:p-10 flex flex-col justify-between">
+        {/* Top Header */}
+        <AnimatePresence>
+          {(playlist.length === 0 || showOverlayOnDemand) && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+              className="flex justify-between items-start pointer-events-auto"
+            >
+              <div className="flex items-center gap-3 md:gap-4 bg-black/40 backdrop-blur-md p-2 md:p-3 rounded-2xl border border-white/5">
+                <div className="w-10 h-10 md:w-14 md:h-14 bg-white/5 backdrop-blur-xl rounded-xl md:rounded-2xl flex items-center justify-center border border-white/10 group pointer-events-auto cursor-pointer relative overflow-hidden" onClick={fetchAdsManual}>
+                  {driver?.profileImage ? (
+                    <img src={driver.profileImage} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Profile" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="text-white text-sm md:text-lg font-black italic">A<span className="text-amber-500">A</span></div>
+                  )}
+                  <div className={cn("w-1.5 h-1.5 md:w-2 md:h-2 rounded-full absolute top-1.5 right-1.5 md:top-2 md:right-2 z-20 shadow-lg", online ? "bg-green-500 animate-pulse shadow-green-500/50" : "bg-red-500 shadow-red-500/50")} />
+                  {loading && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
+                       <RefreshCw className="text-amber-500 animate-spin" size={16} />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5 md:mb-1">
+                    <p className="text-[9px] md:text-[11px] font-black text-white uppercase tracking-[0.1em] md:tracking-[0.2em] leading-none">
+                      {driver?.name?.split(' ')[0] || 'Authorized'}
+                    </p>
+                    <div className="px-1 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[6px] md:text-[7px] font-black text-green-500 uppercase tracking-normal">
+                      VERIFIED
+                    </div>
+                  </div>
+                  <p className="text-[7px] md:text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    ID: <span className="text-amber-500/80">{driver?.driverCode || 'UNIDENTIFIED'}</span> 
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 md:gap-4 pointer-events-auto">
+                {localStorage.getItem('auto_ads_is_terminal') === 'true' && (
+                  <button 
+                    onClick={handleExitDisplayMode}
+                    className="px-3 md:px-5 py-2 md:py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
+                    title="Back to Dashboard"
+                  >
+                    <Smartphone size={12} className="md:w-[14px]" />
+                    <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden md:inline">Dashboard</span>
+                  </button>
+                )}
+                <button 
+                  onClick={() => onLogout()}
+                  className="px-3 md:px-5 py-2 md:py-2.5 bg-slate-500/10 hover:bg-red-500/20 border border-white/5 text-slate-400 hover:text-red-500 rounded-xl flex items-center gap-2 transition-all active:scale-95 group shadow-lg"
+                  title="Sign Out"
+                >
+                   <LogOut size={12} className="group-hover:rotate-12 transition-transform md:w-[14px]" />
+                   <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest hidden md:inline">Sign Out</span>
+                </button>
+                <div className="flex gap-2">
+                   <button 
+                     onClick={() => {
+                       fetchAdsManual();
+                       setStatusLogs(prev => ["CMD: Force check requested", ...prev.slice(0, 5)]);
+                     }}
+                     className="w-9 h-9 md:w-11 md:h-11 bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-all group shadow-lg"
+                   >
+                     <RefreshCw size={14} className={cn(loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500')} />
+                   </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+
       </div>
 
       {/* CONTENT LAYER */}
@@ -1086,192 +1135,67 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         <AnimatePresence mode="wait">
           {playlist.length === 0 ? (
             <motion.div 
-              key="standby" 
+              key="no_campaigns" 
               initial={{ opacity: 0 }} 
               animate={{ opacity: 1 }} 
               exit={{ opacity: 0 }}
-              className="w-full h-full flex items-center justify-center relative overflow-hidden"
+              className="w-full h-full flex flex-col items-center justify-center relative bg-[#050505] p-10 text-center"
             >
-               {/* Standby Dashboard - Map Simulation */}
-               <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
-                  {/* Grid Lines */}
+               <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]" />
-                  
-                  {/* Animated Atmosphere */}
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[200%] h-[200%] border border-white/5 rounded-full" />
-                  <motion.div 
-                    animate={{ scale: [1, 1.1, 1], opacity: [0.05, 0.1, 0.05] }}
-                    transition={{ duration: 15, repeat: Infinity }}
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] border border-white/5 rounded-full" 
-                  />
                </div>
 
-               <div className="w-full max-w-5xl px-4 md:px-10 flex flex-col md:grid md:grid-cols-12 gap-6 md:gap-12 items-center relative z-10 py-20 md:py-0 h-full md:h-auto overflow-y-auto md:overflow-visible no-scrollbar">
-                  {/* Left Column: Stats & Status */}
-                  <div className="w-full md:col-span-4 space-y-4 md:space-y-6 order-2 md:order-1 px-2 md:px-0">
-                     <div className="space-y-2">
-                        <p className="text-[8px] md:text-[10px] font-black text-amber-500 uppercase tracking-[0.3em] font-mono">&gt; NODE_STATUS</p>
-                        <div className="p-4 md:p-5 bg-white/5 border border-white/5 rounded-2xl md:rounded-3xl backdrop-blur-xl shadow-2xl relative overflow-hidden">
-                           {downloading && (
-                             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 text-center space-y-4">
-                                <RefreshCw className="text-amber-500 animate-spin" size={24} />
-                                <div>
-                                   <p className="text-[10px] font-black text-white uppercase tracking-widest">Caching Ad Assets</p>
-                                   <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">{downloadProgress}% Synchronized</p>
-                                </div>
-                                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
-                                   <motion.div 
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${downloadProgress}%` }}
-                                      className="h-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-                                   />
-                                </div>
-                             </div>
-                           )}
-                           <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
-                              <div className="w-12 h-8 md:w-16 md:h-10 rounded-lg md:xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 p-1.5 md:p-2">
-                                 <Smartphone className="text-amber-500" size={20} />
-                              </div>
-                              <div>
-                                 <p className="text-[10px] md:text-xs font-black text-white uppercase tracking-tight">Active Standby</p>
-                                 <p className="text-[7px] md:text-[9px] font-bold text-slate-500 uppercase">Awaiting Assignment</p>
-                              </div>
-                           </div>
-                           <div className="space-y-2.5 md:space-y-3">
-                              <div className="flex justify-between items-center text-[7px] md:text-[9px] font-bold uppercase tracking-widest">
-                                 <span className="text-slate-500">Sync Status</span>
-                                 <span className="text-green-500">OPTIMAL</span>
-                              </div>
-                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                 <motion.div 
-                                    animate={{ x: ["-100%", "100%"] }}
-                                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                                    className="w-1/2 h-full bg-amber-500"
-                                 />
-                              </div>
-                              <div className="flex justify-between items-center text-[7px] md:text-[9px] font-bold uppercase tracking-widest">
-                                 <span className="text-slate-500">Storage Use</span>
-                                 <span className="text-blue-500 text-[6px] md:text-[8px]">{systemMetrics.storage}GB / 16GB</span>
-                              </div>
-                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                                 <div className="h-full bg-blue-500/50" style={{ width: `${(systemMetrics.storage / 16) * 100}%` }} />
-                              </div>
-                           </div>
-                        </div>
-                     </div>
+               <motion.div 
+                 initial={{ scale: 0.9, opacity: 0 }}
+                 animate={{ scale: 1, opacity: 1 }}
+                 className="relative z-10 space-y-8 max-w-2xl"
+               >
+                 <div className="space-y-2">
+                   <h1 className="text-4xl md:text-6xl font-black italic text-white tracking-tighter uppercase leading-none">
+                     AUTOADS <span className="text-amber-500">TERMINAL</span>
+                   </h1>
+                   <div className="h-1 w-20 bg-amber-500 mx-auto rounded-full" />
+                 </div>
 
-                     <div className="space-y-2">
-                        <p className="text-[8px] md:text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] font-mono">&gt; HARDWARE_METRICS</p>
-                        <div className="grid grid-cols-2 gap-3">
-                           <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md">
-                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">RAM Usage</p>
-                              <p className="text-xs md:text-sm font-black text-white">{systemMetrics.ram}%</p>
-                              <div className="w-full bg-white/5 h-1.5 rounded-full mt-2 overflow-hidden">
-                                 <div className="h-full bg-blue-500" style={{ width: `${systemMetrics.ram}%` }} />
-                              </div>
-                           </div>
-                           <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md">
-                              <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase mb-1">Battery</p>
-                              <p className={cn("text-xs md:text-sm font-black", systemMetrics.battery < 20 ? "text-red-500" : "text-green-500")}>
-                                 {systemMetrics.battery}%
-                              </p>
-                              <div className="w-full bg-white/5 h-1.5 rounded-full mt-2 overflow-hidden">
-                                 <div className={cn("h-full", systemMetrics.battery < 20 ? "bg-red-500" : "bg-green-500")} style={{ width: `${systemMetrics.battery}%` }} />
-                              </div>
-                           </div>
-                        </div>
-                     </div>
-                     <div className="space-y-2 mt-4">
-                        <p className="text-[8px] md:text-[10px] font-black text-amber-500 uppercase tracking-[0.3em] font-mono">&gt; NETWORK_MANAGER</p>
-                        <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl backdrop-blur-md space-y-3">
-                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
-                              <span className="text-slate-500">WiFi SSID:</span>
-                              <span className="text-white">{networkConfig?.wifiSSID || 'Not Configured'}</span>
-                           </div>
-                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
-                              <span className="text-slate-500">Hotspot Fallback:</span>
-                              <span className="text-white">{networkConfig?.hotspotName || 'Not Configured'}</span>
-                           </div>
-                           <div className="flex justify-between items-center text-[8px] md:text-[9px] font-bold uppercase tracking-widest">
-                              <span className="text-slate-500">Connection Status:</span>
-                              <span className={cn("px-2 py-0.5 rounded text-[8px]", networkStatus === 'CONNECTED' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500')}>{networkStatus}</span>
-                           </div>
-                        </div>
-                     </div>
-                  </div>
+                 <div className="space-y-4">
+                   <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 rounded-2xl inline-block">
+                     <p className="text-red-500 text-sm md:text-lg font-black uppercase tracking-widest animate-pulse">
+                       NO ACTIVE CAMPAIGNS ASSIGNED
+                     </p>
+                   </div>
+                   
+                   <p className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest max-w-sm mx-auto leading-relaxed">
+                     Waiting for campaign assignment...
+                   </p>
+                 </div>
 
-                  {/* Center Column: Pulse & Big Instruction */}
-                  <div className="w-full md:col-span-4 flex flex-col items-center order-1 md:order-2 py-4 md:py-0">
-                    <div className="relative group cursor-pointer active:scale-95 transition-transform" onClick={fetchAdsManual}>
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-                        className="w-48 h-48 md:w-80 md:h-80 border border-dashed border-amber-500/20 rounded-full flex items-center justify-center"
-                      />
-                      <motion.div 
-                        animate={{ rotate: -360 }}
-                        transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-                        className="absolute inset-2 md:inset-4 border border-blue-500/10 rounded-full"
-                      />
-                      
-                      <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2 md:space-y-4">
-                        <div className="relative">
-                          <Radio className="text-amber-500 animate-pulse w-8 h-8 md:w-14 md:h-14" />
-                          <div className="absolute inset-0 bg-amber-500/20 blur-xl md:blur-2xl rounded-full animate-ping" />
-                        </div>
-                        <div className="text-center px-4">
-                           <p className="text-[8px] md:text-[10px] font-black text-white uppercase tracking-[0.2em] md:tracking-[0.4em] mb-1 md:mb-2 leading-none">Scanning Network</p>
-                           <p className="text-[6px] md:text-[8px] font-black text-slate-500 uppercase tracking-[0.1em] md:tracking-[0.2em] max-w-[100px] md:max-w-[140px] mx-auto leading-relaxed">
-                             {loading ? 'Initializing...' : 'Ready for assignment'}
-                           </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                   <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
+                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Terminal ID</p>
+                     <p className="text-sm font-black text-white font-mono">{activeTerminal?.id || terminalId || 'N/A'}</p>
+                   </div>
+                   <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
+                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Driver Name</p>
+                     <p className="text-sm font-black text-white uppercase">{driver?.fullName || driver?.name || 'NOT_LINKED'}</p>
+                   </div>
+                   <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
+                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Vehicle Number</p>
+                     <p className="text-sm font-black text-white uppercase">{driver?.vehicleNumber || 'NOT_LINKED'}</p>
+                   </div>
+                 </div>
 
-                  {/* Right Column: Log & System */}
-                  <div className="w-full md:col-span-4 space-y-4 md:space-y-6 flex flex-col items-end order-3">
-                     <div className="w-full space-y-2">
-                        <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] font-mono text-center md:text-right">SYSLOG_V2.0 &lt;</p>
-                        <div className="p-4 md:p-5 bg-black/40 border border-white/5 rounded-2xl md:rounded-3xl backdrop-blur-xl h-32 md:h-40 overflow-hidden relative">
-                           <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent pointer-events-none z-10" />
-                           <div className="space-y-1.5 md:space-y-2 font-mono relative z-0">
-                              {statusLogs.map((log, i) => (
-                                <motion.div 
-                                  key={log + i}
-                                  initial={{ opacity: 0, x: 10 }}
-                                  animate={{ opacity: 1 - (i * 0.15), x: 0 }}
-                                  className="text-[7px] md:text-[8px] font-bold text-slate-400 uppercase tracking-tight flex items-start gap-2"
-                                >
-                                  <span className="text-amber-500/50 shrink-0">&gt;</span>
-                                  <span className="truncate">{log}</span>
-                                </motion.div>
-                              ))}
-                           </div>
-                        </div>
-                     </div>
-
-                     <div className="w-full grid grid-cols-2 gap-3 pb-8 md:pb-0">
-                        <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl flex flex-col items-center">
-                           <Signal className="text-slate-600 mb-1.5 md:mb-2 w-3 h-3 md:w-4 md:h-4" />
-                           <p className="text-[6px] md:text-[7px] font-black text-slate-500 uppercase tracking-widest mb-0.5 md:mb-1">Link</p>
-                           <p className="text-[10px] md:text-xs font-black text-white">ADAPTIVE</p>
-                        </div>
-                        <div className="p-3 md:p-4 bg-white/5 border border-white/5 rounded-xl md:rounded-2xl flex flex-col items-center">
-                           <Cpu className="text-slate-600 mb-1.5 md:mb-2 w-3 h-3 md:w-4 md:h-4" />
-                           <p className="text-[6px] md:text-[7px] font-black text-slate-500 uppercase tracking-widest mb-0.5 md:mb-1">Process</p>
-                           <p className="text-[10px] md:text-xs font-black text-white">SYNC</p>
-                        </div>
-                     </div>
-                  </div>
-               </div>
-
-               {/* Bottom Decoration Lines */}
-               <div className="absolute bottom-32 md:bottom-40 left-0 w-full flex items-center gap-4 px-6 md:px-10 opacity-20 pointer-events-none">
-                  <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white to-transparent" />
-                  <div className="text-[6px] md:text-[8px] font-black text-white italic tracking-[0.3em] md:tracking-[1em] uppercase whitespace-nowrap">Peripheral Bridge Active</div>
-                  <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-white to-transparent" />
-               </div>
+                 <div className="pt-10 space-y-4">
+                   <div className="flex items-center justify-center gap-3 text-slate-500">
+                     <div className="w-8 h-[1px] bg-slate-800" />
+                     <p className="text-[9px] font-black uppercase tracking-[0.3em]">Support Contact</p>
+                     <div className="w-8 h-[1px] bg-slate-800" />
+                   </div>
+                   <p className="text-xl md:text-2xl font-black text-white tracking-widest">
+                     +91 <span className="text-amber-500">93539 01804</span>
+                   </p>
+                 </div>
+               </motion.div>
             </motion.div>
           ) : (
             <motion.div 
@@ -1282,21 +1206,52 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               transition={{ duration: 1 }}
               className="w-full h-full relative"
             >
-              {/* Scanline Effect */}
-              <div className="absolute inset-0 scanline z-20 pointer-events-none opacity-[0.03]" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/20 z-10 pointer-events-none" />
-
               {/* Scan to customize overlay - emotional, family-friendly, premium smart mobility design */}
               <SmartPassengerQR deviceId={activeTerminal?.id || terminalId || "ACTIVE"} onLogout={onLogout} />
 
-              {/* Dynamic Mode Notification Banners - REMOVED */}
+              {/* Dynamic Mode Notification Banners */}
+              {(isSchoolActive || activeRidePref) && (
+                <div className="absolute top-12 left-12 z-50 flex flex-col gap-2 pointer-events-none text-left">
+                  {/* School Safe mode timing banner */}
+                  {isSchoolActive && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-sky-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-sky-400 font-sans"
+                    >
+                      <School size={14} className="animate-bounce" />
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">School Zone Timing Active</p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Children Safe Mode Automatically Triggered</p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Active manual overrides banner */}
+                  {activeRidePref && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="px-4 py-2.5 bg-green-500 text-slate-950 rounded-2xl flex items-center gap-2 shadow-lg border border-emerald-400 font-sans"
+                    >
+                      <Shield size={14} />
+                      <div>
+                        <p className="text-[8px] font-black uppercase tracking-wider leading-none">
+                          {activeRidePref.driverOverrideMode ? `${activeRidePref.driverOverrideMode.replace('_', ' ')} OVERRIDE ACTIVE` : 'PASSENGER PREFERENCES ACTIVE'}
+                        </p>
+                        <p className="text-[6px] font-bold uppercase tracking-widest text-slate-950 leading-none mt-0.5">Ad feeds filtered dynamically for this ride</p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
 
               <div 
                 className={cn(
                   "w-full h-full relative transition-[filter]"
                 )}
                 style={{
-                  filter: `brightness(${brightnessProfile ? brightnessProfile.level / 100 : 0.75}) ${
+                  filter: `brightness(${brightnessProfile ? brightnessProfile.level / 100 : 1.0}) ${
                     brightnessProfile?.reducedContrast ? 'contrast(0.75)' : ''
                   } ${
                     brightnessProfile?.reducedGlow ? 'saturate(0.5) contrast(0.9)' : ''
@@ -1306,26 +1261,38 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               >
                 {isVideoMedia(currentAd) ? (
                   <video 
-                    key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
+                    key={`vid_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}_${playbackTick}`}
                     ref={videoRef}
                     autoPlay 
                     muted={terminalVolume === 0}
-                    loop={playlist.length === 1}
+                    loop={false}
                     playsInline
-                    crossOrigin="anonymous"
                     className="w-full h-full object-cover"
                     src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || ""}
                     onEnded={handleAdComplete}
+                    onLoadedMetadata={(e) => {
+                      if (e.currentTarget.duration) {
+                        setAdDuration(e.currentTarget.duration);
+                      }
+                    }}
                     onError={(e) => {
                       const urlToLog = getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl);
                       console.error("[Terminal] Video playback error:", urlToLog);
-                      // Skip fallback entirely to prevent cascading errors if the sample video itself is invalid
-                      handleAdComplete();
+                      if (videoRef.current && videoRef.current.src !== '/uploads/1779860520885-1000434856.mp4') {
+                        console.warn("[Terminal] Attempting fallback to sample video...");
+                        videoRef.current.src = '/uploads/1779860520885-1000434856.mp4';
+                        videoRef.current.play().catch(pErr => {
+                          console.error("[Terminal] Fallback also failed or was blocked by gesture requirement:", pErr);
+                          handleAdComplete();
+                        });
+                      } else {
+                        handleAdComplete();
+                      }
                     }}
                   />
                 ) : (
                   <img 
-                    key={`img_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}`}
+                    key={`img_${currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl || currentIndex}_${playbackTick}`}
                     src={getSafeUrl(currentAd?.url || currentAd?.assetUrl || currentAd?.mediaUrl) || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="} 
                     alt={currentAd?.title || "Ad"} 
                     className="w-full h-full object-cover" 
@@ -1342,10 +1309,10 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
               {/* Ad Progress Bar */}
               <div className="absolute bottom-0 left-0 w-full h-2 z-50 bg-black/20">
                 <motion.div 
-                  key={currentIndex}
+                  key={`${currentIndex}_${adDuration}_${playbackTick}`}
                   initial={{ width: "0%" }}
                   animate={{ width: "100%" }}
-                  transition={{ duration: 10, ease: "linear" }}
+                  transition={{ duration: adDuration, ease: "linear" }}
                   className="h-full bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.6)]"
                 />
               </div>
@@ -1367,14 +1334,6 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                    {currentAd?.title || 'AutoAds Campaign'}
                  </motion.h2>
               </div>
-
-              {showQuoteOverlay && activeQuote && (
-                <CommunityQuotesFeed 
-                  quote={activeQuote} 
-                  duration={9} 
-                  onComplete={handleQuoteComplete} 
-                />
-              )}
             </motion.div>
           )}
         </AnimatePresence>

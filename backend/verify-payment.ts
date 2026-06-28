@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import { dbAdm, admin } from '../lib/firebase-admin.js';
+import { getCredential } from '../lib/env.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Guarantee response headers are always JSON
@@ -20,60 +21,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const isSimulated = req.body.is_simulated || (razorpay_order_id && razorpay_order_id.startsWith('order_simulated')) || razorpay_signature === 'simulated_signature';
 
     if (!isSimulated) {
-      let key_id = (process.env.RAZOR_PAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").trim().replace(/^["']|["']$/g, '');
+      const key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
+      const key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
 
       // 2. VERIFY KEYS
       if (!key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_'))) {
-        console.log('[RAZORPAY_VERIFY_AUTH] VALiD KEY CHECK');
         return res.status(500).json({ 
           success: false, 
-          error: `CRITICAL: Invalid Razorpay Key ID format (Loaded ID: "${key_id ? key_id.substring(0, 12) + "..." : "none"}"). Must start with rzp_live_ or rzp_test_.` 
+          error: `CRITICAL: Missing or invalid Razorpay Key ID in system environment (RAZORPAY_KEY_ID)` 
         });
       }
 
-      // Collect all unique candidate secrets
-      const addCandidate = (name: string, raw: string | undefined) => {
-        if (!raw) return;
-        const clean = raw.trim().replace(/^["']|["']$/g, '');
-        if (clean && !secrets_candidates.some(s => s.value === clean)) {
-          secrets_candidates.push({ name, value: clean });
-        }
-      };
-
-      addCandidate("RAZORPAY_KEY_SECRET", process.env.RAZORPAY_KEY_SECRET);
-      addCandidate("RAZORPAY_SECRET", process.env.RAZORPAY_SECRET);
-      addCandidate("RAZOR_PAY_KEY_SECRET", (process.env as any).RAZOR_PAY_KEY_SECRET);
-
-      if (secrets_candidates.length === 0) {
-        return res.status(500).json({ success: false, error: "Missing Razorpay secret configuration in environment." });
+      if (!key_secret) {
+        return res.status(500).json({ 
+          success: false, 
+          error: `CRITICAL: Missing Razorpay Key Secret in system environment (RAZORPAY_KEY_SECRET)` 
+        });
       }
 
-      let matchingSecret: string | null = null;
-      let matchingSecretName = "";
+      const generated_signature = crypto
+          .createHmac("sha256", key_secret)
+          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+          .digest("hex");
 
-      for (const cand of secrets_candidates) {
-        const generated_signature = crypto
-            .createHmac("sha256", cand.value)
-            .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-            .digest("hex");
-
-        if (generated_signature === razorpay_signature) {
-          matchingSecret = cand.value;
-          matchingSecretName = cand.name;
-          break;
-        }
-      }
-
-      if (!matchingSecret) {
-        console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed against all secret candidates.');
+      if (generated_signature !== razorpay_signature) {
+        console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed against configured Secret.');
         return res.status(400).json({ success: false, error: "Invalid signature" });
       }
 
-      console.log(`[RAZORPAY] Signature verified successfully using secret source: ${matchingSecretName}`);
+      console.log(`[RAZORPAY] Signature verified successfully.`);
 
-      // CAPTURE PAYMENT USING THE MATCHING SECRET
-      const razorpay = new Razorpay({ key_id, key_secret: matchingSecret });
-      console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount, "using secret source:", matchingSecretName);
+      // CAPTURE PAYMENT USING THE CONFIG SECRET
+      const razorpay = new Razorpay({ key_id, key_secret });
+      console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
       try {
         await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
       } catch (err: any) {
@@ -165,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(500).json({ 
       success: false, 
       error: errorMsg,
-      loadedKeyId: (process.env.RAZOR_PAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").substring(0, 12) + "...",
+      loadedKeyId: getCredential('RAZORPAY_KEY_ID').substring(0, 12) + "...",
       candidateSecretsCount: secrets_candidates.length,
       candidateSecretsSources: secrets_candidates.map(s => s.name)
     });

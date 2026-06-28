@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useReducer } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Palette, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download, Star } from 'lucide-react';
+import { Plus, Palette, Target, Users, Zap, Image as ImageIcon, Video, ArrowUpRight, BarChart3, Clock, Wallet, Settings, Check, CreditCard, Sparkles, X, Gift, PlayCircle, LogIn, User, Phone, CheckCircle2, CheckCircle, ShieldCheck, Lock, ChevronRight, LogOut, Trash2, Database, AlertCircle, Send, Info, FileText, RefreshCw, MessageSquare, Upload, Activity, Monitor, ArrowLeft, Menu, LayoutDashboard, History, Paperclip, Download, Star, Store, Building2, Mic, QrCode, Award } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { firebaseService, AdCampaign, Device, SupportTicket, ChatMessage } from '@/services/firebaseService';
 import { auth, googleLogin, storage, db } from '@/lib/firebase';
@@ -19,9 +19,9 @@ import NotificationCenter from '../common/NotificationCenter';
 declare const Razorpay: any;
 
 const plans = [
-  { id: 'BASIC', name: 'Basic Plan', price: 999, color: 'bg-emerald-500' },
-  { id: 'STARTER', name: 'Starter Plan', price: 1999, color: 'bg-indigo-500' },
-  { id: 'PRO', name: 'Pro Plan', price: 4999, color: 'bg-slate-900' },
+  { id: 'basic_starter', name: 'Starter Plan', price: 999, color: 'bg-emerald-500' },
+  { id: 'basic_growth', name: 'Growth Plan', price: 1999, color: 'bg-indigo-500' },
+  { id: 'basic_professional', name: 'Professional Plan', price: 4999, color: 'bg-slate-900' },
 ];
 
 const getSafeUrl = (url: string | undefined | null) => {
@@ -137,7 +137,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [isFirestoreOffline, setIsFirestoreOffline] = useState(false);
   const [activeCampaignData, setActiveCampaignData] = useState<any>(null);
   const [editablePlans, setEditablePlans] = useState<Plan[]>(plans.map(p => ({...p})));
-  const [activePlan, setActivePlan] = useState(() => localStorage.getItem('last_selected_plan') || 'BASIC');
+  const [activePlan, setActivePlan] = useState(() => localStorage.getItem('last_selected_plan') || 'basic_starter');
+  const [activeCategory, setActiveCategory] = useState<'BASIC' | 'ENTERPRISE' | 'AGENCY'>(() => {
+    return (localStorage.getItem('last_selected_category') as any) || 'BASIC';
+  });
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showPayment, setShowPaymentState] = useState(false);
   const hasUserInitiatedPayment = useRef(false);
@@ -248,8 +251,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     hasUserInitiatedPayment.current = true;
     setShowPayment(true);
   };
-  const [needDesigner, setNeedDesigner] = useState<boolean | null>(null);
-  const [needVideoMaker, setNeedVideoMaker] = useState<boolean | null>(null);
+  const [needDesigner, setNeedDesigner] = useState<boolean | null>(false);
+  const [needVideoMaker, setNeedVideoMaker] = useState<boolean | null>(false);
+  const [needMotionGraphics, setNeedMotionGraphics] = useState<boolean>(false);
+  const [needVoiceOver, setNeedVoiceOver] = useState<boolean>(false);
+  const [needCampaignSetup, setNeedCampaignSetup] = useState<boolean>(false);
+  const [needQrDesign, setNeedQrDesign] = useState<boolean>(false);
+  const [needCustomBranding, setNeedCustomBranding] = useState<boolean>(false);
   const [selectedState, setSelectedState] = useState(() => localStorage.getItem('last_selected_state') || '');
   const [selectedCity, setSelectedCity] = useState(() => localStorage.getItem('last_selected_city') || '');
   const [customCity, setCustomCity] = useState(() => localStorage.getItem('last_custom_city') || '');
@@ -373,6 +381,41 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     });
     return Object.values(combined);
   }, [plansList, configList]);
+
+  const getAddonPrice = (addonKey: string) => {
+    if (!selectedPlan) return 0;
+    const planFromDb = dbPlans.find((p: any) => p.id === selectedPlan.id) || selectedPlan;
+    switch (addonKey) {
+      case 'posterDesign':
+        return planFromDb.addonPosterDesignPrice ?? 1000;
+      case 'videoEditing':
+        return planFromDb.addonVideoEditingPrice ?? 2000;
+      case 'motionGraphics':
+        return planFromDb.addonMotionGraphicsPrice ?? 3500;
+      case 'voiceOver':
+        return planFromDb.addonVoiceOverPrice ?? 1500;
+      case 'campaignSetup':
+        return planFromDb.addonCampaignSetupPrice ?? 500;
+      case 'qrDesign':
+        return planFromDb.addonQrDesignPrice ?? 300;
+      case 'customBranding':
+        return planFromDb.addonCustomBrandingPrice ?? 2500;
+      default:
+        return 0;
+    }
+  };
+
+  const getAddonsTotal = () => {
+    let total = 0;
+    if (needDesigner) total += getAddonPrice('posterDesign');
+    if (needVideoMaker) total += getAddonPrice('videoEditing');
+    if (needMotionGraphics) total += getAddonPrice('motionGraphics');
+    if (needVoiceOver) total += getAddonPrice('voiceOver');
+    if (needCampaignSetup) total += getAddonPrice('campaignSetup');
+    if (needQrDesign) total += getAddonPrice('qrDesign');
+    if (needCustomBranding) total += getAddonPrice('customBranding');
+    return total;
+  };
   const [promotions, setPromotions] = useState<any[]>([]);
   const [showFloatingOffer, setShowFloatingOffer] = useState(true);
   const [myCampaigns, setMyCampaigns] = useState<AdCampaign[]>([]);
@@ -424,14 +467,24 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   const mergedPlans = useMemo(() => {
     const basePlans = [
-      { id: 'BASIC', name: 'Basic Plan', price: 999, maxScreens: 3, durationDays: 1, type: 'PLAN', color: 'bg-emerald-500' },
-      { id: 'STARTER', name: 'Starter Plan', price: 1999, maxScreens: 5, durationDays: 5, type: 'PLAN', color: 'bg-indigo-500' },
-      { id: 'PRO', name: 'Pro Plan', price: 4999, maxScreens: 10, durationDays: 7, type: 'PLAN', color: 'bg-slate-900' },
+      { id: 'basic_starter', name: 'Starter', price: 999, maxScreens: 3, durationDays: 1, type: 'PLAN', color: 'bg-emerald-500', category: 'BASIC', estimatedReach: '5K - 10K', features: ['Standard Support', 'Basic Analytics'] },
+      { id: 'basic_growth', name: 'Growth', price: 1999, maxScreens: 5, durationDays: 5, type: 'PLAN', color: 'bg-indigo-500', category: 'BASIC', estimatedReach: '15K - 30K', features: ['Priority Support', 'Detailed Analytics'] },
+      { id: 'basic_professional', name: 'Professional', price: 4999, maxScreens: 10, durationDays: 7, type: 'PLAN', color: 'bg-slate-900', category: 'BASIC', estimatedReach: '50K - 100K', features: ['Dedicated Manager', 'Advanced Targeting'] },
+      
+      { id: 'enterprise_starter', name: 'Enterprise Starter', price: 14999, maxScreens: 50, durationDays: 15, type: 'PLAN', color: 'bg-blue-500', category: 'ENTERPRISE', citiesSupported: '1 City', fleetSize: '50 Autos', features: ['Custom Reporting', '24/7 Support'] },
+      { id: 'enterprise_plus', name: 'Enterprise Plus', price: 29999, maxScreens: 100, durationDays: 30, type: 'PLAN', color: 'bg-blue-700', category: 'ENTERPRISE', citiesSupported: 'Up to 3 Cities', fleetSize: '100 Autos', features: ['API Access', 'Volume Discounts'] },
+      { id: 'enterprise_elite', name: 'Enterprise Elite', price: 99999, maxScreens: 500, durationDays: 90, type: 'PLAN', color: 'bg-indigo-900', category: 'ENTERPRISE', citiesSupported: 'Pan India', fleetSize: '500+ Autos', features: ['White-glove Service', 'SLA Guarantee'] },
+      
+      { id: 'agency_starter', name: 'Agency Starter', price: 49999, maxScreens: 200, durationDays: 30, type: 'PLAN', color: 'bg-amber-500', category: 'AGENCY', clients: 'Up to 5', revenueShare: '10%', features: ['White Label Reports', 'Agency Dashboard'] },
+      { id: 'agency_business', name: 'Agency Business', price: 89999, maxScreens: 500, durationDays: 60, type: 'PLAN', color: 'bg-amber-600', category: 'AGENCY', clients: 'Up to 15', revenueShare: '15%', features: ['Custom Branding', 'Priority Queue'] },
+      { id: 'agency_unlimited', name: 'Agency Unlimited', price: 199999, maxScreens: 1500, durationDays: 365, type: 'PLAN', color: 'bg-amber-800', category: 'AGENCY', clients: 'Unlimited', revenueShare: '25%', features: ['Dedicated Dev Support', 'Co-marketing'] },
     ];
     
     // Merge basePlans with dbPlans, ensuring all dbPlans are included
     const result = [...basePlans];
     dbPlans.forEach(dbPlan => {
+      // Exclude services from the subscription slider
+      if (dbPlan.category === 'SERVICES') return;
       const index = result.findIndex(p => p.id === dbPlan.id);
       if (index !== -1) {
         result[index] = { ...result[index], ...dbPlan };
@@ -443,7 +496,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   }, [dbPlans]);
 
   // SINGLE SOURCE OF TRUTH REDUCER STATE MACHINE
-  type WorkflowState = 'DETAILS' | 'AWAITING_PAYMENT' | 'PAYMENT_PROCESSING' | 'ACTIVE' | 'FAILED';
+  type WorkflowState = 'DETAILS' | 'AWAITING_PAYMENT' | 'PAYMENT_PROCESSING' | 'ACTIVE' | 'FAILED' | 'SUCCESS';
 
   type MachineState = {
     workflowState: WorkflowState;
@@ -455,6 +508,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     | { type: 'SET_AWAITING_PAYMENT' }
     | { type: 'SET_PAYMENT_PROCESSING' }
     | { type: 'SET_ACTIVE' }
+    | { type: 'SET_SUCCESS' }
     | { type: 'SET_FAILED'; error: string | null };
 
   const machineReducer = (state: MachineState, action: MachineAction): MachineState => {
@@ -467,6 +521,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         return { workflowState: 'PAYMENT_PROCESSING', error: null };
       case 'SET_ACTIVE':
         return { workflowState: 'ACTIVE', error: null };
+      case 'SET_SUCCESS':
+        return { workflowState: 'SUCCESS', error: null };
       case 'SET_FAILED':
         return { workflowState: 'FAILED', error: action.error };
       default:
@@ -586,7 +642,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
   useEffect(() => {
     // Sync selected plan with mergedPlans or default to the first plan if not set
-    const savedPlanId = localStorage.getItem('last_selected_plan') || 'BASIC';
+    const savedPlanId = localStorage.getItem('last_selected_plan') || 'basic_starter';
     const plan = mergedPlans.find(p => p.id === activePlan) || 
                  mergedPlans.find(p => p.id === savedPlanId) || 
                  mergedPlans[0];
@@ -793,8 +849,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     try {
       setLoading(true);
       // 1. Record Campaign
-      const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
-      const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
+      const addonsFee = getAddonsTotal();
 
       const campaignRef = await firebaseService.createCampaign({
         title: campaignDetails.title,
@@ -808,8 +863,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         duration: campaignDetails.duration,
         needDesigner: !!needDesigner,
         needVideoMaker: !!needVideoMaker,
-        designerFee: designerCharge,
-        videoMakerFee: videoMakerCharge,
+        designerFee: addonsFee,
+        videoMakerFee: 0,
         paymentReceived: true
       });
 
@@ -818,7 +873,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       await firebaseService.recordPayment({
         campaignId: campaignRef.id,
-        amount: baseAmount + designerCharge + videoMakerCharge,
+        amount: baseAmount + addonsFee,
         currency: 'INR',
         status: 'SUCCESS',
         paymentMethod: 'system',
@@ -856,6 +911,78 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [orderData, setOrderData] = useState<any>(null);
   const [isPreparingOrder, setIsPreparingOrder] = useState(false);
 
+  // High-fidelity Interactive Sandbox Gateway States
+  const [showSandboxOverlay, setShowSandboxOverlay] = useState(false);
+  const [sandboxProcessing, setSandboxProcessing] = useState(false);
+  const [sandboxCardNumber, setSandboxCardNumber] = useState('4111 1111 1111 1111');
+  const [sandboxExpiry, setSandboxExpiry] = useState('12/28');
+  const [sandboxCvv, setSandboxCvv] = useState('123');
+  const [sandboxCardName, setSandboxCardName] = useState('');
+  const [sandboxSuccess, setSandboxSuccess] = useState(false);
+  const [activePaymentMethod, setActivePaymentMethod] = useState<'card' | 'upi' | 'netbanking'>('card');
+  const [sandboxUpiId, setSandboxUpiId] = useState('pay@autoads');
+
+  const executeSimulatedPayment = async () => {
+    if (sandboxProcessing || sandboxSuccess) return;
+    setSandboxProcessing(true);
+    triggerToast("Sandbox Mode: Simulating secure payment validation...", "info");
+
+    try {
+      let currentOrderData = orderData;
+      if (!currentOrderData) {
+        currentOrderData = await prepareOrder(createdCampaignId || localStorage.getItem('last_created_campaign') || undefined);
+      }
+      if (!currentOrderData) {
+        throw new Error("Failed to prepare transaction sequence.");
+      }
+
+      const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
+      const totalAmount = baseAmount + getAddonsTotal();
+
+      const response = {
+        razorpay_order_id: currentOrderData.id,
+        razorpay_payment_id: "pay_simulated_" + Date.now(),
+        razorpay_signature: "simulated_signature",
+        is_simulated: true
+      };
+
+      const verifyRes = await fetch("/api/verify-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ...response,
+          uid: user?.uid,
+          campaignId: createdCampaignId || localStorage.getItem('last_created_campaign') || undefined,
+          planData: { amount: totalAmount }
+        })
+      });
+
+      const verifyData = await verifyRes.json();
+      if (verifyData.success) {
+        console.log("[LOG] [SUCCESS_SCREEN] Sandbox verification success. Dispatching SET_SUCCESS.");
+        setSandboxSuccess(true);
+        triggerToast("Simulated Sandbox transaction processed successfully!", "success");
+        
+        localStorage.removeItem("payment_pending");
+        setShowSandboxOverlay(false);
+        dispatch({ type: 'SET_SUCCESS' });
+      } else {
+        throw new Error(verifyData.error || "Simulation Verification failed");
+      }
+    } catch (err: any) {
+      console.error("[LOG] [FAILED_SCREEN] SIMULATED VERIFY ERROR:", err);
+      triggerToast(`Sandbox Checkout rejected: ${err.message}`, "error");
+      dispatch({
+        type: 'SET_FAILED',
+        error: err.message || "Simulation Verification failed"
+      });
+    } finally {
+      setSandboxProcessing(false);
+    }
+  };
+
   const prepareOrder = async (campaignId?: string) => {
     if (isPreparingOrder) return orderData;
     if (!user) { 
@@ -876,9 +1003,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
     }
 
     const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-    const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
-    const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
-    const amount = baseAmount + designerCharge + videoMakerCharge;
+    const amount = baseAmount + getAddonsTotal();
     if (!amount || amount <= 0) {
       triggerToast('Invalid order amount.', 'error');
       return null;
@@ -916,8 +1041,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
       if (!response.ok) {
         throw new Error(
-          data?.message ||
           data?.description ||
+          data?.error ||
+          data?.message ||
           "Payment failed"
         );
       }
@@ -951,69 +1077,20 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   };
 
   const handlePaymentAndSubmit = async () => {
-    console.log("[PAYMENT_SYSTEM] Payment button clicked debug");
+    console.log("BUTTON_CLICKED");
     if (paymentProcessedRef.current) return;
 
     if (isPreparingOrder) return;
-    console.log("[PAYMENT_SYSTEM] Payment button clicked");
-    console.log("[PAYMENT_SYSTEM] Opening Modal from:", new Error().stack);
     
     try {
+      console.log("PREPARE_ORDER_CALLED");
       let currentOrderData = orderData;
       if (!currentOrderData) {
         currentOrderData = await prepareOrder(createdCampaignId || localStorage.getItem('last_created_campaign') || undefined);
       }
       
       if (!currentOrderData) return;
-      
-      if (currentOrderData.is_simulated) {
-        setLoading(true);
-        triggerToast("Sandbox Mode: Simulating secure payment...", "info");
-        
-        try {
-          const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-          const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
-          const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
-          const totalAmount = baseAmount + designerCharge + videoMakerCharge;
-
-          const response = {
-            razorpay_order_id: currentOrderData.id,
-            razorpay_payment_id: "pay_simulated_" + Date.now(),
-            razorpay_signature: "simulated_signature",
-            is_simulated: true
-          };
-
-          const verifyRes = await fetch("/api/verify-payment", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              ...response,
-              uid: user?.uid,
-              campaignId: createdCampaignId || localStorage.getItem('last_created_campaign') || undefined,
-              planData: { amount: totalAmount }
-            })
-          });
-
-          const verifyData = await verifyRes.json();
-          if (verifyData.success) {
-            localStorage.removeItem("payment_pending");
-            setShowPaymentState(false);
-            triggerToast("Simulated Sandbox Payment completed successfully!", "success");
-            window.location.hash = 'customer';
-            dispatch({ type: 'SET_ACTIVE' });
-          } else {
-            throw new Error(verifyData.error || "Simulation Verification failed");
-          }
-        } catch (err: any) {
-          console.error("SIMULATED VERIFY ERROR:", err);
-          triggerToast(`Sandbox Verification failed: ${err.message}`, "error");
-        } finally {
-          setLoading(false);
-        }
-        return;
-      }
+      console.log("ORDER_CREATED");
 
       const rawRazorpayKey = currentOrderData.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || "";
       const razorpayKey = String(rawRazorpayKey).trim().replace(/^["']|["']$/g, '');
@@ -1023,6 +1100,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         throw new Error("Razorpay SDK not loaded");
       }
 
+      console.log("RAZORPAY_INSTANCE_CREATED");
       const options = {
         key: razorpayKey,
         amount: currentOrderData.amount,
@@ -1030,7 +1108,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         name: "AutoAds Pro",
         description: "Campaign Payment",
         order_id: currentOrderData.id,
-        // redirect: true, // Removed to prevent interference with handler
         handler: async function (response: any) {
           alert("RAZORPAY CALLBACK FIRED");
           console.log("STEP 1");
@@ -1040,9 +1117,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           setLoading(true);
           try {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
-            const designerCharge = needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0;
-            const videoMakerCharge = needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0;
-            const totalAmount = baseAmount + designerCharge + videoMakerCharge;
+            const totalAmount = baseAmount + getAddonsTotal();
 
             console.log("BEFORE_VERIFY");
             const verifyRes = await fetch("/api/verify-payment", {
@@ -1064,16 +1139,19 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
              if (verifyData.success) {
                localStorage.removeItem("payment_pending");
-               setShowPaymentState(false);
+               console.log("[LOG] [SUCCESS_SCREEN] Razorpay live verification success. Dispatching SET_SUCCESS.");
                triggerToast("Payment successful!", "success");
-               window.location.hash = 'customer';
-               dispatch({ type: 'SET_ACTIVE' });
+               dispatch({ type: 'SET_SUCCESS' });
              } else {
                throw new Error(verifyData.error || "Verification failed");
              }
-           } catch (err) {
-             console.error("VERIFY ERROR:", err);
-             triggerToast("Payment verification failed.", "error");
+           } catch (err: any) {
+             console.error("[LOG] [FAILED_SCREEN] VERIFY ERROR:", err);
+             triggerToast("Payment verification failed: " + err.message, "error");
+             dispatch({
+               type: 'SET_FAILED',
+               error: err.message || "Payment verification failed"
+             });
            } finally {
              setLoading(false);
            }
@@ -1100,6 +1178,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
          console.log("EVENT SUCCESS", resp);
        });
        razor.open();
+       console.log("CHECKOUT_OPENED");
     } catch (e: any) {
       triggerToast(`Modal Error: ${e.message}`, "error");
     }
@@ -1435,9 +1514,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       // Auto-configure the campaign flow
       setNeedDesigner(true);
-      let newPlanId = 'STARTER';
+      let newPlanId = 'basic_growth';
       if (type.includes('Video')) {
-        newPlanId = 'PRO';
+        newPlanId = 'basic_professional';
       }
       setActivePlan(newPlanId);
       localStorage.setItem('last_selected_plan', newPlanId);
@@ -1581,7 +1660,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
           </div>
           {user && (
             <div className="flex items-center gap-2 md:gap-4 ml-2 md:border-l md:border-slate-100 md:pl-6 shrink-0">
-               <NotificationCenter role="CUSTOMER" userId={user?.uid} onNavigateToTab={(tab) => { setActiveTab(tab as any); }} />
+               <ErrorBoundary>
+                 <NotificationCenter role="CUSTOMER" userId={user?.uid} onNavigateToTab={(tab) => { setActiveTab(tab as any); }} />
+               </ErrorBoundary>
                <div className="hidden sm:flex flex-col items-end mr-2 text-right">
                   <span className="text-[9px] font-black text-slate-900 uppercase tracking-tighter">{userProfile?.name || user.displayName || user.email?.split('@')[0] || 'Customer'}</span>
                   <div className="flex items-center gap-1">
@@ -2097,68 +2178,180 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                 </div>
               </div>
 
-              <div className="space-y-6">
-                <div className={cn("space-y-1 p-6 rounded-[2rem] border shadow-sm transition-all duration-500 relative overflow-hidden", 
-                  activePlan === 'BASIC' ? "bg-emerald-50/50 border-emerald-100" : 
-                  activePlan === 'PRO' ? "bg-indigo-50/50 border-indigo-100" : 
-                  "bg-slate-50 border-slate-200"
-                )}>
-                   <div className={cn("absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2", selectedPlan?.color)} />
-                   <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest italic relative z-10">Targeting Subscription</h3>
-                   <div className="flex items-center gap-2 relative z-10">
-                      <div className={cn("w-2 h-2 rounded-full animate-pulse", selectedPlan?.color)} />
-                      <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest italic">Active Tier: {selectedPlan?.name}</p>
-                   </div>
-                </div>
-            
-                <div className="space-y-2">
-                  {Array.isArray(mergedPlans) && mergedPlans.filter(p => ['BASIC', 'STARTER', 'PRO'].includes(p.id)).map((plan) => (
-                    <div
-                      key={plan.id}
-                      className={cn(
-                        "w-full px-4 py-3 bg-white rounded-xl border transition-all text-left relative overflow-hidden group cursor-pointer",
-                        activePlan === plan.id 
-                          ? "border-amber-500 ring-2 ring-amber-500/5 shadow-sm"
-                          : "border-slate-100 shadow-sm hover:border-slate-200"
-                      )}
-                      onClick={() => {
-                        handleActivePlanChange(plan.id);
-                      }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <h4 className="text-[11px] font-black text-slate-900 tracking-tight uppercase italic">{plan.name}</h4>
-                          <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1.5 leading-none">
-                            <Monitor size={8} className="text-amber-500" />
-                            <span>{plan.type === 'SERVICE' ? 'Creation Service' : `${plan.maxScreens} Units • ${plan.durationDays} Day Cycle`}</span>
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-sm font-black text-slate-950 italic tabular-nums leading-none">
-                            ₹{plan.price}
-                          </span>
-                          <p className="text-[6px] text-slate-400 font-black uppercase tracking-widest leading-none mt-0.5">Base Rate</p>
+                {/* AutoAds Premium Subscription Selection */}
+                <div className="bg-[#0b0c10] rounded-[2rem] border border-slate-800/60 p-6 md:p-10 shadow-2xl overflow-hidden relative">
+                  {/* Top Heading */}
+                  <div className="text-center space-y-2 mb-10 relative z-10">
+                    <h2 className="text-3xl md:text-5xl font-black italic tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-500 to-amber-600 uppercase">
+                      CHOOSE YOUR PLAN
+                    </h2>
+                    <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-[0.2em]">
+                      Scale your local business with our smart fleet
+                    </p>
+                  </div>
+
+                  {/* Category Selection */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10 mb-10">
+                    {[
+                      { 
+                        id: 'BASIC', label: 'LOCAL BUSINESS', subtitle: 'For Shops, Restaurants, Salons, Clinics & more', 
+                        icon: 'store', color: 'emerald', glow: 'from-emerald-500/20 to-transparent' 
+                      },
+                      { 
+                        id: 'ENTERPRISE', label: 'ENTERPRISE', subtitle: 'For Schools, Colleges, Hospitals, Corporates', 
+                        icon: 'building', color: 'orange', glow: 'from-orange-500/20 to-transparent' 
+                      },
+                      { 
+                        id: 'AGENCY', label: 'AGENCY', subtitle: 'For Advertising Agencies & Franchise Partners', 
+                        icon: 'users', color: 'purple', glow: 'from-purple-500/20 to-transparent' 
+                      }
+                    ].map((cat) => (
+                      <div
+                        key={cat.id}
+                        onClick={() => {
+                          setActiveCategory(cat.id as any);
+                          localStorage.setItem('last_selected_category', cat.id);
+                        }}
+                        className={cn(
+                          "relative rounded-2xl p-5 cursor-pointer transition-all duration-500 overflow-hidden group border",
+                          activeCategory === cat.id 
+                            ? `border-${cat.color}-500/50 bg-[#12141c] shadow-[0_0_30px_-5px_rgba(var(--${cat.color}-500),0.3)]` 
+                            : "border-slate-800/50 bg-[#0f111a] hover:bg-[#151722] hover:border-slate-700"
+                        )}
+                      >
+                        {/* Glow Background */}
+                        {activeCategory === cat.id && (
+                          <motion.div
+                            layoutId="activeCategoryGlow"
+                            className={cn("absolute inset-0 bg-gradient-to-b opacity-50", cat.glow)}
+                            initial={false}
+                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                          />
+                        )}
+                        
+                        <div className="relative z-10 flex flex-col items-center text-center space-y-3">
+                          <div className={cn(
+                            "w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-300",
+                            activeCategory === cat.id 
+                              ? `bg-${cat.color}-500/20 text-${cat.color}-400 ring-1 ring-${cat.color}-500/50` 
+                              : "bg-slate-800/50 text-slate-500 group-hover:text-slate-300 group-hover:bg-slate-800"
+                          )}>
+                            {cat.icon === 'store' && <Store size={24} className={activeCategory === cat.id ? "drop-shadow-[0_0_10px_rgba(52,211,153,0.8)]" : ""} />}
+                            {cat.icon === 'building' && <Building2 size={24} className={activeCategory === cat.id ? "drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]" : ""} />}
+                            {cat.icon === 'users' && <Users size={24} className={activeCategory === cat.id ? "drop-shadow-[0_0_10px_rgba(168,85,247,0.8)]" : ""} />}
+                          </div>
+                          <div>
+                            <h4 className={cn(
+                              "text-xs font-black tracking-widest uppercase mb-1 transition-colors",
+                              activeCategory === cat.id ? `text-${cat.color}-400` : "text-slate-300"
+                            )}>
+                              {cat.label}
+                            </h4>
+                            <p className="text-[9px] text-slate-500 font-medium leading-relaxed max-w-[180px] mx-auto">
+                              {cat.subtitle}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
 
-                <div className="p-4 bg-slate-950 rounded-2xl space-y-4 text-white shadow-xl relative overflow-hidden border border-slate-900">
-                   <div className="relative z-10">
-                      <button 
-                        onClick={() => {
-                          setCreationStep('DETAILS');
-                          openPaymentModal();
-                        }}
-                        className="w-full bg-amber-500 text-slate-950 rounded-lg py-3 font-black text-[9px] uppercase tracking-[0.2em] hover:bg-amber-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
+                  {/* Plan Cards Slider */}
+                  <div className="relative z-10 overflow-hidden min-h-[400px]">
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={activeCategory}
+                        initial={{ opacity: 0, x: 50 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -50 }}
+                        transition={{ duration: 0.35, ease: "easeOut" }}
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch"
                       >
-                        Confirm Selection <ArrowUpRight size={12} />
-                      </button>
-                   </div>
-                   <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/4 w-24 h-24 bg-amber-500/5 blur-3xl pointer-events-none" />
+                        {Array.isArray(mergedPlans) && mergedPlans.filter((p: any) => p.category === activeCategory).map((plan: any, idx: number) => {
+                          const isMiddle = idx === 1;
+                          const categoryTheme = activeCategory === 'BASIC' ? 'emerald' : activeCategory === 'ENTERPRISE' ? 'orange' : 'purple';
+                          const isSelected = activePlan === plan.id;
+                          
+                          return (
+                          <div
+                            key={plan.id}
+                            onClick={() => handleActivePlanChange(plan.id)}
+                            className={cn(
+                              "relative rounded-[2rem] p-6 transition-all duration-300 cursor-pointer border flex flex-col text-center",
+                              isMiddle ? "bg-gradient-to-b from-[#1a1525] to-[#0f0c16] border-purple-500/30 shadow-2xl lg:-translate-y-4 lg:scale-105" : "bg-[#11131a] border-slate-800/60 hover:bg-[#151822]",
+                              isSelected && !isMiddle ? `border-${categoryTheme}-500/50 shadow-[0_0_30px_-10px_rgba(var(--${categoryTheme}-500),0.3)]` : ""
+                            )}
+                          >
+                            {isMiddle && (
+                              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white text-[8px] font-black uppercase tracking-[0.2em] py-1 px-4 rounded-full shadow-[0_0_10px_rgba(168,85,247,0.5)] whitespace-nowrap z-20">
+                                MOST POPULAR
+                              </div>
+                            )}
+                            
+                            <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wide sm:tracking-widest mt-4 min-h-[40px] flex items-center justify-center break-words px-2">
+                              {plan.name}
+                            </h3>
+                            
+                            <p className="text-[10px] text-slate-400 font-medium mt-2">
+                              {activeCategory === 'BASIC' && `Manage up to\n${plan.maxScreens} Autos`}
+                              {activeCategory === 'ENTERPRISE' && `Manage up to\n${plan.fleetSize || plan.maxScreens + ' Autos'}`}
+                              {activeCategory === 'AGENCY' && `Manage up to\n${plan.clients || '50 Clients'}`}
+                            </p>
+                            
+                            <div className="mt-6 mb-8">
+                              <div className="flex items-start justify-center gap-1">
+                                <span className="text-lg font-bold text-slate-400 mt-1">₹</span>
+                                <span className="text-4xl font-black text-white tracking-tight">{plan.price.toLocaleString()}</span>
+                              </div>
+                              <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">/month</p>
+                            </div>
+                            
+                            <div className="space-y-3 mb-8 flex-1 text-left px-2">
+                               {activeCategory === 'BASIC' && (
+                                 <>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.maxScreens} Autos</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'Basic Analytics'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[1] || 'Email Support'}</div>
+                                 </>
+                               )}
+                               {activeCategory === 'ENTERPRISE' && (
+                                 <>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.fleetSize || plan.maxScreens + ' Autos'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.citiesSupported || 'Multi City'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'Advanced Analytics'}</div>
+                                 </>
+                               )}
+                               {activeCategory === 'AGENCY' && (
+                                 <>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.clients || 'Clients'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.revenueShare || 'Revenue Share'}</div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-300 font-medium"><Check size={14} className={cn(`text-${categoryTheme}-500`)} /> {plan.features?.[0] || 'White Label'}</div>
+                                 </>
+                               )}
+                            </div>
+                            
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleActivePlanChange(plan.id);
+                                setCreationStep('DETAILS');
+                                openPaymentModal();
+                              }}
+                              className={cn(
+                                "w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                                isSelected || isMiddle 
+                                  ? `bg-${isMiddle ? 'purple' : categoryTheme}-600 hover:bg-${isMiddle ? 'purple' : categoryTheme}-500 text-white shadow-[0_0_20px_rgba(var(--${isMiddle ? 'purple' : categoryTheme}-500),0.4)]`
+                                  : "bg-slate-800/50 hover:bg-slate-700 text-slate-300"
+                              )}
+                            >
+                              CHOOSE PLAN
+                            </button>
+                          </div>
+                        )})}
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
                 </div>
-              </div>
             </div>
           </div>
         )}
@@ -2449,7 +2642,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4">
                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest italic leading-none">Standard Creative</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Perfect for quick announcements, offers, and regional targeting.</p>
-                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹{dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000}</h3>
+                         <h3 className="text-3xl font-black italic text-slate-900 tracking-tight">₹{dbPlans.find(p => p.id === 'designer_service')?.price || 1000}</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Professional 4K Static Design</li>
@@ -2470,7 +2663,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       <div className="space-y-4 relative z-10">
                          <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest italic leading-none">Video Ads Service</h4>
                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">High-Impact 1080p motion graphics to grab maximum network attention.</p>
-                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹{dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000}</h3>
+                         <h3 className="text-3xl font-black italic text-white tracking-tight">₹{dbPlans.find(p => p.id === 'video_ads_service')?.price || 2000}</h3>
                       </div>
                       <ul className="space-y-4 text-[10px] font-black uppercase text-slate-300 tracking-widest relative z-10">
                          <li className="flex items-center gap-3"><CheckCircle2 size={14} className="text-amber-500" /> Custom Motion Narrative (15s)</li>
@@ -2701,39 +2894,136 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                       </div>
                       
                       <div className="space-y-3">
+                        {/* 1. Poster Design */}
                         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
                                  <Palette size={14} />
                               </div>
                               <div>
-                                 <p className="text-[10px] font-black text-slate-900 uppercase">Professional Graphic Design</p>
-                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{(dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000).toLocaleString()} for Custom Banner Design</p>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Poster Design Service</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('posterDesign').toLocaleString()} for custom poster/banner</p>
                               </div>
                            </div>
                            <button 
                              onClick={() => setNeedDesigner(!needDesigner)}
-                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needDesigner ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needDesigner ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
                            >
                              {needDesigner ? 'Added' : 'Add'}
                            </button>
                         </div>
 
+                        {/* 2. Video Editing */}
                         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
                                  <Video size={14} />
                               </div>
                               <div>
-                                 <p className="text-[10px] font-black text-slate-900 uppercase">Professional Video Editing</p>
-                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{(dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000).toLocaleString()} for Animated Video Ad</p>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Video Editing Service</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('videoEditing').toLocaleString()} for dynamic video/animation</p>
                               </div>
                            </div>
                            <button 
                              onClick={() => setNeedVideoMaker(!needVideoMaker)}
-                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all", needVideoMaker ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needVideoMaker ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
                            >
                              {needVideoMaker ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        {/* 3. Motion Graphics */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
+                                 <Sparkles size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Motion Graphics</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('motionGraphics').toLocaleString()} for animated transitions</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedMotionGraphics(!needMotionGraphics)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needMotionGraphics ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needMotionGraphics ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        {/* 4. Voice Over */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
+                                 <Mic size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Voice Over Service</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('voiceOver').toLocaleString()} for professional voice acting</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedVoiceOver(!needVoiceOver)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needVoiceOver ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needVoiceOver ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        {/* 5. Campaign Setup */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
+                                 <Settings size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Premium Campaign Setup</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('campaignSetup').toLocaleString()} for priority configuration</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedCampaignSetup(!needCampaignSetup)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needCampaignSetup ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needCampaignSetup ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        {/* 6. QR Design */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
+                                 <QrCode size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">QR Code Design</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('qrDesign').toLocaleString()} for custom tracking QR code</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedQrDesign(!needQrDesign)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needQrDesign ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needQrDesign ? 'Added' : 'Add'}
+                           </button>
+                        </div>
+
+                        {/* 7. Custom Branding */}
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white border rounded-lg flex items-center justify-center text-amber-500 shadow-sm shrink-0">
+                                 <Award size={14} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-900 uppercase">Custom Brand Integration</p>
+                                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">₹{getAddonPrice('customBranding').toLocaleString()} for custom brand placement</p>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={() => setNeedCustomBranding(!needCustomBranding)}
+                             className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shrink-0", needCustomBranding ? "bg-amber-500 text-slate-950 font-extrabold shadow-sm" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-350")}
+                           >
+                             {needCustomBranding ? 'Added' : 'Add'}
                            </button>
                         </div>
                       </div>
@@ -2896,6 +3186,33 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Checking cryptographic signatures...</p>
                     </div>
                   </div>
+                ) : workflowState === 'SUCCESS' ? (
+                  <div className="space-y-6 py-8 text-center font-sans">
+                     <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20">
+                        <CheckCircle2 size={40} className="stroke-[2.5]" />
+                     </div>
+                     <div>
+                        <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Successful</h4>
+                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Transaction Completed & Verified</p>
+                     </div>
+                     <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-[11px] font-mono leading-relaxed text-left">
+                        <p className="font-bold text-center text-emerald-900">Campaign Activated!</p>
+                        <p className="mt-2 text-slate-600 text-[10.5px]">Your payment has been successfully recorded. You can now close this screen to view your active campaign on the dashboard, update media uploads, and start publishing.</p>
+                     </div>
+                     <div className="pt-4">
+                        <button 
+                          onClick={() => {
+                            console.log("[LOG] [SUCCESS_SCREEN] User closed success page. Dispatching SET_ACTIVE.");
+                            localStorage.removeItem("payment_pending");
+                            setShowPaymentState(false);
+                            dispatch({ type: 'SET_ACTIVE' });
+                          }} 
+                          className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+                        >
+                           Continue to Dashboard
+                        </button>
+                     </div>
+                  </div>
                 ) : workflowState === 'FAILED' ? (
                   <div className="space-y-6 py-8 text-center font-sans">
                      <div className="w-20 h-20 bg-red-100 text-red-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-red-500/20">
@@ -2906,14 +3223,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                         <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mt-1">Verification could not be completed</p>
                      </div>
                      <div className="p-4 bg-red-50 rounded-2xl border border-red-100 text-red-800 text-[11px] font-mono">
-                        {paymentResult?.error || 'Unknown error occurred during payment verification.'}
+                        {machineState.error || paymentResult?.error || 'Unknown error occurred during payment verification.'}
                      </div>
                      <div className="pt-4">
                         <button onClick={() => {
-                          setCreatedCampaignId(null);
-                          setActiveCampaignData(null);
+                          setShowPaymentState(false);
+                          dispatch({ type: 'INIT_DETAILS' });
                         }} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-all">
-                           Try Again
+                           Try Again / Close
                         </button>
                      </div>
                   </div>
@@ -2940,27 +3257,104 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                        </div>
                        {needDesigner && (
                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
-                            <span>Creative Strategy Fee</span>
-                            <span>₹{(dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000).toLocaleString()}</span>
+                            <span>Poster Design Fee</span>
+                            <span>₹{getAddonPrice('posterDesign').toLocaleString()}</span>
                          </div>
                        )}
                        {needVideoMaker && (
                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-rose-600 font-extrabold italic">
-                            <span>Video Ad Service Fee</span>
-                            <span>₹{(dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000).toLocaleString()}</span>
+                            <span>Video Editing Fee</span>
+                            <span>₹{getAddonPrice('videoEditing').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {needMotionGraphics && (
+                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                             <span>Motion Graphics Fee</span>
+                             <span>₹{getAddonPrice('motionGraphics').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {needVoiceOver && (
+                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                             <span>Voice Over Fee</span>
+                             <span>₹{getAddonPrice('voiceOver').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {needCampaignSetup && (
+                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                             <span>Campaign Setup Fee</span>
+                             <span>₹{getAddonPrice('campaignSetup').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {needQrDesign && (
+                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                             <span>QR Design Fee</span>
+                             <span>₹{getAddonPrice('qrDesign').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {needCustomBranding && (
+                          <div className="flex justify-between items-center text-[11px] font-black uppercase text-amber-600 font-extrabold italic">
+                             <span>Custom Branding Fee</span>
+                             <span>₹{getAddonPrice('customBranding').toLocaleString()}</span>
+                          </div>
+                        )}
+                        {false && (
+                          <div className="hidden">
                          </div>
                        )}
                        <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200 text-lg font-black italic uppercase text-slate-900">
                           <span>Total Deployment Fee</span>
                           <span>₹{(
                             (typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price) + 
-                            (needDesigner ? (dbPlans.find(p => p.id === 'DESIGNER')?.price || 1000) : 0) + 
-                            (needVideoMaker ? (dbPlans.find(p => p.id === 'VIDEOMAK')?.price || 2000) : 0)
+                            getAddonsTotal() + 
+                            0
                           ).toLocaleString()}</span>
                        </div>
                     </div>
 
-                                         <button 
+                                                              {orderData ? (
+                       orderData.is_simulated ? (
+                         <div className="p-5 bg-amber-50 border border-amber-200 rounded-[1.5rem] space-y-2 mb-4">
+                           <div className="flex items-center gap-2 text-amber-800">
+                             <AlertCircle size={15} className="stroke-[2.5]" />
+                             <p className="text-[10px] font-black uppercase tracking-wider">Gateway Sandbox Mode</p>
+                           </div>
+                           <p className="text-[9px] text-slate-600 font-medium leading-relaxed text-left">
+                             We detected that your active Razorpay credentials are empty, set to placeholders, or failed back-end API authentication checks. 
+                             The system has securely initialized the robust <strong>Sandbox Simulation Protocol</strong>. Clicking the <strong>PAY NOW</strong> button below will automatically simulate checkout & confirm payment instantly.
+                           </p>
+                           <div className="pt-1 flex items-center justify-between">
+                             <span className="text-[7.5px] font-black text-amber-500 uppercase tracking-widest italic animate-pulse">Offline Testing Active</span>
+                             <span className="text-[7.5px] bg-amber-100 border border-amber-300 text-amber-800 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">SANDBOX FALLBACK</span>
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="p-5 bg-emerald-50 border border-emerald-250 rounded-[1.5rem] space-y-2 mb-4">
+                           <div className="flex items-center gap-2 text-emerald-800">
+                             <CheckCircle2 size={15} className="stroke-[2.5]" />
+                             <p className="text-[10px] font-black uppercase tracking-wider">Razorpay Gateway Loaded</p>
+                           </div>
+                           <p className="text-[9px] text-slate-600 font-medium leading-relaxed text-left">
+                             Secure online transaction channels successfully calibrated. Ready to process your deployment fee via your live/test Razorpay checkout popup.
+                           </p>
+                           <div className="pt-1 flex items-center justify-between">
+                             <span className="text-[7.5px] font-black text-emerald-600 uppercase tracking-widest italic animate-pulse">Gateway Secure</span>
+                             <span className="text-[7.5px] bg-emerald-100 border border-emerald-300 text-emerald-800 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">RAZORPAY ACTIVE</span>
+                           </div>
+                         </div>
+                       )
+                     ) : (
+                       <div className="p-5 bg-slate-50 border border-slate-150 rounded-[1.5rem] space-y-2 mb-4">
+                         <div className="flex items-center gap-2 text-slate-600">
+                           <div className="w-2.5 h-2.5 border-2 border-slate-500 border-t-transparent rounded-full animate-spin" />
+                           <p className="text-[10px] font-black uppercase tracking-wider">Checking Server Protocol...</p>
+                         </div>
+                         <p className="text-[9px] text-slate-500 font-medium leading-neutral text-left">
+                           Querying back-end node configuration to verify Razorpay checkout credentials...
+                         </p>
+                       </div>
+                     )}
+
+<button 
                       onClick={handlePaymentAndSubmit}
                       disabled={loading}
                       className={cn(
@@ -2989,6 +3383,257 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                   </div>
                 )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* HIGH-FIDELITY INTERACTIVE SANDBOX GATEWAY MODAL */}
+      <AnimatePresence>
+        {showSandboxOverlay && (
+          <div className="fixed inset-0 z-[250] overflow-y-auto flex items-start justify-center p-4 sm:p-6 lg:p-8">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!sandboxProcessing) setShowSandboxOverlay(false);
+              }}
+              className="absolute inset-0 bg-slate-950/85 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 text-slate-100 rounded-[2.5rem] shadow-2xl overflow-hidden my-auto"
+            >
+              {/* Header */}
+              <div className="p-6 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-[#f59e0b]">MayaanAds Sandbox</h3>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Gateway Simulation Node</p>
+                  </div>
+                </div>
+                {!sandboxProcessing && (
+                  <button 
+                    onClick={() => setShowSandboxOverlay(false)}
+                    className="p-2 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-full transition-all"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              {/* Order Sum */}
+              <div className="p-6 bg-slate-900 border-b border-slate-800/60 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest">Selected Campaign plan</p>
+                  <p className="text-sm font-black text-white">{selectedPlan?.name || "Premium Plan"}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest">DEPLOYMENT CHARGE</p>
+                  <p className="text-lg font-extrabold text-amber-400 font-mono">
+                    ₹{(selectedPlan?.price || 0).toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+
+              {/* Success Screen */}
+              {sandboxSuccess ? (
+                <div className="p-10 flex flex-col items-center justify-center space-y-4 text-center">
+                  <motion.div 
+                    initial={{ scale: 0.3, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 200, damping: 15 }}
+                    className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center"
+                  >
+                    <CheckCircle size={36} className="stroke-[2.5]" />
+                  </motion.div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black uppercase tracking-wider text-emerald-400 animate-pulse">Transaction Authorized</h4>
+                    <p className="text-[9px] text-slate-400 font-medium leading-relaxed px-4">Simulation completed. Broadcaster nodes successfully notified.</p>
+                  </div>
+                  <div className="text-[8px] font-bold text-slate-500 font-mono">ID: pay_sim_{Date.now().toString().substring(6)}</div>
+                </div>
+              ) : (
+                <div className="p-6 space-y-6">
+                  {/* Select Payment Method */}
+                  <div className="grid grid-cols-3 gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+                    <button 
+                      onClick={() => { if(!sandboxProcessing) setActivePaymentMethod('card'); }}
+                      className={cn(
+                        "py-2.5 rounded-xl text-[8.5px] font-black uppercase tracking-widest transition-all",
+                        activePaymentMethod === 'card' ? "bg-slate-800 text-amber-400 font-extrabold border border-slate-700/50" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      Card
+                    </button>
+                    <button 
+                      onClick={() => { if(!sandboxProcessing) setActivePaymentMethod('upi'); }}
+                      className={cn(
+                        "py-2.5 rounded-xl text-[8.5px] font-black uppercase tracking-widest transition-all",
+                        activePaymentMethod === 'upi' ? "bg-slate-800 text-amber-400 font-extrabold border border-slate-700/50" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      UPI
+                    </button>
+                    <button 
+                      onClick={() => { if(!sandboxProcessing) setActivePaymentMethod('netbanking'); }}
+                      className={cn(
+                        "py-2.5 rounded-xl text-[8.5px] font-black uppercase tracking-widest transition-all",
+                        activePaymentMethod === 'netbanking' ? "bg-slate-800 text-amber-400 font-extrabold border border-slate-700/50" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      Banking
+                    </button>
+                  </div>
+
+                  {/* Tab Contents: Card */}
+                  {activePaymentMethod === 'card' && (
+                    <div className="space-y-4">
+                      {/* Virtual Card Preview */}
+                      <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-slate-800/80 p-5 rounded-3xl relative overflow-hidden space-y-6">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[7.5px] font-extrabold text-slate-500 uppercase tracking-widest">SECURE CHIP GATEWAY</span>
+                          <span className="text-amber-500 font-bold italic text-xs">MayaanCard</span>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-[14px] font-semibold tracking-[0.2em] text-white font-mono">{sandboxCardNumber || '•••• •••• •••• ••••'}</p>
+                          <div className="flex justify-between items-center text-[8px] text-slate-400 font-bold uppercase tracking-wider">
+                            <div>
+                              <span>CARDHOLDER</span>
+                              <p className="text-[9.5px] text-white mt-0.5 truncate max-w-[150px] font-extrabold uppercase">{sandboxCardName || 'USER NAME'}</p>
+                            </div>
+                            <div className="text-right">
+                              <span>EXPIRES</span>
+                              <p className="text-[9.5px] text-white mt-0.5 font-extrabold">{sandboxExpiry || 'MM/YY'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Card Input Fields */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                          <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Cardholder Name</label>
+                          <input 
+                            type="text" 
+                            disabled={sandboxProcessing}
+                            value={sandboxCardName}
+                            onChange={(e) => setSandboxCardName(e.target.value)}
+                            placeholder="YOUR FULL NAME"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-[10px] uppercase font-bold text-slate-100 tracking-wider focus:outline-none focus:border-amber-500/50 transition-colors"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Card Number</label>
+                          <input 
+                            type="text" 
+                            disabled={sandboxProcessing}
+                            value={sandboxCardNumber}
+                            onChange={(e) => setSandboxCardNumber(e.target.value)}
+                            placeholder="4111 1111 1111 1111"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-[10px] font-bold text-slate-100 tracking-wider focus:outline-none focus:border-amber-500/50 transition-colors font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Expiry Date</label>
+                          <input 
+                            type="text" 
+                            disabled={sandboxProcessing}
+                            value={sandboxExpiry}
+                            onChange={(e) => setSandboxExpiry(e.target.value)}
+                            placeholder="MM/YY"
+                            maxLength={5}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-[10px] font-bold text-slate-100 tracking-wider focus:outline-none focus:border-amber-500/50 transition-colors font-mono text-center"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">CVV</label>
+                          <input 
+                            type="password" 
+                            disabled={sandboxProcessing}
+                            value={sandboxCvv}
+                            onChange={(e) => setSandboxCvv(e.target.value)}
+                            placeholder="123"
+                            maxLength={3}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-[10px] font-bold text-slate-100 tracking-wider focus:outline-none focus:border-amber-500/50 transition-colors font-mono text-center"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tab Contents: UPI */}
+                  {activePaymentMethod === 'upi' && (
+                    <div className="space-y-4 bg-slate-950 border border-slate-800 p-5 rounded-3xl">
+                      <div>
+                        <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Virtual Payment Address (VPA)</label>
+                        <input 
+                          type="text" 
+                          disabled={sandboxProcessing}
+                          value={sandboxUpiId}
+                          onChange={(e) => setSandboxUpiId(e.target.value)}
+                          placeholder="username@upi"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-[10px] font-bold text-slate-100 tracking-wider focus:outline-none focus:border-amber-500/50 transition-colors font-mono"
+                        />
+                      </div>
+                      <p className="text-[8px] text-slate-500 font-bold leading-normal uppercase">
+                        Accepting virtual UPI tokens. You can authorize with any mock string value.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Tab Contents: Net Banking */}
+                  {activePaymentMethod === 'netbanking' && (
+                    <div className="space-y-4 bg-slate-950 border border-slate-800 p-5 rounded-3xl">
+                      <p className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-2">Select Banker Node</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['STATE BANK OF INDIA', 'HDFC BANK', 'ICICI BANK', 'AXIS BANK'].map(bank => (
+                          <button 
+                            key={bank}
+                            type="button"
+                            disabled={sandboxProcessing}
+                            className="px-4 py-3 text-left border border-slate-850 hover:border-amber-500/40 rounded-xl bg-slate-900 text-[8px] font-extrabold text-slate-400 uppercase tracking-wider hover:text-white transition-all"
+                          >
+                            {bank}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Simulated action button */}
+                  <div className="space-y-3 pt-2">
+                    <button 
+                      onClick={executeSimulatedPayment}
+                      disabled={sandboxProcessing}
+                      className="w-full py-4.5 bg-[#f59e0b] hover:bg-amber-400 text-slate-950 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl hover:shadow-amber-500/10 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      {sandboxProcessing ? (
+                        <>
+                          <div className="w-4.5 h-4.5 border-2 border-slate-950/20 border-t-slate-950 rounded-full animate-spin" />
+                          <span>PROCESSING SIMULATED AUTH...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>AUTHORIZE SIMULATED PAYMENT</span>
+                          <Lock size={13} fill="currentColor" />
+                        </>
+                      )}
+                    </button>
+                    
+                    <div className="flex items-center justify-center gap-1.5 text-slate-500 text-[8px] font-black uppercase tracking-wider">
+                      <Lock size={9} />
+                      <span>SECURE 256-BIT SANDBOX INTEGRITY TRUST</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}
@@ -3105,10 +3750,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[3rem] p-8 max-h-[80vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-8">
-                <h3 className="text-xl font-black italic uppercase text-slate-900">Control Panel</h3>
                 <button onClick={() => setShowMobileMenu(false)} className="p-2 bg-slate-100 rounded-full">
-                  <X size={20} />
+                  <ArrowLeft size={20} />
                 </button>
+                <h3 className="text-xl font-black italic uppercase text-slate-900">Control Panel</h3>
+                <div />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {[

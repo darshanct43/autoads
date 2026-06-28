@@ -11,7 +11,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Message is required' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const { getCredential } = await import('../lib/env.js');
+  const apiKey = getCredential('GEMINI_API_KEY');
   if (!apiKey) {
     console.error('[CHAT] GEMINI_API_KEY is not defined in the backend environment.');
     return res.status(500).json({ 

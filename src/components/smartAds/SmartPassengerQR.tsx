@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { Baby, Users, Shield, Sparkles, Heart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -10,11 +10,11 @@ interface SmartPassengerQRProps {
 }
 
 export default function SmartPassengerQR({ deviceId, onLogout }: SmartPassengerQRProps) {
-  const [isPopupVisible, setIsPopupVisible] = useState(false);
-  const [isManualExpanded, setIsManualExpanded] = useState(false);
+  const [isPopupVisible, setIsPopupVisible] = React.useState(false);
+  const [isManualExpanded, setIsManualExpanded] = React.useState(false);
 
   // Timer logic
-  useEffect(() => {
+  React.useEffect(() => {
     let showTimer: NodeJS.Timeout;
     let hideTimer: NodeJS.Timeout;
 
@@ -42,9 +42,7 @@ export default function SmartPassengerQR({ deviceId, onLogout }: SmartPassengerQ
   const rawDeviceId = deviceId || 'ACTIVE';
   // Sanitize: ensure deviceId isn't a URL
   const safeDeviceId = rawDeviceId.includes('://') ? 'ACTIVE' : rawDeviceId;
-  const baseUrl = "https://ais-pre-ekg3akgeks2b33ctivvphe-141352367606.asia-southeast1.run.app";
-  console.log("SAFE_RIDE_BASE_URL", baseUrl);
-  const qrValue = `${baseUrl}/safe-ride/${encodeURIComponent(safeDeviceId)}`;
+  const qrValue = `https://autoads.in/family-ride/${encodeURIComponent(safeDeviceId)}`;
   console.log("ACTIVE TERMINAL ID (from props):", deviceId);
   console.log("FINAL QR URL:", qrValue);
 
@@ -73,8 +71,14 @@ export default function SmartPassengerQR({ deviceId, onLogout }: SmartPassengerQ
             {deviceId}
         </p>
 
+
         <button 
-            onClick={onLogout}
+            onClick={(e) => { 
+                console.log("[FORENSIC] Sign Out button clicked");
+                e.stopPropagation(); 
+                onLogout(); 
+                console.log("[FORENSIC] onLogout called");
+            }}
             className="w-full py-0.5 mt-0.5 text-[8px] font-black text-slate-500 hover:text-white uppercase tracking-widest bg-slate-800 rounded-md hover:bg-slate-700 transition"
         >
             Sign Out

@@ -6,7 +6,8 @@ import { UserRole } from '@/types';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  signOut
 } from 'firebase/auth';
 import { auth, googleLogin } from '@/lib/firebase';
 import { firebaseService } from '@/services/firebaseService';
@@ -30,7 +31,22 @@ export default function Auth({ onLogin }: AuthProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isTerminalMode, setIsTerminalMode] = useState(false);
+  const [isTerminalMode, setIsTerminalMode] = useState(() => 
+    typeof window !== 'undefined' ? localStorage.getItem('auto_ads_is_terminal') === 'true' : false
+  );
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (isTerminalMode) {
+        localStorage.setItem('auto_ads_is_terminal', 'true');
+        localStorage.removeItem('auto_ads_tv_mode');
+        localStorage.removeItem('auto_ads_device_mode');
+      } else {
+        localStorage.removeItem('auto_ads_is_terminal');
+      }
+    }
+  }, [isTerminalMode]);
+
 
   // Invitation claim states
   const [claimCodeInput, setClaimCodeInput] = useState('');
@@ -43,6 +59,10 @@ export default function Auth({ onLogin }: AuthProps) {
 
   // Handle invitation code in hash URL
   useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).autoAdsStartupCheckpoint) {
+      (window as any).autoAdsStartupCheckpoint(5, 'completed', 'Login Screen Ready / Operational (Ready)');
+    }
+
     const handleHash = async () => {
       if (window.location.hash.startsWith('#claim')) {
         setAuthMode('CLAIM_INVITATION');
@@ -152,20 +172,34 @@ export default function Auth({ onLogin }: AuthProps) {
           
           let userRole: UserRole = 'CUSTOMER';
           
-          if (profile?.role === 'ADMIN' || emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
-            userRole = 'ADMIN';
-          } else if (profile?.role === 'SUPPORT' || profile?.role === 'SUPPORT_AGENT' || profile?.role === 'SUPPORT_MANAGER' || profile?.role === 'SUPPORT_TEAM' || profile?.role === 'STAFF' || emailLower.includes('support')) {
-            userRole = 'SUPPORT_TEAM';
-          } else if (profile?.role === 'FRANCHISE_STAFF') {
-            userRole = 'FRANCHISE_STAFF';
-          } else if (profile?.role === 'FRANCHISE_OWNER') {
-            userRole = 'FRANCHISE_OWNER';
-          } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
-            userRole = 'FRANCHISE_OWNER';
-          } else if (profile?.role === 'DRIVER' || driverProfile) {
-            userRole = 'DRIVER';
-          } else if (profile?.role) {
+          if (profile) {
             userRole = profile.role as UserRole;
+            console.log("[FORENSIC] Profile exists on check. Using profile.role only:", userRole);
+          } else {
+            // Profile missing: self-heal if modern privileged email is loaded
+            if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com') {
+              console.log("[FORENSIC] Live ADMIN profile is missing, self-healing...", emailLower);
+              try {
+                await firebaseService.saveUserProfile(
+                  user.uid,
+                  user.displayName || 'Admin Darshan',
+                  user.phoneNumber || '+919999999999',
+                  'ADMIN',
+                  'ENTERPRISE',
+                  { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
+                );
+                userRole = 'ADMIN';
+              } catch (createErr) {
+                console.error("[FORENSIC] Failed to self-heal user profile:", createErr);
+                userRole = 'ADMIN'; // Client fallback
+              }
+            } else if (emailLower.includes('support')) {
+              userRole = 'SUPPORT_TEAM';
+            } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
+              userRole = 'FRANCHISE_OWNER';
+            } else if (driverProfile) {
+              userRole = 'DRIVER';
+            }
           }
 
           setRole(userRole);
@@ -187,41 +221,17 @@ export default function Auth({ onLogin }: AuthProps) {
   const handleGoogleLogin = async () => {
     setError('');
     setLoading(true);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auto_ads_offline_mode');
+      localStorage.removeItem('auto_ads_offline_role');
+      localStorage.removeItem('auto_ads_last_role');
+      localStorage.removeItem('auto_ads_is_terminal');
+    }
     try {
-      const result = await googleLogin();
-      const user = result.user;
-      const emailLower = user.email?.toLowerCase() || '';
-      
-      const profile = await firebaseService.getUserProfile(user.uid);
-      const driverProfile = await firebaseService.getDriverProfile(user.uid);
-      
-      let userRole: UserRole = 'CUSTOMER';
-
-      if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || profile?.role === 'ADMIN') {
-        userRole = 'ADMIN';
-      } else if (profile?.role === 'SUPPORT' || profile?.role === 'SUPPORT_AGENT' || profile?.role === 'SUPPORT_MANAGER' || profile?.role === 'SUPPORT_TEAM' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
-        userRole = 'SUPPORT_TEAM';
-      } else if (profile?.role === 'FRANCHISE_STAFF') {
-        userRole = 'FRANCHISE_STAFF';
-      } else if (profile?.role === 'FRANCHISE_OWNER') {
-        userRole = 'FRANCHISE_OWNER';
-      } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
-        userRole = 'FRANCHISE_OWNER';
-      } else if (profile?.role === 'DRIVER' || driverProfile || emailLower.includes('driver')) {
-        userRole = 'DRIVER';
-      } else if (profile?.role) {
-        userRole = profile.role as UserRole;
-      }
-
-      // Final check for terminal switch
-      if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
-        userRole = 'DEVICE';
-      }
-
-      onLogin(userRole);
+      console.log("[FORENSIC] [Auth] Triggering googleLogin redirection...");
+      await googleLogin();
     } catch (err: any) {
       setError(err.message || 'Google Auth Failed');
-    } finally {
       setLoading(false);
     }
   };
@@ -241,12 +251,6 @@ export default function Auth({ onLogin }: AuthProps) {
     }
     const inputEmailLower = inputEmail.toLowerCase();
 
-    if (isTerminalMode) {
-      localStorage.setItem('auto_ads_is_terminal', 'true');
-    } else {
-      localStorage.removeItem('auto_ads_is_terminal');
-    }
-
     try {
       // Always lowercase and trim emails for Firebase authentication
       let finalEmail = inputEmail.trim().toLowerCase();
@@ -263,6 +267,13 @@ export default function Auth({ onLogin }: AuthProps) {
       let userCredential;
       try {
         userCredential = await signInWithEmailAndPassword(auth, finalEmail, inputPassword);
+        
+        const user = userCredential.user;
+        const profile = await firebaseService.getUserProfile(user.uid);
+        const userRole = profile?.role as UserRole;
+
+        // User successfully logged in
+        // (Whitelist check removed as per requirements)
       } catch (authErr: any) {
         console.error("[Auth Error]", authErr);
         
@@ -283,7 +294,7 @@ export default function Auth({ onLogin }: AuthProps) {
           const isCustomerDemo = (inputEmailLower === 'customer@autoads.in' || inputEmailLower === 'customer') && inputPassword === 'autoads123';
           const isFranchiseDemo = (inputEmailLower === 'franchise@autoads.in' || inputEmailLower === 'franchise') && inputPassword === 'autoads123';
           const isDriverDemo = (inputEmailLower.startsWith('drv-') || inputEmailLower === 'driver') && inputPassword === 'autoads123';
-          const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower.startsWith('darshanct');
+          const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower === 'dashanct43@gmail.com' || inputEmailLower.startsWith('darshanct') || inputEmailLower.startsWith('dashanct');
 
           if (isSupportDemo || isAdminDemo || isCustomerDemo || isFranchiseDemo || isDriverDemo || isDeveloperDemo) {
             console.warn("[Auth Warning] Network Request Failed. Activating Majestic Offline Auth Fallback for testing.");
@@ -319,7 +330,7 @@ export default function Auth({ onLogin }: AuthProps) {
         const isCustomerDemo = (inputEmailLower === 'customer@autoads.in' || inputEmailLower === 'customer') && inputPassword === 'autoads123';
         const isFranchiseDemo = (inputEmailLower === 'franchise@autoads.in' || inputEmailLower === 'franchise') && inputPassword === 'autoads123';
         const isDriverDemo = (inputEmailLower.startsWith('drv-') || inputEmailLower === 'driver') && inputPassword === 'autoads123';
-        const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower.startsWith('darshanct');
+        const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower === 'dashanct43@gmail.com' || inputEmailLower.startsWith('darshanct') || inputEmailLower.startsWith('dashanct');
 
         if (isSupportDemo || isAdminDemo || isCustomerDemo || isFranchiseDemo || isDriverDemo || isDeveloperDemo) {
           console.warn("[Auth Fallback] Experiencing credential conflict, activating reliable offline fallback for demo account.");
@@ -358,20 +369,34 @@ export default function Auth({ onLogin }: AuthProps) {
       
       let userRole: UserRole = 'CUSTOMER';
 
-      if (profile?.role === 'ADMIN' || emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com') {
-        userRole = 'ADMIN';
-      } else if (profile?.role === 'SUPPORT' || profile?.role === 'SUPPORT_AGENT' || profile?.role === 'SUPPORT_MANAGER' || profile?.role === 'SUPPORT_TEAM' || profile?.role === 'STAFF' || emailLower === 'vijayathrishu@gmail.com' || emailLower.includes('support')) {
-        userRole = 'SUPPORT_TEAM';
-      } else if (profile?.role === 'FRANCHISE_STAFF') {
-        userRole = 'FRANCHISE_STAFF';
-      } else if (profile?.role === 'FRANCHISE_OWNER') {
-        userRole = 'FRANCHISE_OWNER';
-      } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
-        userRole = 'FRANCHISE_OWNER';
-      } else if (profile?.role === 'DRIVER' || driverProfile) {
-        userRole = 'DRIVER'; 
-      } else if (profile?.role) {
+      if (profile) {
         userRole = profile.role as UserRole;
+        console.log("[FORENSIC] saved profile exists on handleLoginSubmit. Using profile.role only:", userRole);
+      } else {
+        // Profile missing: self-heal if modern privileged email is loaded
+        if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com') {
+          console.log("[FORENSIC] Live ADMIN profile is missing on login submit, self-healing...", emailLower);
+          try {
+            await firebaseService.saveUserProfile(
+              user.uid,
+              user.displayName || 'Admin Darshan',
+              user.phoneNumber || '+919999999999',
+              'ADMIN',
+              'ENTERPRISE',
+              { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
+            );
+            userRole = 'ADMIN';
+          } catch (createErr) {
+            console.error("[FORENSIC] Failed to self-heal user profile on login:", createErr);
+            userRole = 'ADMIN'; // Client fallback
+          }
+        } else if (emailLower.includes('support')) {
+          userRole = 'SUPPORT_TEAM';
+        } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
+          userRole = 'FRANCHISE_OWNER';
+        } else if (driverProfile) {
+          userRole = 'DRIVER';
+        }
       }
       
       console.log("[Auth] Resolved role:", userRole);
@@ -408,7 +433,18 @@ export default function Auth({ onLogin }: AuthProps) {
         }
       }
 
-      const finalDestRole = (userRole === 'ADMIN' || ['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(userRole)) ? userRole : (isTerminalMode ? 'DEVICE' : userRole);
+      localStorage.removeItem('auto_ads_tv_mode');
+      localStorage.removeItem('auto_ads_device_mode');
+      localStorage.removeItem('auto_ads_offline_mode');
+      localStorage.removeItem('auto_ads_offline_role');
+      if (isTerminalMode) {
+        localStorage.setItem('auto_ads_is_terminal', 'true');
+      } else {
+        localStorage.removeItem('auto_ads_is_terminal');
+      }
+      
+      const finalDestRole = isTerminalMode ? 'DEVICE' : userRole;
+      console.log("[FORENSIC] Auth/Login flow final. TOGGLE_VALUE =", isTerminalMode, "userRole =", userRole, "finalDestRole =", finalDestRole);
       onLogin(finalDestRole); 
     } catch (err: any) {
       setError(err.message || 'Authentication Failed');
@@ -441,7 +477,8 @@ export default function Auth({ onLogin }: AuthProps) {
         phone: phone || '0000000000',
         email: user.email || '',
         city: driverProfile.location,
-        status: 'pending_verification',
+        status: 'active',
+        accountStatus: 'ACTIVE',
         isVerified: false,
         driverCode: `DRV-${Math.floor(1000 + Math.random() * 9000)}`,
         password: password || 'default123', 
@@ -460,6 +497,8 @@ export default function Auth({ onLogin }: AuthProps) {
       await firebaseService.saveUserProfile(user.uid, driverProfile.name, phone || '0000000000', 'DRIVER');
       console.log("[Auth] Successfully saved user profile.");
       
+      localStorage.removeItem('auto_ads_tv_mode');
+      localStorage.removeItem('auto_ads_device_mode');
       if (isTerminalMode) {
         localStorage.setItem('auto_ads_is_terminal', 'true');
       } else {
@@ -510,7 +549,8 @@ export default function Auth({ onLogin }: AuthProps) {
           name: 'User',
           phone: phone,
           email: finalEmail,
-          status: 'pending_verification',
+          status: 'active',
+          accountStatus: 'ACTIVE',
           isVerified: false,
           driverCode: `DRV-${Math.floor(1000 + Math.random() * 9000)}`,
           password: password,
@@ -583,17 +623,18 @@ export default function Auth({ onLogin }: AuthProps) {
           <div className="bg-slate-950 p-6 md:p-10 text-white relative overflow-hidden">
             <div className="absolute right-0 top-0 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full" />
             <div className="flex items-center gap-4 md:gap-6 mb-2 relative z-10">
-              <div className="h-16 md:h-20 flex items-center justify-center">
-                <img src={`${import.meta.env.BASE_URL}mayaan_logo.jpeg`} alt="Mayaan" className="h-full w-auto object-contain drop-shadow-lg" />
+              <div className="h-24 md:h-28 flex items-center justify-center">
+                <img src="/mayan%20logo.jpeg" alt="Mayan" className="h-full w-auto object-contain drop-shadow-lg" />
               </div>
               <div>
-                <h2 className="text-2xl md:text-3xl font-black italic uppercase tracking-tighter text-amber-500 leading-none">AutoAds</h2>
-                <p className="text-[9px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest mt-1 italic">Mayaan Group Gateway</p>
+                <h2 className="text-3xl md:text-4xl font-black italic uppercase tracking-tighter text-amber-500 leading-none">AutoAds</h2>
+                <p className="text-[10px] md:text-[12px] font-black text-slate-500 uppercase tracking-widest mt-1 italic">Mayaan Group Gateway</p>
               </div>
             </div>
           </div>
 
           <div className="p-6 md:p-10 space-y-6 md:space-y-8 bg-white">
+
             {error && <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-xl text-[10px] font-bold uppercase tracking-widest text-center">{error}</div>}
 
             {authMode === 'CREDENTIALS' && (
@@ -629,9 +670,8 @@ export default function Auth({ onLogin }: AuthProps) {
 
                       <button type="submit" disabled={loading} className="w-full py-5 bg-slate-950 text-amber-500 font-black rounded-2xl text-[12px] uppercase tracking-[0.25em] shadow-2xl hover:scale-[1.01] transition-all disabled:opacity-50">{loading ? 'Processing...' : 'Secure Sign In'}</button>
                       <button type="button" onClick={() => setIsRegistering(true)} className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-all text-center">New Member? Register Here</button>
-                      <div className="flex justify-between items-center py-2 px-1">
+                      <div className="flex justify-center items-center py-2 px-1">
                         <button type="button" onClick={() => setAuthMode('FORGOT_PASSWORD')} className="text-[9px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors italic">Recovery Access</button>
-                        <button type="button" onClick={() => setAuthMode('CLAIM_INVITATION')} className="text-[9px] font-black text-amber-500 uppercase tracking-widest hover:text-amber-600 transition-colors italic">Claim Invitation</button>
                       </div>
                     </div>
                   </form>
@@ -644,7 +684,6 @@ export default function Auth({ onLogin }: AuthProps) {
                           <button type="button" onClick={() => { setRole('DRIVER'); setAuthMode('SIGNUP'); }} className="flex-1 py-5 bg-white border-2 border-slate-100 text-slate-950 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:border-amber-500 transition-all flex flex-col items-center gap-2"><Truck size={20} className="text-amber-500" /> Auto Driver</button>
                           <button type="button" onClick={() => { setRole('CUSTOMER'); setAuthMode('SIGNUP'); }} className="flex-1 py-5 bg-white border-2 border-slate-100 text-slate-950 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:border-amber-500 transition-all flex flex-col items-center gap-2"><Target size={20} className="text-amber-500" /> Customer</button>
                         </div>
-                        <button type="button" onClick={() => { setRole('STAFF' as any); setAuthMode('SIGNUP'); }} className="w-full py-4 bg-white border-2 border-slate-100 text-slate-950 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:border-amber-500 transition-all flex items-center justify-center gap-3"><Monitor size={18} className="text-amber-500" /> Administrative Staff</button>
                       </div>
                     </div>
                   </div>
@@ -674,7 +713,7 @@ export default function Auth({ onLogin }: AuthProps) {
             {authMode === 'SIGNUP' && (
               <div className="space-y-6">
                 <div className="space-y-1 text-center">
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{role === 'DRIVER' ? 'New Driver Enrollment' : role === 'STAFF' ? 'Staff Authorization' : 'Customer Access'}</h3>
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{role === 'DRIVER' ? 'New Driver Enrollment' : role === 'SUPPORT_TEAM' ? 'Staff Authorization' : 'Customer Access'}</h3>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic leading-none">Register your identity on the network</p>
                 </div>
                 <form onSubmit={handleSignup} className="space-y-4">
@@ -757,6 +796,15 @@ export default function Auth({ onLogin }: AuthProps) {
                   </label>
                 </div>
                 <button type="submit" disabled={!driverProfile.agreed || loading} className={cn("w-full py-5 font-black rounded-2xl text-[11px] uppercase tracking-[0.25em] transition-all", driverProfile.agreed ? "bg-slate-950 text-amber-500" : "bg-slate-100 text-slate-300 cursor-not-allowed")}>{loading ? 'Processing...' : 'Finalize Enrollment'}</button>
+                <div className="pt-4 flex justify-center">
+                  <button 
+                    type="button"
+                    onClick={() => signOut(auth).then(() => setAuthMode('CREDENTIALS'))}
+                    className="text-[9px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors flex items-center gap-2"
+                  >
+                    <LogOut size={12} /> Sign Out & Cancel
+                  </button>
+                </div>
               </form>
             )}
 
@@ -921,6 +969,15 @@ export default function Auth({ onLogin }: AuthProps) {
                         className="flex-[2] py-4.5 bg-slate-950 text-amber-500 font-black rounded-2xl text-[10px] uppercase tracking-wider hover:scale-[1.01] transition-all disabled:opacity-50 cursor-pointer"
                       >
                         {loading ? 'Claiming Hub...' : 'Unfreeze & Initialize'}
+                      </button>
+                    </div>
+                    <div className="text-center pt-4 border-t border-slate-50">
+                      <button 
+                        type="button" 
+                        onClick={() => { setValidatedInvite(null); setAuthMode('CREDENTIALS'); }}
+                        className="text-[9px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors"
+                      >
+                        Return to Sign In
                       </button>
                     </div>
                   </form>

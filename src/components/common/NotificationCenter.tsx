@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bell, 
@@ -20,10 +21,47 @@ interface NotificationCenterProps {
   shouldSubscribe?: boolean;
   franchiseId?: string;
   territoryId?: string;
+  userCreatedAt?: any;
+  lang?: string;
 }
 
-export default function NotificationCenter({ userId, role, onNavigateToTab, shouldSubscribe = true, franchiseId, territoryId }: NotificationCenterProps) {
+export default function NotificationCenter({ 
+  userId, 
+  role, 
+  onNavigateToTab, 
+  shouldSubscribe = true, 
+  franchiseId, 
+  territoryId,
+  userCreatedAt,
+  lang = 'en'
+}: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const titles: Record<string, string> = {
+    en: 'Activity Feed',
+    hi: 'गतिविधि फ़ीड',
+    te: 'కార్యకలాప ఫీడ్'
+  };
+  const subtitle: Record<string, string> = {
+    en: 'Important alerts relevant to your account',
+    hi: 'आपके खाते से संबंधित महत्वपूर्ण अलर्ट',
+    te: 'మీ ఖాతాకు సంబంధించిన ముఖ్యమైన హెచ్చరికలు'
+  };
+  const markAllReadText: Record<string, string> = {
+    en: 'Clear All',
+    hi: 'सभी साफ करें',
+    te: 'అన్నీ క్లియర్ చేయండి'
+  };
+  const silenceText: Record<string, string> = {
+    en: 'Silence is golden',
+    hi: 'खामोशी सोना है',
+    te: 'నిశ్శబ్దం బంగారం'
+  };
+  const emptyText: Record<string, string> = {
+    en: 'You do not have any notification alerts at this moment.',
+    hi: 'इस समय आपके पास कोई अधिसूचना अलर्ट नहीं है।',
+    te: 'ఈ సమయంలో మీకు ఎలాంటి నోటిఫికేషన్ హెచ్చరికలు లేవు.'
+  };
+
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [liveToast, setLiveToast] = useState<AppNotification | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -55,10 +93,10 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
         }
       }
       setNotifications(notifs);
-    }, franchiseId, territoryId);
+    }, franchiseId, territoryId, userCreatedAt);
 
     return () => unsubscribe();
-  }, [userId, role, shouldSubscribe, franchiseId, territoryId]);
+  }, [userId, role, shouldSubscribe, franchiseId, territoryId, userCreatedAt]);
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -195,8 +233,8 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
               <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">Activity Feed</h3>
-                <p className="text-[10px] text-slate-500 font-medium">Important alerts relevant to your account</p>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">{titles[lang.toLowerCase()] || titles.en}</h3>
+                <p className="text-[10px] text-slate-500 font-medium">{subtitle[lang.toLowerCase()] || subtitle.en}</p>
               </div>
               {unreadCount > 0 && (
                 <button
@@ -205,7 +243,7 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
                   className="text-[10px] font-black text-amber-600 hover:text-amber-700 transition-colors uppercase tracking-wider flex items-center gap-1"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  Clear All
+                  {markAllReadText[lang.toLowerCase()] || markAllReadText.en}
                 </button>
               )}
             </div>
@@ -217,8 +255,8 @@ export default function NotificationCenter({ userId, role, onNavigateToTab, shou
                   <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center mb-2.5">
                     <Bell className="w-5 h-5 text-slate-300" />
                   </div>
-                  <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">Silence is golden</h4>
-                  <p className="text-[10px] text-slate-400">You do not have any notification alerts at this moment.</p>
+                  <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">{silenceText[lang.toLowerCase()] || silenceText.en}</h4>
+                  <p className="text-[10px] text-slate-400">{emptyText[lang.toLowerCase()] || emptyText.en}</p>
                 </div>
               ) : (
                 notifications.map((notif) => (

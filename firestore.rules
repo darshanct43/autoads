@@ -16,6 +16,7 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'admin@autoads.in' ||
         request.auth.token.email == 'darshanct43@gmail.com' ||
+        request.auth.token.email == 'dashanct43@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );
@@ -158,6 +159,11 @@ service cloud.firestore {
       allow write: if false; // only backend
     }
 
+    match /staffWhitelist/{email} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     match /users/{userId} {
       allow read: if isHQ() || isOwner(userId);
 
@@ -202,7 +208,7 @@ service cloud.firestore {
     }
 
     match /drivers/{driverId} {
-      allow read: if isHQ() || (isOwner(driverId) || isFranchiseStaffFor(resource.data.franchiseId));
+      allow read: if true;
       allow create: if isSignedIn() && (request.auth.uid == driverId || request.auth.uid == request.resource.data.userId);
       allow update: if isHQ() || (isOwner(driverId) || isFranchiseStaffFor(resource.data.franchiseId));
       allow delete: if isAdmin();
@@ -250,7 +256,7 @@ service cloud.firestore {
     }
     
     match /terminals/{terminalId} {
-      allow read: if isHQ() || isFranchiseStaffFor(resource.data.franchiseId);
+      allow read: if true;
       allow write: if isHQ() || isFranchiseStaffFor(resource.data.franchiseId);
     }
 
@@ -305,6 +311,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /planEdits/{editId} {
+      allow read, write: if isSignedIn() && isHQ();
+    }
+
     match /plans/{planId} {
       allow read: if true;
       allow write: if isHQ(); // Lock to matches isHQ level
@@ -322,13 +332,12 @@ service cloud.firestore {
     }
 
     match /devices/{deviceId} {
-      allow read: if isHQ();
+      allow read: if true;
       allow write: if isHQ();
     }
 
     match /ridePreferences/{deviceId} {
-      allow read: if isHQ() || (isSignedIn() && resource.data.driverId == request.auth.uid);
-      allow write: if isHQ() || (isSignedIn() && (resource.data.driverId == request.auth.uid || request.resource.data.driverId == request.auth.uid));
+      allow read, write: if true;
     }
 
     match /canvaTokens/{uid} {

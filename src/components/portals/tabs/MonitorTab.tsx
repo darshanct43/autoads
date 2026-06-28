@@ -14,7 +14,8 @@ import {
   HardDrive,
   Eye,
   Tv,
-  Sliders
+  Sliders,
+  FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Driver } from "@/services/firebaseService";
@@ -29,6 +30,9 @@ interface MonitorTabProps {
   setNetworkConfigTarget: (terminalId: string | null) => void;
   startTVSession: (terminal: any) => void;
   handleRemoteCommand: (terminalId: string, cmd: string, params?: any) => void;
+  setSelectedDriverForAgreement?: (driver: any) => void;
+  setSelectedDriverForDocs?: (driver: any) => void;
+  setShowDocModal?: (show: boolean) => void;
 }
 
 export const MonitorTab: React.FC<MonitorTabProps> = ({
@@ -40,6 +44,9 @@ export const MonitorTab: React.FC<MonitorTabProps> = ({
   setNetworkConfigTarget,
   startTVSession,
   handleRemoteCommand,
+  setSelectedDriverForAgreement,
+  setSelectedDriverForDocs,
+  setShowDocModal,
 }) => {
   // Determine online helper
   const isTerminalOnline = (t: any) => {
@@ -297,6 +304,31 @@ export const MonitorTab: React.FC<MonitorTabProps> = ({
                         <Sliders size={14} className="text-emerald-500" />
                         <span className="text-[8px] font-black uppercase tracking-widest">Conf</span>
                       </button>
+
+                      {setSelectedDriverForDocs && setShowDocModal && driver && (
+                        <button
+                          onClick={() => {
+                            setSelectedDriverForDocs(driver);
+                            setShowDocModal(true);
+                          }}
+                          className="py-2.5 px-3 bg-slate-50 hover:bg-emerald-500/10 hover:text-emerald-600 border border-slate-100 hover:border-emerald-200 text-slate-600 rounded-xl transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
+                          title="Identity Docs"
+                        >
+                          <Eye size={14} className="text-emerald-600" />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Docs</span>
+                        </button>
+                      )}
+
+                      {setSelectedDriverForAgreement && driver && (
+                        <button
+                          onClick={() => setSelectedDriverForAgreement(driver)}
+                          className="py-2.5 px-3 bg-slate-50 hover:bg-indigo-500/10 hover:text-indigo-600 border border-slate-100 hover:border-indigo-200 text-slate-600 rounded-xl transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
+                          title="Signed Agreement"
+                        >
+                          <FileText size={14} className="text-indigo-600" />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Signed</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 

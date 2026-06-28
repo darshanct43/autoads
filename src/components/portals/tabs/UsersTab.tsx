@@ -27,7 +27,9 @@ import {
   UserX,
   AlertOctagon,
   RefreshCw,
-  FileText
+  FileText,
+  Copy,
+  Link as LinkIcon
 } from "lucide-react";
 import { UserRole, User } from "@/types";
 import { INITIAL_FRANCHISES, INITIAL_CITIES, getCityName } from "@/modules/cityManagement/cities";
@@ -38,20 +40,108 @@ import { firebaseService } from "@/services/firebaseService";
 
 interface UsersTabProps {
   users: User[];
+  showToast: (msg: string, type: 'success' | 'error') => void;
 }
 
 type DirectoryView = "USERS" | "FRANCHISES" | "STAFF" | "PERMISSIONS" | "INVITE_STAFF";
 
-export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
+export const UsersTab: React.FC<UsersTabProps> = ({ users = [], showToast }) => {
   const [activeSubView, setActiveSubView] = useState<DirectoryView>("USERS");
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("ALL");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  // Staff Invitation State
+  // Staff Access Whitelist State
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"SUPPORT_MANAGER" | "SUPPORT_AGENT">("SUPPORT_AGENT");
+  const [inviteFullName, setInviteFullName] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteRole, setInviteRole] = useState<"SUPPORT_MANAGER" | "SUPPORT_AGENT" | "SUPPORT_TEAM">("SUPPORT_TEAM");
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [whitelist, setWhitelist] = useState<any[]>([]);
+
+  // Real-time whitelist listener
+  useEffect(() => {
+    if (activeSubView === "INVITE_STAFF") {
+      const unsubscribe = firebaseService.subscribeToStaffWhitelist((data) => {
+        setWhitelist(data);
+      });
+      return () => unsubscribe();
+    }
+  }, [activeSubView]);
+
+  const handleAddWhitelist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail || !invitePassword || !inviteFullName) {
+      showToast("Email, Password and Full Name are required", "error");
+      return;
+    }
+    setIsSubmittingInvite(true);
+    try {
+      const { initializeApp } = await import('firebase/app');
+      const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
+      const { doc, setDoc } = await import('firebase/firestore');
+      
+      // Initialize a secondary app just to create the user without logging admin out
+      const secondaryApp = initializeApp({
+        apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
+        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
+      }, 'SecondaryApp' + Date.now());
+      
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, inviteEmail, invitePassword);
+      
+      // We can use the primary db to write to the users collection
+      // since the admin is authenticated there.
+      const userDocRef = doc(db, 'users', userCredential.user.uid);
+      const defaultPermissions: Record<string, boolean> = {
+        viewTickets: true,
+        replyTickets: true,
+        viewDrivers: true,
+        approveDriverKyc: true,
+        viewCampaigns: true,
+        viewDevices: true,
+        managePlans: false,
+        approveCampaigns: false,
+        approveDevices: false,
+        viewPayments: false,
+        approveWithdrawals: false,
+        manageSupportTeam: false,
+        systemSettings: false,
+        removeTestData: false,
+        purgeNetworkData: false
+      };
+
+      await setDoc(userDocRef, {
+        email: inviteEmail,
+        fullName: inviteFullName,
+        role: 'SUPPORT_TEAM' as const,
+        status: 'ACTIVE',
+        permissions: defaultPermissions,
+        createdAt: new Date().toISOString()
+      });
+      
+      showToast(`Account created: ${inviteEmail}`, 'success');
+      setInviteEmail("");
+      setInviteFullName("");
+      setInvitePassword("");
+    } catch (err: any) {
+      showToast(err.message || "Operation failed.", 'error');
+    } finally {
+      setIsSubmittingInvite(false);
+    }
+  };
+
+  const handleRemoveWhitelist = async (email: string) => {
+    if (!window.confirm(`Revoke access for ${email}?`)) return;
+    try {
+      await firebaseService.removeFromStaffWhitelist(email);
+      showToast(`Access revoked for ${email}`, 'success');
+    } catch (err) {
+      showToast("Operation failed.", 'error');
+    }
+  };
 
   // Phase 1B Interactive Administrative States
   const [inspectorTab, setInspectorTab] = useState<"INFO" | "CONTROL" | "AUDIT">("INFO");
@@ -59,6 +149,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState<UserRole>("CUSTOMER");
   const [editStatus, setEditStatus] = useState<string>("ACTIVE");
+  const [editPermissions, setEditPermissions] = useState<Record<string, boolean>>({});
   const [isMutating, setIsMutating] = useState(false);
   const [mutationMessage, setMutationMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -80,6 +171,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
       setEditPhone(selectedUser.phone || "");
       setEditRole(selectedUser.role || "CUSTOMER");
       setEditStatus(selectedUser.status || ((selectedUser as any).isApproved !== false ? "ACTIVE" : "PENDING_APPROVAL"));
+      setEditPermissions(selectedUser.permissions || {});
       setMutationMessage(null);
       setInspectorTab("INFO");
     }
@@ -155,12 +247,17 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
 
     try {
       const isApprovedValue = editStatus === "ACTIVE";
-      const updateData = {
+      const updateData: any = {
         name: editName.trim(),
         phone: editPhone.trim(),
         status: editStatus,
-        isApproved: isApprovedValue
+        isApproved: isApprovedValue,
+        role: editRole,
       };
+      
+      if (editRole === 'SUPPORT_TEAM') {
+        updateData.permissions = editPermissions;
+      }
 
       await firebaseService.updateUserProfile(selectedUser.id, updateData);
 
@@ -168,14 +265,12 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
       await logAdminAction(
         "PROFILE_MUTATION",
         selectedUser.id,
-        `Modified display fields. Name: "${editName.trim()}", Phone: "${editPhone.trim()}", Status: "${editStatus}", Approved: ${isApprovedValue}.`
+        `Modified display fields. Name: "${editName.trim()}", Role: "${editRole}", Status: "${editStatus}".`
       );
 
       setMutationMessage({ type: "success", text: "User profile details updated successfully!" });
       
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast("Profile Details Synchronized", "success");
-      }
+      showToast("Profile Details Synchronized", "success");
     } catch (e: any) {
       console.error(e);
       setMutationMessage({ type: "error", text: e.message || "Failed to submit modifications." });
@@ -221,9 +316,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
 
       setMutationMessage({ type: "success", text: `User promoted to ${editRole} security classification.` });
 
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast(`Role Updated to ${editRole}`, "success");
-      }
+      showToast(`Role Updated to ${editRole}`, "success");
     } catch (e: any) {
       console.error(e);
       setMutationMessage({ type: "error", text: e.message || "Failed to elevate permissions classification." });
@@ -246,15 +339,11 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         specialization: "OPERATIONS_STAFF"
       });
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast(`Staff invitation sent to ${inviteEmail}`, "success");
-      }
+      showToast(`Staff invitation sent to ${inviteEmail}`, "success");
       setInviteEmail("");
     } catch (e: any) {
       console.error(e);
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast(e.message || "Invitation failed", "error");
-      }
+      showToast(e.message || "Invitation failed", "error");
     } finally {
       setIsSubmittingInvite(false);
     }
@@ -277,8 +366,9 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
   };
 
   // Determine if a role belongs to the corporate staff directory
-  const isStaffRole = (role: UserRole) => {
-    return ["ADMIN", "SUPPORT_MANAGER", "SUPPORT_AGENT", "SUPPORT", "STAFF"].includes(role);
+  const isStaffRole = (role?: UserRole) => {
+    if (!role) return false;
+    return ["ADMIN", "SUPPORT_MANAGER", "SUPPORT_AGENT", "SUPPORT_TEAM", "SUPPORT", "STAFF"].includes(role);
   };
 
   // 1. Calculations for upper Metrics Bar
@@ -315,7 +405,14 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
   });
 
   // Get visually distinct badge colors for roles
-  const getRoleStyle = (role: UserRole) => {
+  const getRoleStyle = (role?: UserRole) => {
+    if (!role) {
+      return {
+        bg: "bg-slate-50 text-slate-700 border-slate-200",
+        pill: "bg-slate-500 text-white",
+        label: "User",
+      };
+    }
     switch (role) {
       case "ADMIN":
         return {
@@ -409,7 +506,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
       <div className="flex flex-wrap gap-2 p-1.5 bg-slate-100 rounded-2xl max-w-max border border-slate-200/50" id="directory-selectors">
         {[
           { id: "USERS", label: "User Accounts", icon: Users },
-          { id: "INVITE_STAFF", label: "Invite to Support Team", icon: Mail },
+          { id: "INVITE_STAFF", label: "Staff Access Whitelist", icon: Mail },
         ].map((btn) => {
           const Icon = btn.icon;
           const active = activeSubView === btn.id;
@@ -645,42 +742,89 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
             {activeSubView === "INVITE_STAFF" && (
               <div className="max-w-md mx-auto p-8 rounded-3xl bg-white border border-slate-100 shadow-sm space-y-6">
                 <div>
-                  <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">Invite Support Staff</h3>
+                  <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">Add Staff Member</h3>
                   <p className="text-[11px] text-slate-400 mt-1 uppercase font-black tracking-wider">
-                    Invite colleagues to join and assist on the Support Team website portal.
+                    Create a new account for Support Team.
                   </p>
                 </div>
-                <form onSubmit={handleInviteStaff} className="space-y-4">
+                <form onSubmit={handleAddWhitelist} className="space-y-4">
                   <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Email Address</label>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Staff Full Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="Jane Doe"
+                      value={inviteFullName}
+                      onChange={(e) => setInviteFullName(e.target.value)}
+                      className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Staff Email Address</label>
                     <input 
                       type="email" 
                       required
-                      placeholder="colleague@company.com"
+                      placeholder="staff@company.com"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Assign Role</label>
-                    <select
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value as "SUPPORT_MANAGER" | "SUPPORT_AGENT")}
-                      className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
-                    >
-                      <option value="SUPPORT_AGENT">Support Agent</option>
-                      <option value="SUPPORT_MANAGER">Support Manager</option>
-                    </select>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Define Password (Admin Assigned)</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="Enter a temporary password"
+                      value={invitePassword}
+                      onChange={(e) => setInvitePassword(e.target.value)}
+                      className="w-full p-3 border border-slate-200 rounded-xl text-xs font-semibold bg-slate-50 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Assign Authorization Role</label>
+                    <div className="w-full p-3 border border-slate-200 rounded-xl text-xs font-bold bg-slate-50 text-slate-800">
+                      Support Team Core (SUPPORT_TEAM)
+                    </div>
                   </div>
                   <button 
                     type="submit"
                     disabled={isSubmittingInvite}
-                    className="w-full p-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg"
+                    className="w-full p-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg"
                   >
-                    {isSubmittingInvite ? "Sending..." : "Send Invitation"}
+                    {isSubmittingInvite ? "Adding..." : "Create Account"}
                   </button>
                 </form>
+
+                {whitelist.length > 0 && (
+                  <div className="pt-6 border-t border-slate-100 space-y-4">
+                    <div>
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-800">Whitelisted Staff</h4>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Authorized emails for support portal access</p>
+                    </div>
+                    <div className="space-y-2">
+                       {whitelist.map(item => (
+                         <div key={item.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between group">
+                           <div>
+                             <p className="text-[9px] font-black text-slate-900">{item.email}</p>
+                             <div className="flex items-center gap-2 mt-0.5">
+                               <p className="text-[8px] font-bold text-indigo-500 uppercase">{item.role?.replace('_', ' ')}</p>
+                               <span className="text-[7px] text-slate-300">•</span>
+                               <p className="text-[8px] font-medium text-slate-400 uppercase italic">Added {new Date(item.createdAt).toLocaleDateString()}</p>
+                             </div>
+                           </div>
+                           <button
+                             onClick={() => handleRemoveWhitelist(item.email)}
+                             className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                             title="Revoke Permission"
+                           >
+                             <UserX size={14} />
+                           </button>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -896,7 +1040,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
                           <div className="space-y-2">
                             <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Assigned Operational Roles</p>
                             <div className="grid grid-cols-1 gap-1.5 max-h-[150px] overflow-y-auto pr-1">
-                              {Object.entries(PERMISSIONS_BY_ROLE[selectedUser.role] || {}).map(([key, value]) => {
+                              {Object.entries(selectedUser.role ? (PERMISSIONS_BY_ROLE[selectedUser.role] || {}) : {}).map(([key, value]) => {
                                 return (
                                   <div key={key} className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/5 text-[10px]">
                                     <span className="text-slate-300 capitalize">{key.replace("can", "").replace(/([A-Z])/g, " $1")}</span>
@@ -1011,8 +1155,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
                                     <option value="CUSTOMER" className="text-white bg-slate-900">CUSTOMER</option>
                                     <option value="DRIVER" className="text-white bg-slate-900">DRIVER</option>
                                     <option value="FRANCHISE_OWNER" className="text-white bg-slate-900">FRANCHISE_OWNER</option>
-                                    <option value="SUPPORT_AGENT" className="text-white bg-slate-900">SUPPORT_AGENT</option>
-                                    <option value="SUPPORT_MANAGER" className="text-white bg-slate-900">SUPPORT_MANAGER</option>
                                     <option value="SUPPORT_TEAM" className="text-white bg-slate-900">SUPPORT_TEAM</option>
                                     <option value="STAFF" className="text-white bg-slate-900">STAFF</option>
                                     <option value="SUPPORT" className="text-white bg-slate-900">SUPPORT (Legacy)</option>
@@ -1030,6 +1172,118 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users = [] }) => {
                                   {isMutating ? "Writing Operations..." : "Mutate Security Role"}
                                 </button>
                               </div>
+
+                              {editRole === 'SUPPORT_TEAM' && (
+                                <div className="bg-white/5 border border-white/5 p-4 rounded-2xl space-y-3">
+                                  <h4 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider flex items-center gap-1.5 border-b border-white/5 pb-2">
+                                    <Shield size={12} /> Assigned Permissions
+                                  </h4>
+                                  
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Driver Operations</p>
+                                      {[
+                                        { key: 'viewDrivers', label: 'View Drivers' },
+                                        { key: 'approveDriverKyc', label: 'Approve Driver KYC' },
+                                        { key: 'suspendDrivers', label: 'Suspend Drivers' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Campaign Operations</p>
+                                      {[
+                                        { key: 'viewCampaigns', label: 'View Campaigns' },
+                                        { key: 'approveCampaigns', label: 'Approve Campaigns' },
+                                        { key: 'startCampaigns', label: 'Start Campaigns' },
+                                        { key: 'stopCampaigns', label: 'Stop Campaigns' },
+                                        { key: 'rejectCampaigns', label: 'Reject Campaigns' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Terminal Operations</p>
+                                      {[
+                                        { key: 'viewDevices', label: 'View Devices' },
+                                        { key: 'approveDevices', label: 'Approve Devices' },
+                                        { key: 'remoteDeviceAccess', label: 'Remote Device Access' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Support Operations</p>
+                                      {[
+                                        { key: 'viewTickets', label: 'View Tickets' },
+                                        { key: 'replyTickets', label: 'Reply Tickets' },
+                                        { key: 'closeTickets', label: 'Close Tickets' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Financial Operations</p>
+                                      {[
+                                        { key: 'viewPayments', label: 'View Payments' },
+                                        { key: 'approveWithdrawals', label: 'Approve Withdrawals' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Administration</p>
+                                      {[
+                                        { key: 'createStaff', label: 'Create Staff Members' },
+                                        { key: 'editStaffPermissions', label: 'Edit Staff Permissions' },
+                                        { key: 'manageSupportTeam', label: 'Manage Support Team' },
+                                        { key: 'managePlans', label: 'Manage Package Plans' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">System Operations</p>
+                                      {[
+                                        { key: 'systemSettings', label: 'Access System Settings' },
+                                        { key: 'removeTestData', label: 'Remove Test Data' },
+                                        { key: 'purgeNetworkData', label: 'Purge Network Data' }
+                                      ].map(p => (
+                                        <label key={p.key} className="flex items-center gap-2 text-[10px] text-slate-300">
+                                          <input type="checkbox" checked={!!editPermissions[p.key]} onChange={e => setEditPermissions({...editPermissions, [p.key]: e.target.checked})} className="rounded bg-black/40 border-white/10" />
+                                          {p.label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    onClick={handleMutateProfileAndStatus}
+                                    disabled={isMutating}
+                                    className="w-full mt-2 bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isMutating ? "Writing Operations..." : "Update Permissions"}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

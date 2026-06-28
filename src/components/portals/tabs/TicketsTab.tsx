@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { SupportTicket } from "@/types";
 import { firebaseService } from "@/services/firebaseService";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface TicketsTabProps {
   tickets: SupportTicket[];
@@ -38,6 +39,7 @@ export const TicketsTab: React.FC<TicketsTabProps> = ({
   handleStatusChange,
   handleDeleteTicket,
 }) => {
+  const { hasPermission } = usePermissions();
   const filteredTickets = tickets.filter(t => {
      // Normalization
      const status = (t.status || 'open').toLowerCase();
@@ -552,74 +554,80 @@ export const TicketsTab: React.FC<TicketsTabProps> = ({
               {/* Action Operations Control panel footer (Fixed) */}
               <div className="shrink-0 p-4 border-t border-slate-100 bg-white" id="details-section-actions">
                 {/* Send reply input */}
-                <form onSubmit={handleSendMessage} className="flex gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800 shadow-xl mb-3" id="live-reply-form">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      required
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Type reply message..."
-                      className="flex-1 px-3 py-2 bg-slate-800 border-none rounded-lg text-[10px] font-black text-white focus:outline-none placeholder:text-slate-500 font-mono"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isSending || !newMessage.trim()}
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase text-[9px] tracking-widest rounded-lg shadow-sm transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer active:scale-95"
-                    >
-                      Send
-                    </button>
-                </form>
+                {hasPermission('replyTickets') && (
+                  <form onSubmit={handleSendMessage} className="flex gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800 shadow-xl mb-3" id="live-reply-form">
+                      <input
+                        type="text"
+                        value={newMessage}
+                        required
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        placeholder="Type reply message..."
+                        className="flex-1 px-3 py-2 bg-slate-800 border-none rounded-lg text-[10px] font-black text-white focus:outline-none placeholder:text-slate-500 font-mono"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSending || !newMessage.trim()}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase text-[9px] tracking-widest rounded-lg shadow-sm transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer active:scale-95"
+                      >
+                        Send
+                      </button>
+                  </form>
+                )}
 
                 <div className="flex items-center justify-between gap-4">
                   {/* Status Change Selector buttons */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Status:</span>
-                    <div className="flex items-center gap-1 p-1 bg-slate-50 border border-slate-100 rounded-xl">
-                      <button
-                        onClick={() => handleStatusChange(activeTicket.id!, "open")}
-                        className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
-                          activeTicket.status?.toLowerCase() === "open"
-                            ? "bg-rose-600 text-white shadow-sm"
-                            : "text-slate-400 hover:text-slate-600"
-                        }`}
-                      >
-                        Open
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(activeTicket.id!, "in_progress")}
-                        className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
-                          activeTicket.status?.toLowerCase() === "in_progress"
-                            ? "bg-amber-500 text-slate-900 shadow-sm"
-                            : "text-slate-400 hover:text-slate-600"
-                        }`}
-                      >
-                        Active
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(activeTicket.id!, "resolved")}
-                        className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
-                          activeTicket.status?.toLowerCase() === "resolved"
-                            ? "bg-emerald-600 text-white shadow-sm"
-                            : "text-slate-400 hover:text-slate-600"
-                        }`}
-                      >
-                        Done
-                      </button>
+                  {hasPermission('closeTickets') && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Status:</span>
+                      <div className="flex items-center gap-1 p-1 bg-slate-50 border border-slate-100 rounded-xl">
+                        <button
+                          onClick={() => handleStatusChange(activeTicket.id!, "open")}
+                          className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
+                            activeTicket.status?.toLowerCase() === "open"
+                              ? "bg-rose-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-600"
+                          }`}
+                        >
+                          Open
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(activeTicket.id!, "in_progress")}
+                          className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
+                            activeTicket.status?.toLowerCase() === "in_progress"
+                              ? "bg-amber-500 text-slate-900 shadow-sm"
+                              : "text-slate-400 hover:text-slate-600"
+                          }`}
+                        >
+                          Active
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(activeTicket.id!, "resolved")}
+                          className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all ${
+                            activeTicket.status?.toLowerCase() === "resolved"
+                              ? "bg-emerald-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-600"
+                          }`}
+                        >
+                          Done
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Absolute Purge Danger Button */}
-                  <button
-                    onClick={() => {
-                        if(window.confirm("Terminate thread?")) {
-                            handleDeleteTicket(activeTicket.id!);
-                            setActiveTicketId(null);
-                        }
-                    }}
-                    className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1"
-                  >
-                    <Trash2 size={12} /> Terminate
-                  </button>
+                  {hasPermission('closeTickets') && (
+                    <button
+                      onClick={() => {
+                          if(window.confirm("Terminate thread?")) {
+                              handleDeleteTicket(activeTicket.id!);
+                              setActiveTicketId(null);
+                          }
+                      }}
+                      className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1"
+                    >
+                      <Trash2 size={12} /> Terminate
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

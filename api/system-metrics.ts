@@ -87,7 +87,11 @@ export default async function handler(req: any, res: any) {
         }, { merge: true });
       }
     } catch (e: any) {
-      console.warn("[System Metrics Database Warning] Permission denied or failed to access 'systemMetrics/live':", e.message);
+      if (e.message?.includes('PERMISSION_DENIED')) {
+        console.info("[System Metrics Info] Firestore metrics write skipped (permission denied).");
+      } else {
+        console.warn("[System Metrics Database Warning] Permission denied or failed to access 'systemMetrics/live':", e.message);
+      }
       // Generate active, realistic metrics increments if Firestore database is locked out
       dbMetrics.firestoreReads = (dbMetrics.firestoreReads || 142) + documentsRead;
       dbMetrics.firestoreWrites = (dbMetrics.firestoreWrites || 36) + 1;
@@ -123,16 +127,17 @@ export default async function handler(req: any, res: any) {
     }
 
     // 4. Return combined live metrics payload
+    const { getCredential } = await import('../lib/env.js');
     const payload = {
       ai: {
         gemini: {
-          configured: !!process.env.GEMINI_API_KEY,
+          configured: !!getCredential('GEMINI_API_KEY'),
           requestsToday: dbMetrics.geminiRequestsToday || 0,
           failures: dbMetrics.geminiFailures || 0,
-          quotaRemaining: process.env.GEMINI_API_KEY ? Math.max(0, 15 - (dbMetrics.geminiRequestsToday % 15)) + " RPM / 1M TPM" : "0 (Unconfigured)"
+          quotaRemaining: getCredential('GEMINI_API_KEY') ? Math.max(0, 15 - (dbMetrics.geminiRequestsToday % 15)) + " RPM / 1M TPM" : "0 (Unconfigured)"
         },
         openai: {
-          configured: !!process.env.OPENAI_API_KEY,
+          configured: !!getCredential('OPENAI_API_KEY'),
           requestsToday: dbMetrics.openaiRequestsToday || 0,
           failures: dbMetrics.openaiFailures || 0
         }

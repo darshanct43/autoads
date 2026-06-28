@@ -76,7 +76,7 @@ const DEFAULT_PLANS = [
 const generateMissingPDF = async (driverData: any) => {
   const aadhaarUrl = driverData.aadharPhoto || driverData.documents?.aadhaar;
   const dlUrl = driverData.dlPhoto || driverData.documents?.drivingLicense;
-  const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl;
+  const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl || driverData.selfiePhoto;
   
   if (!selfieUrl) {
     console.error("Verification selfie required before agreement completion.");
@@ -363,6 +363,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
   // Campaign Management States for LIVE_CAMPAIGNS tab
   const [selectedCampaign, setSelectedCampaign] = useState<AdCampaign | null>(null);
   const [isEditingMedia, setIsEditingMedia] = useState(false);
+  const [isUpdatingOperationalStatus, setIsUpdatingOperationalStatus] = useState(false);
   const [editMediaUrl, setEditMediaUrl] = useState("");
   const [editMediaType, setEditMediaType] = useState<"IMAGE" | "VIDEO">("IMAGE");
   const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
@@ -402,6 +403,35 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
     };
     fetchProfile();
   }, []);
+
+  const hasPermission = (permKey: string) => {
+    if (auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com') return true;
+    if (userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'ADMIN') return true;
+    if (userProfile?.role === 'SUPPORT_TEAM') {
+      if (!userProfile?.permissions || Object.keys(userProfile.permissions).length === 0) {
+        const defaults: Record<string, boolean> = {
+          viewTickets: true,
+          replyTickets: true,
+          viewDrivers: true,
+          approveDriverKyc: true,
+          viewCampaigns: true,
+          viewDevices: true,
+          managePlans: false,
+          approveCampaigns: false,
+          approveDevices: false,
+          viewPayments: false,
+          approveWithdrawals: false,
+          manageSupportTeam: false,
+          systemSettings: false,
+          removeTestData: false,
+          purgeNetworkData: false
+        };
+        return !!defaults[permKey];
+      }
+      return !!userProfile?.permissions?.[permKey];
+    }
+    return true; 
+  };
 
   // Sync plans from firebase to keep local and database aligned
   useEffect(() => {
@@ -603,6 +633,19 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
     }
   };
 
+  const handleUpdateOperationalStatus = async (campaignId: string, status: 'ACTIVE' | 'PAUSED') => {
+    setIsUpdatingOperationalStatus(true);
+    try {
+      await firebaseService.updateCampaign(campaignId, { operationalStatus: status });
+      showToast(`Campaign playback ${status === 'ACTIVE' ? 'resumed' : 'paused'} successfully.`, "success");
+      setSelectedCampaign(prev => prev ? { ...prev, operationalStatus: status } : null);
+    } catch (err) {
+      showToast("Failed to update playback status.", "error");
+    } finally {
+      setIsUpdatingOperationalStatus(false);
+    }
+  };
+
   const handleDeleteCampaign = async (id: string) => {
     if (!id) return;
     if (!window.confirm("Confirm permanent removal?")) return;
@@ -774,8 +817,8 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
     return Date.now() - lastUpdate < 60000;
   }).length;
 
-  const isManager = userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'SUPPORT_TEAM';
-  const isHighRankSupport = userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'ADMIN';
+  const isManager = userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'SUPPORT_TEAM' || userProfile?.role === 'ADMIN' || auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com';
+  const isHighRankSupport = userProfile?.role === 'SUPPORT_MANAGER' || userProfile?.role === 'ADMIN' || auth.currentUser?.email?.toLowerCase() === 'vijayathrishu@gmail.com';
   const isAdmin = userProfile?.role === 'ADMIN';
 
   // State calculations for Operations Command Center Metrics Dashboard
@@ -1005,10 +1048,13 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
             </div>
           </div>
 
-          <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden flex flex-col justify-between">
+          <div 
+            onClick={() => setActiveTab('TERMINAL_HUB')}
+            className="bg-white p-5 md:p-6 rounded-2xl border border-slate-100 hover:border-indigo-300 hover:shadow-md transition-all relative overflow-hidden flex flex-col justify-between cursor-pointer group"
+          >
             <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
             <div>
-              <p className="text-slate-500 text-xs font-semibold">Online IOT Terminals</p>
+              <p className="text-slate-500 text-xs font-semibold group-hover:text-indigo-600 transition-colors">Online IOT Terminals</p>
               <p className="text-3xl font-semibold text-indigo-600 mt-2">{onlineTerminalsCount}</p>
             </div>
             <div className="mt-4 flex items-center gap-1.5 text-slate-400 text-[10px] font-medium">
@@ -1016,9 +1062,12 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
             </div>
           </div>
 
-          <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden flex flex-col justify-between">
+          <div 
+            onClick={() => setActiveTab('TERMINAL_HUB')}
+            className="bg-white p-5 md:p-6 rounded-2xl border border-slate-100 hover:border-rose-300 hover:shadow-md transition-all relative overflow-hidden flex flex-col justify-between cursor-pointer group"
+          >
             <div>
-              <p className="text-slate-500 text-xs font-semibold">Offline Devices</p>
+              <p className="text-slate-500 text-xs font-semibold group-hover:text-rose-500 transition-colors">Offline Devices</p>
               <p className="text-3xl font-semibold text-rose-500 mt-2">{offlineTerminalsCount}</p>
             </div>
             <div className="mt-4 flex items-center gap-1.5 text-slate-400 text-[10px] font-medium">
@@ -1154,6 +1203,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
         onLogout={onLogout} 
         userRole={userProfile?.role}
         badgeCounts={badgeCounts}
+        hasPermission={hasPermission}
       />
 
        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
@@ -1215,7 +1265,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                 </ErrorBoundary>
               )}
 
-              {activeTab === 'LIVE_CAMPAIGNS' && (
+              {activeTab === 'LIVE_CAMPAIGNS' && isManager && hasPermission('viewCampaigns') && (
                 <ErrorBoundary componentName="Live Campaigns">
                   <div className="bg-white border border-slate-200 p-6 rounded-[2rem] shadow-sm text-left">
                     <CampaignsTab
@@ -1247,6 +1297,8 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                           showToast("Media update failed.", 'error');
                         }
                       }}
+                      handleUpdateOperationalStatus={handleUpdateOperationalStatus}
+                      isUpdatingOperationalStatus={isUpdatingOperationalStatus}
                       isUpdatingMedia={false}
                       searchTerm={searchTerm}
                       setSearchTerm={setSearchTerm}
@@ -1297,7 +1349,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Campaign Composer tab */}
-              {activeTab === 'COMPOSE_CAMPAIGN' && isManager && (
+              {activeTab === 'COMPOSE_CAMPAIGN' && isManager && hasPermission('startCampaigns') && (
                 <ErrorBoundary componentName="Campaign Composer">
                   <div className="bg-white border border-slate-150 rounded-[2.5rem] p-8 max-w-4xl mx-auto text-left shadow-lg text-slate-700">
                     <div className="flex items-center gap-2 mb-2">
@@ -1485,7 +1537,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Monitor Queue tab */}
-              {activeTab === 'MONITOR_QUEUE' && isManager && (
+              {activeTab === 'MONITOR_QUEUE' && isManager && hasPermission('approveCampaigns') && (
                 <ErrorBoundary componentName="Monitor Queue Reviews">
                   <div className="bg-white border border-slate-150 p-6 rounded-[2.5rem] shadow-sm text-left">
                       <div className="flex items-center gap-2 mb-4 text-left">
@@ -1506,7 +1558,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Support Tickets tab */}
-              {activeTab === 'SUPPORT_RELAY' && isManager && (
+              {activeTab === 'SUPPORT_RELAY' && isManager && hasPermission('viewTickets') && (
                 <ErrorBoundary componentName="Support Relay">
                   <div className="bg-white border border-slate-150 rounded-[2.5rem] p-6 shadow-sm text-left">
                     <TicketsTab
@@ -1549,64 +1601,8 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                   </div>
                 </ErrorBoundary>
               )}
-
-              {/* Pricing Config tab */}
-              {activeTab === 'PRICING_CONFIG' && isHighRankSupport && (
-                <ErrorBoundary componentName="Pricing Config">
-                  <div className="bg-white border border-slate-150 p-6 rounded-[2.5rem] text-left shadow-sm">
-                    <div className="flex items-center justify-between mb-4 border-b border-slate-150 pb-4">
-                      <div className="flex items-center gap-2">
-                        <Sliders className="w-5 h-5 text-amber-500" />
-                        <h2 className="text-xl font-bold tracking-tight text-slate-900">Pricing Controls</h2>
-                      </div>
-                    </div>
-
-                    {/* Subtab selection */}
-                    <div className="flex items-center gap-2 mb-6 bg-slate-50 p-1.5 rounded-2xl w-fit border border-slate-150/80">
-                      <button
-                        onClick={() => setPricingSubTab('PLANS')}
-                        className={cn(
-                          "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer",
-                          pricingSubTab === 'PLANS' ? "bg-amber-500 text-slate-950 shadow-md" : "text-slate-500 hover:text-slate-800"
-                        )}
-                      >
-                        Plan Manager
-                      </button>
-                      <button
-                        onClick={() => setPricingSubTab('PROPOSALS')}
-                        className={cn(
-                          "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer",
-                          pricingSubTab === 'PROPOSALS' ? "bg-amber-500 text-slate-950 shadow-md" : "text-slate-500 hover:text-slate-800"
-                        )}
-                      >
-                        Approval Queue
-                      </button>
-                    </div>
-
-                    {pricingSubTab === 'PLANS' ? (
-                      <PlanManager />
-                    ) : (
-                      <PricingApprovalsTab
-                        planProposals={planProposals}
-                        plans={plans.length > 0 ? plans : DEFAULT_PLANS}
-                        showApprovalModal={pricingShowModal}
-                        setShowApprovalModal={setPricingShowModal}
-                        setApprovingCampaignId={setPricingApprovingId}
-                        setApprovalForm={setPricingForm}
-                        approvalForm={pricingForm}
-                        handleRejectPlan={handleRejectPlan}
-                        handleApprovePlan={handleApprovePlan}
-                        pricingSubTab={pricingSubTab}
-                        setPricingSubTab={setPricingSubTab}
-                        isSubmitting={isSubmittingPricing}
-                      />
-                    )}
-                  </div>
-                </ErrorBoundary>
-              )}
-
               {/* Global Offers tab */}
-              {activeTab === 'GLOBAL_OFFERS' && isManager && (
+              {activeTab === 'GLOBAL_OFFERS' && isManager && hasPermission('viewCampaigns') && (
                 <ErrorBoundary componentName="Global Offers Notices">
                   <div className="bg-white border border-slate-150 p-6 rounded-[2.5rem] shadow-sm text-left">
                     <div className="flex items-center gap-2 mb-4 text-left">
@@ -1628,7 +1624,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Quotes Review tab */}
-              {activeTab === 'QUOTES_REVIEW' && isManager && (
+              {activeTab === 'QUOTES_REVIEW' && isManager && hasPermission('viewDrivers') && (
                 <ErrorBoundary componentName="Driver Quotes Review">
                   <div className="bg-white border border-slate-150 p-8 rounded-[2.5rem] text-left shadow-sm">
                     <QuotesReviewTab />
@@ -1637,7 +1633,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Driver KYC Bureau tab */}
-              {activeTab === 'DRIVER_KYC_BUREAU' && isManager && (
+              {activeTab === 'DRIVER_KYC_BUREAU' && isManager && hasPermission('viewDrivers') && (
                 <ErrorBoundary componentName="Driver KYC Bureau">
                   <div className="bg-white border border-slate-150 p-2 rounded-[2.5rem] text-left shadow-sm">
                     <div className="p-6 border-b border-slate-150">
@@ -1796,7 +1792,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
               )}
 
               {/* Terminal Hub tab */}
-              {activeTab === 'TERMINAL_HUB' && isManager && (
+              {activeTab === 'TERMINAL_HUB' && isManager && hasPermission('viewDevices') && (
                 <ErrorBoundary componentName="Terminal Hub Tab">
                   <div className="bg-white border border-slate-150 p-2 rounded-[2.5rem] shadow-sm text-left">
                     <TerminalHubTab
@@ -1817,13 +1813,16 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                       setActiveTab={setActiveTab}
                       setNetworkConfigTarget={setNetworkConfigTarget}
                       firebaseService={firebaseService}
+                      setSelectedDriverForAgreement={setSelectedDriverForAgreement}
+                      setSelectedDriverForDocs={setSelectedDriverForDocs}
+                      setShowDocModal={setShowDocModal}
                     />
                   </div>
                 </ErrorBoundary>
               )}
 
               {/* Transactions Registry tab */}
-              {activeTab === 'TRANSACTIONS' && isManager && (
+              {activeTab === 'TRANSACTIONS' && isManager && hasPermission('viewPayments') && (
                 <ErrorBoundary componentName="Transactions Registry Tab">
                   <div className="bg-white border border-slate-150 p-6 rounded-[2.5rem] shadow-sm text-left">
                     <PaymentsTab
@@ -1834,6 +1833,15 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                       drivers={drivers}
                       campaigns={campaigns}
                     />
+                  </div>
+                </ErrorBoundary>
+              )}
+
+              {/* Plan Management tab */}
+              {activeTab === 'PLAN_MANAGEMENT' && isManager && hasPermission('managePlans') && (
+                <ErrorBoundary componentName="Plan Management Tab">
+                  <div className="bg-white border border-slate-150 p-6 rounded-[2.5rem] shadow-sm text-left">
+                    <PlanManager />
                   </div>
                 </ErrorBoundary>
               )}
@@ -1852,18 +1860,6 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                 <ErrorBoundary componentName="Revenue Center">
                   <div className="bg-white border border-slate-150 p-1 rounded-[2.5rem] shadow-sm">
                     <RevenueCenter />
-                  </div>
-                </ErrorBoundary>
-              )}
-
-              {/* Pricing Control tab */}
-              {activeTab === 'PRICING_CONTROL' && isManager && (
-                <ErrorBoundary componentName="Pricing Control">
-                  <div className="bg-white border border-slate-150 p-8 rounded-[2.5rem] shadow-sm">
-                    <PricingProposalsTab
-                      plans={mergedPlans}
-                      showToast={showToast}
-                    />
                   </div>
                 </ErrorBoundary>
               )}
@@ -1952,6 +1948,7 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                 <div className="grid grid-cols-2 gap-2.5">
                   {[
                     { id: 'DASHBOARD', title: 'Dashboard', icon: LayoutDashboard },
+                    { id: 'TERMINAL_HUB', title: 'Terminal Fleet', icon: Cpu },
                     { id: 'SUPPORT_RELAY', title: 'Support Hub', icon: Ticket },
                     { id: 'FRAUD_ALERTS', title: 'Security & Anomalies', icon: ShieldAlert },
                     { id: 'COMPOSE_CAMPAIGN', title: 'Campaign Composer', icon: Send },
@@ -2361,29 +2358,33 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                   </p>
                 </div>
                 <div className="flex gap-4 w-full md:w-auto">
-                   <button 
-                    onClick={async () => {
-                       await firebaseService.updateDriverProfile(selectedDriverForDocs.id, { 
-                         kycStatus: 'UNDER_REVIEW', 
-                         adminApproved: false 
-                       });
-                       showToast("Dossier transmitted for Admin Finalization.", "success");
-                       setShowDocModal(false);
-                    }}
-                    className="flex-1 md:flex-none px-10 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all shadow-xl shadow-amber-500/20"
-                   >
-                     Submit for Admin Review
-                   </button>
-                   <button 
-                    onClick={async () => {
-                        await firebaseService.updateDriverProfile(selectedDriverForDocs.id, { kycStatus: 'REJECTED' });
-                        showToast("Revocation warning issued.", "error");
-                        setShowDocModal(false);
-                    }}
-                    className="flex-1 md:flex-none px-10 py-4 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
-                   >
-                     Reject
-                   </button>
+                   {hasPermission('approveDriverKyc') && (
+                     <button 
+                      onClick={async () => {
+                         await firebaseService.updateDriverProfile(selectedDriverForDocs.id, { 
+                           kycStatus: 'UNDER_REVIEW', 
+                           adminApproved: false 
+                         });
+                         showToast("Dossier transmitted for Admin Finalization.", "success");
+                         setShowDocModal(false);
+                      }}
+                      className="flex-1 md:flex-none px-10 py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all shadow-xl shadow-amber-500/20"
+                     >
+                       Submit for Admin Review
+                     </button>
+                   )}
+                   {hasPermission('approveDriverKyc') && (
+                     <button 
+                      onClick={async () => {
+                          await firebaseService.updateDriverProfile(selectedDriverForDocs.id, { kycStatus: 'REJECTED' });
+                          showToast("Revocation warning issued.", "error");
+                          setShowDocModal(false);
+                      }}
+                      className="flex-1 md:flex-none px-10 py-4 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
+                     >
+                       Reject
+                     </button>
+                   )}
                 </div>
               </div>
             </motion.div>

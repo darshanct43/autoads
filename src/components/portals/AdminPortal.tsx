@@ -85,7 +85,7 @@ import NotificationCenter from "../common/NotificationCenter";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { RevenueManagementTab } from "./tabs/RevenueManagementTab";
 import { PricingApprovalsTab } from "./tabs/PricingApprovalsTab";
-import { PackagesTab } from "./tabs/PackagesTab";
+import { PlanManager } from "./tabs/PlanManager";
 import { FranchisesTab } from "./tabs/FranchisesTab";
 import { DeviceHealthCenterTab } from "./tabs/DeviceHealthCenterTab";
 import { TerminalHubTab } from "./tabs/TerminalHubTab";
@@ -241,9 +241,10 @@ const clauses = [
 ];
 
 const generateMissingPDF = async (driverData: any) => {
+  return;
   const aadhaarUrl = driverData.aadharPhoto || driverData.documents?.aadhaar;
   const dlUrl = driverData.dlPhoto || driverData.documents?.drivingLicense;
-  const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl;
+  const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl || driverData.selfiePhoto;
   if (!selfieUrl) {
     console.error("Verification selfie required before agreement completion.");
     return;
@@ -636,15 +637,23 @@ const getCampaignExpiration = (campaign: any) => {
 interface AdminPortalProps {
   onRoleJump?: (role: UserRole) => void;
   onLogout: () => void;
+  initialTab?: string;
 }
 
 export default function AdminPortal({
   onRoleJump,
   onLogout,
+  initialTab,
 }: AdminPortalProps) {
+  console.log("AdminPortal DEBUG: initialTab =", initialTab);
   const [selectedTheme, setSelectedTheme] = useState<'default' | 'tokyo' | 'emerald' | 'ocean' | 'solar'>(() => (localStorage.getItem('admin_premium_theme') as any) || 'default');
   
-  const [activeTab, setActiveTab] = useState("DASHBOARD");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
+      return "TERMINAL_HUB";
+    }
+    return initialTab || "DASHBOARD";
+  });
   const [renderError, setRenderError] = useState<string | null>(null);
 
   console.log('AdminPortal RENDER: activeTab', activeTab);
@@ -799,6 +808,7 @@ export default function AdminPortal({
   const [editMediaUrl, setEditMediaUrl] = useState('');
   const [editMediaType, setEditMediaType] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
   const [isUpdatingMedia, setIsUpdatingMedia] = useState(false);
+  const [isUpdatingOperationalStatus, setIsUpdatingOperationalStatus] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
   const [selectedDriverForAgreement, setSelectedDriverForAgreement] = useState<any | null>(null);
@@ -852,6 +862,7 @@ export default function AdminPortal({
 
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [purgeInput, setPurgeInput] = useState("");
 
   const liveUnitsCount = liveStatus.filter((status) => {
@@ -1176,8 +1187,8 @@ export default function AdminPortal({
   const handleExecutePurge = async () => {
     setIsSubmitting(true);
     try {
-      await firebaseService.purgeAllProductionData();
-      showToast("System Reset Complete. Network at 0.", 'success');
+      await firebaseService.purgeAllProductionData(true);
+      showToast("System Reset Complete (Dry Run Mode). Network at 0.", 'success');
       setShowPurgeConfirm(false);
       // Reload to ensure all subscriptions clear properly
       window.location.reload();
@@ -1371,10 +1382,15 @@ export default function AdminPortal({
   };
 
   const [planProposals, setPlanProposals] = useState<any[]>([]);
+  const [planEdits, setPlanEdits] = useState<any[]>([]);
 
   useEffect(() => {
     const unsub = firebaseService.subscribeToPlanProposals(setPlanProposals);
-    return () => unsub();
+    const unsubEdits = firebaseService.subscribeToPlanEdits(setPlanEdits);
+    return () => {
+      unsub();
+      unsubEdits();
+    };
   }, []);
 
   const handleApprovePlan = async (proposalId: string, planId: string, newValue: number, type: 'price' | 'designerPrice' | 'videoMakerPrice' = 'price') => {
@@ -1666,6 +1682,19 @@ export default function AdminPortal({
     }
   };
 
+  const handleUpdateOperationalStatus = async (campaignId: string, status: 'ACTIVE' | 'PAUSED') => {
+    setIsUpdatingOperationalStatus(true);
+    try {
+      await firebaseService.updateCampaign(campaignId, { operationalStatus: status });
+      showToast(`Campaign playback ${status === 'ACTIVE' ? 'resumed' : 'paused'} successfully.`, "success");
+      setSelectedCampaign(prev => prev ? { ...prev, operationalStatus: status } : null);
+    } catch (err) {
+      showToast("Failed to update playback status.", "error");
+    } finally {
+      setIsUpdatingOperationalStatus(false);
+    }
+  };
+
   const [holdPurge, setHoldPurge] = useState(0);
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -1699,8 +1728,8 @@ export default function AdminPortal({
   const executePurge = async () => {
     try {
       setIsExtracting(true);
-      await firebaseService.purgeAllProductionData();
-      setOpFeedback({ message: "Network Purged Successfully", type: 'success' });
+      await firebaseService.purgeAllProductionData(true);
+      setOpFeedback({ message: "Network Purged Successfully (Dry Run Mode)", type: 'success' });
       setTimeout(() => window.location.reload(), 1000);
     } catch (e) {
       setOpFeedback({ message: "Purge Failed", type: 'error' });
@@ -1708,6 +1737,24 @@ export default function AdminPortal({
       setIsExtracting(false);
       setShowPurgeConfirm(false);
       setPurgeInput("");
+    }
+  };
+
+  const handleCleanupTestData = async () => {
+    try {
+      setIsExtracting(true);
+      const deletedCount = await firebaseService.cleanupTestData();
+      setOpFeedback({ 
+        message: `System Sanitized: ${deletedCount} test nodes removed.`, 
+        type: 'success' 
+      });
+      setShowCleanupConfirm(false);
+      // Wait a bit then refresh to show updated stats
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      setOpFeedback({ message: "Sanitization Sequence Failed", type: 'error' });
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -1820,7 +1867,7 @@ export default function AdminPortal({
 
   const getComplianceStatus = (loc: any) => {
     const activeCampaign = campaigns.find(c => c.assignedDrivers?.includes(loc.id) && c.status === 'ACTIVE');
-    if (!activeCampaign || !activeCampaign.targetLat) return { status: 'idle', distance: 0 };
+    if (!activeCampaign || !activeCampaign.targetLat || !activeCampaign.targetLng) return { status: 'idle', distance: 0 };
 
     const dist = calculateDistance(loc.lat, loc.lng, activeCampaign.targetLat, activeCampaign.targetLng);
     const isCompliant = dist <= (activeCampaign.coverageRadius || 5000);
@@ -1938,6 +1985,8 @@ export default function AdminPortal({
   const renderTabContent = () => {
     console.log('RENDER TAB', activeTab);
     switch (activeTab) {
+      case "PLAN_APPROVAL_CENTER":
+        return <PlanManager />;
       case "OPERATIONS_CENTER":
         return <OperationsCenter />;
       case "TERRITORY_COMMAND":
@@ -1996,6 +2045,8 @@ export default function AdminPortal({
             editUploadProgress={editUploadProgress}
             handleUpdateMedia={handleUpdateMedia}
             isUpdatingMedia={isUpdatingMedia}
+            handleUpdateOperationalStatus={handleUpdateOperationalStatus}
+            isUpdatingOperationalStatus={isUpdatingOperationalStatus}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             selectedArea={selectedArea}
@@ -2019,23 +2070,7 @@ export default function AdminPortal({
             handleDeleteCampaign={handleDeleteCampaign}
           />
         );
-      case "PRICING_APPROVALS":
-        return (
-          <PricingApprovalsTab
-            planProposals={planProposals}
-            plans={plans}
-            showApprovalModal={showApprovalModal}
-            setShowApprovalModal={setShowApprovalModal}
-            setApprovingCampaignId={setApprovingCampaignId}
-            setApprovalForm={setApprovalForm}
-            approvalForm={approvalForm}
-            handleRejectPlan={handleRejectPlan}
-            handleApprovePlan={handleApprovePlan}
-            pricingSubTab={pricingSubTab}
-            setPricingSubTab={setPricingSubTab}
-            isSubmitting={isSubmitting}
-          />
-        );
+
       case "TERMINAL_HUB":
         return (
           <ErrorBoundary>
@@ -2057,6 +2092,10 @@ export default function AdminPortal({
               setActiveTab={setActiveTab}
               setNetworkConfigTarget={setNetworkConfigTarget}
               firebaseService={firebaseService}
+              startTVSession={startTVSession}
+              setSelectedDriverForAgreement={setSelectedDriverForAgreement}
+              setSelectedDriverForDocs={setSelectedDriverForDocs}
+              setShowDocModal={setShowDocModal}
             />
           </ErrorBoundary>
         );
@@ -2091,51 +2130,7 @@ export default function AdminPortal({
             setMapZoom={setMapZoom}
           />
         );
-      case "PACKAGES":
-        return (
-          <PackagesTab
-            setActiveTab={setActiveTab}
-            isExtracting={isExtracting}
-            handleExtractionClick={handleExtractionClick}
-            showToast={showToast}
-            plans={plans}
-            onPushToNetwork={async (plan) => {
-              try {
-                const finalPrice = typeof plan.price === 'number' ? plan.price : parseFloat(plan.price.toString().replace(/[^0-9.]/g, '')) || 0;
-                const finalDesc = plan.description || '';
-                
-                // 1. Submit proposal and approve for price
-                const pPrice = await firebaseService.proposePlanChange({
-                  planId: plan.id,
-                  currentPrice: 0,
-                  proposedPrice: finalPrice,
-                  reason: 'Admin push - auto-approve price',
-                  type: 'price'
-                });
-                await firebaseService.approvePlanProposal(pPrice.id, plan.id, finalPrice, 'price');
 
-                // 2. Submit proposal and approve for description
-                const pDesc = await firebaseService.proposePlanChange({
-                  planId: plan.id,
-                  currentPrice: '',
-                  proposedPrice: finalDesc,
-                  reason: 'Admin push - auto-approve description',
-                  type: 'description'
-                });
-                await firebaseService.approvePlanProposal(pDesc.id, plan.id, finalDesc, 'description');
-                
-                // Refresh plans state
-                const up = await firebaseService.getPlans();
-                setPlans(up);
-                
-                showToast('Plan pushed to network successfully!', 'success');
-              } catch(e: any) {
-                console.error(e);
-                showToast('Failed to push plan: ' + (e.message || 'Unknown error'), 'error');
-              }
-            }}
-          />
-        );
 // case "FRANCHISES":
 //   return (
 //     <FranchisesTab
@@ -2184,6 +2179,9 @@ export default function AdminPortal({
             setNetworkConfigTarget={setNetworkConfigTarget}
             startTVSession={startTVSession}
             handleRemoteCommand={handleRemoteCommand}
+            setSelectedDriverForAgreement={setSelectedDriverForAgreement}
+            setSelectedDriverForDocs={setSelectedDriverForDocs}
+            setShowDocModal={setShowDocModal}
           />
         );
       case "WITHDRAWALS":
@@ -2228,7 +2226,73 @@ export default function AdminPortal({
         return (
           <UsersTab
             users={users}
+            showToast={showToast}
           />
+        );
+      case "SETTINGS":
+        return (
+          <div className="p-6 md:p-10 space-y-8 max-w-4xl mx-auto">
+            <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-2">
+                  System Maintenance
+                </h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  Advanced Node Operations & Logic Calibration
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                      <Database size={20} />
+                    </div>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Data Sanitization</h4>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                    Automatically locate and remove all TEST, DEMO, and simulated records across the entire network architecture.
+                  </p>
+                  <button 
+                    onClick={() => setShowCleanupConfirm(true)}
+                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                  >
+                    Remove Test Data
+                  </button>
+                </div>
+
+                <div className="p-6 bg-red-50/50 rounded-3xl border border-red-100 space-y-4 text-left">
+                   <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-red-500/10 text-red-500 rounded-xl">
+                      <Trash2 size={20} />
+                    </div>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Hard Reset</h4>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                    Purge all production data nodes and reset the network state to zero. This action is destructive and irreversible.
+                  </p>
+                  <button 
+                    onClick={() => setShowPurgeConfirm(true)}
+                    className="w-full py-4 bg-red-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                  >
+                    Purge Network Data
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-slate-100">
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                   <div className="flex items-center gap-3">
+                     <div className="p-2 bg-slate-900/10 text-slate-900 rounded-xl">
+                       <Smartphone size={16} />
+                     </div>
+                     <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Live SDK Telemetry</span>
+                   </div>
+                   <div className="px-3 py-1 bg-emerald-500 text-white text-[8px] font-black uppercase tracking-widest rounded-lg">Active</div>
+                </div>
+              </div>
+            </div>
+          </div>
         );
       default:
         console.log('DEFAULT TAB HIT', activeTab);
@@ -2297,6 +2361,54 @@ export default function AdminPortal({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {showCleanupConfirm && (
+          <motion.div
+            key="cleanup-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6"
+          >
+            <motion.div 
+              key="cleanup-modal"
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-md w-full border border-indigo-100"
+            >
+              <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
+                <Database className="text-indigo-500" size={32} />
+              </div>
+              <h3 className="text-2xl font-black uppercase text-slate-900 mb-2 italic">
+                Surgical Cleanup
+              </h3>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest leading-relaxed mb-6">
+                Delete all TEST / DEMO data? This will remove campaigns, payments, terminals, and users identified as non-production assets.
+              </p>
+              
+              <div className="space-y-4">
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCleanupConfirm(false)}
+                    className="flex-1 px-4 py-3 bg-slate-100 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+                  >
+                    Abort
+                  </button>
+                  <button
+                    onClick={handleCleanupTestData}
+                    disabled={isExtracting}
+                    className="flex-[2] bg-indigo-500 text-white px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-indigo-500/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                  >
+                    {isExtracting ? "SANITIZING..." : "EXECUTE CLEANUP"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {opFeedback && (
           <motion.div
@@ -2321,7 +2433,7 @@ export default function AdminPortal({
             { id: "OPERATIONS_CENTER", icon: Server, title: "Operations Center" },
             { id: "MAP", icon: MapPin, title: "Live Tracking" },
             { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
-            { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests", badge: planProposals.length > 0 },
+            { id: "PLAN_APPROVAL_CENTER", icon: FileText, title: "Plan Approval Center", badge: planEdits.filter(e => e.status === "PENDING_APPROVAL").length > 0 },
             { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
             { id: "MONITOR", icon: Smartphone, title: "Live Units", badge: liveScreensCount > 0 },
             { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
@@ -2331,7 +2443,7 @@ export default function AdminPortal({
             // { id: "FRANCHISES", icon: Shield, title: "Franchises" },
             { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
             { id: "NOTICES", icon: Gift, title: "Global Offers" },
-            { id: "PACKAGES", icon: Zap, title: "Package Config" },
+            { id: "SETTINGS", icon: Settings, title: "System Settings" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -2400,16 +2512,16 @@ export default function AdminPortal({
           <MapPin size={20} />
         </button>
         <button
-          onClick={() => setActiveTab("PRICING_APPROVALS")}
+          onClick={() => setActiveTab("PLAN_APPROVAL_CENTER")}
           className={cn(
             "p-2 rounded-xl transition-all relative",
-            activeTab === "PRICING_APPROVALS"
+            activeTab === "PLAN_APPROVAL_CENTER"
               ? "bg-amber-500 text-slate-950"
               : "text-slate-500",
           )}
         >
-          <Check size={20} />
-          {planProposals.length > 0 && (
+          <FileText size={20} />
+          {planEdits.filter(e => e.status === "PENDING_APPROVAL").length > 0 && (
             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" />
           )}
         </button>
@@ -2466,7 +2578,7 @@ export default function AdminPortal({
                   { id: "OPERATIONS_CENTER", icon: Server, title: "Operations" },
                   { id: "MAP", icon: MapPin, title: "Live Tracking" },
                   { id: "TERMINAL_HUB", icon: TerminalIcon, title: "Terminal Sync" },
-                  { id: "PRICING_APPROVALS", icon: Check, title: "Price Requests" },
+                  { id: "PLAN_APPROVAL_CENTER", icon: FileText, title: "Plan Approvals" },
                   { id: "CAMPAIGNS", icon: Monitor, title: "Ads Control" },
                   { id: "MONITOR", icon: Smartphone, title: "Live Units" },
                   { id: "TICKETS", icon: AlertCircle, title: "Support Hub" },
@@ -2476,7 +2588,7 @@ export default function AdminPortal({
                   // { id: "FRANCHISES", icon: Shield, title: "Franchises" },
                   { id: "WITHDRAWALS", icon: Wallet, title: "Payouts" },
                   { id: "NOTICES", icon: Gift, title: "Global Offers" },
-                  { id: "PACKAGES", icon: Zap, title: "Package Config" },
+                  { id: "SETTINGS", icon: Settings, title: "System Settings" },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -2510,7 +2622,7 @@ export default function AdminPortal({
       <div className="flex-1 flex flex-col overflow-hidden pb-20 md:pb-0 relative bg-white">
         {/* Floating Role Switch Button Removed - Unified in App.tsx */}
 
-        <header className="h-14 md:h-16 border-b border-slate-100 flex items-center justify-between px-4 md:px-8 bg-white shrink-0 sticky top-0 z-40">
+        <header className={cn("h-14 md:h-16 border-b border-slate-100 flex items-center justify-between px-4 md:px-8 bg-white shrink-0 sticky top-0 z-40", activeTab === "TERMINAL_HUB" && "hidden")}>
           <div className="flex items-center gap-2 md:gap-3">
             <div className="md:hidden h-16 flex items-center justify-center p-2"></div>
             <div>
@@ -2531,13 +2643,8 @@ export default function AdminPortal({
 
           <div className="flex items-center gap-3">
             <NotificationCenter role="ADMIN" userId={auth.currentUser?.uid} onNavigateToTab={(tab) => setActiveTab(tab as any)} />
-            <button
-              onClick={() => setShowPurgeConfirm(true)}
-              className="hidden md:flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-red-400 shadow-lg shadow-red-500/10"
-            >
-              <Trash2 size={14} />
-              Wipe Database
-            </button>
+
+
             <button
               onClick={(e) => handleExtractionClick(e, drivers, "Global_Status_Report")}
               className={cn(
@@ -3650,7 +3757,7 @@ export default function AdminPortal({
                   />
                 ) : (
                   <img
-                    src={getSafeUrl(viewingUnit.metrics?.currentAdImage) || `https://placehold.co/1920x1080/1e293b/FFFFFF/png?text=Unit+${viewingUnit.id.slice(0, 4)}`}
+                    src={getSafeUrl(viewingUnit.metrics?.currentAdImage) || `https://placehold.co/1920x1080/1e293b/FFFFFF/png?text=${viewingUnit.id}`}
                     alt="Expanded Vision"
                     className="w-full h-full object-contain"
                     referrerPolicy="no-referrer"
@@ -3953,6 +4060,12 @@ export default function AdminPortal({
               </button>
 
               <div className="flex items-center gap-4 mb-8 text-left">
+                <button 
+                  onClick={() => setShowDocModal(false)}
+                  className="p-3 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200"
+                >
+                  <ArrowLeft size={20} />
+                </button>
                 <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
                   <ShieldCheck className="text-white" size={24} />
                 </div>
@@ -3962,17 +4075,18 @@ export default function AdminPortal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: "Aadhaar Card", key: "aadharPhoto", folder: "aadhaar" },
                   { label: "Driving License", key: "dlPhoto", folder: "drivingLicense" },
-                  { label: "Biometric Selfie", key: "profileImage", folder: "selfie" }
+                  { label: "Biometric Selfie", key: "profileImage", folder: "selfie" },
+                  { label: "Vehicle RC", key: "rcPhoto", folder: "rc" }
                 ].map((docItem) => {
-                  const url = selectedDriverForDocs[docItem.key] || selectedDriverForDocs.documents?.[docItem.folder];
+                  const url = (selectedDriverForDocs as any)[docItem.key] || (selectedDriverForDocs.documents as any)?.[docItem.folder];
                   return (
                     <div key={docItem.key} className="space-y-3">
                       <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 ml-1 text-left">{docItem.label}</p>
-                      <div className="aspect-video md:aspect-[4/5] bg-slate-50 rounded-2xl border border-slate-150 overflow-hidden relative group shadow-inner">
+                      <div className={cn("bg-slate-50 rounded-2xl border border-slate-150 overflow-hidden relative group shadow-inner", docItem.key === 'profileImage' ? "aspect-[3/4] md:aspect-[3/4]" : "aspect-video md:aspect-[4/5]")}>
                         {url ? (
                           <img 
                             src={getSafeUrl(url)} 
@@ -4016,7 +4130,7 @@ export default function AdminPortal({
                        showToast("Approval command transmitted.", "success");
                        setShowDocModal(false);
                     }}
-                    className="flex-1 md:flex-none px-10 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all shadow-xl shadow-emerald-500/20"
+                    className="flex-1 md:flex-none px-6 py-3 text-[9px] md:px-10 md:py-4 md:text-[10px] bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20"
                    >
                      Approve KYC
                    </button>
@@ -4026,7 +4140,7 @@ export default function AdminPortal({
                         showToast("Revocation warning issued.", "error");
                         setShowDocModal(false);
                     }}
-                    className="flex-1 md:flex-none px-10 py-4 border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all"
+                    className="flex-1 md:flex-none px-6 py-3 text-[9px] md:px-10 md:py-4 md:text-[10px] border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 rounded-2xl font-black uppercase tracking-widest transition-all"
                    >
                      Reject
                    </button>

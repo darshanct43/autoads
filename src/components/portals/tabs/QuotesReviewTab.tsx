@@ -135,8 +135,8 @@ export default function QuotesReviewTab() {
     const matchesFilter = activeFilter === 'ALL' || q.status === activeFilter;
     const matchesSearch = 
       q.quote.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.driverName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.terminalId.toLowerCase().includes(searchQuery.toLowerCase());
+      (q.driverName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (q.terminalId || '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 

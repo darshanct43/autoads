@@ -44,7 +44,7 @@ export async function writeAuditLog(
       stateId: stateId || 'KA',
       territoryId: territoryId || 'T-UNASSIGNED',
       cityId: cityId || 'UNASSIGNED',
-      franchiseId: franchiseId || null,
+      franchiseId: franchiseId || undefined,
       timestamp: serverTimestamp(),
       details
     };

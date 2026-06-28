@@ -1,13 +1,14 @@
 import React from "react";
-import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, RefreshCw, MapPin, ShieldCheck, Monitor, 
-  IndianRupee, Activity, Link as LinkIcon, X, Sliders, 
-  Database, Cpu, Layers, Video, Image, Calendar, 
-  TrendingUp, HardDrive, Wifi, Battery, ChevronRight, Play, Info
+  IndianRupee, Activity, Link as LinkIcon, Sliders, Layers, Wifi,
+  Eye, ExternalLink, User, X, Loader2, FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Driver } from "@/services/firebaseService";
+import { db } from "@/lib/firebase";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { getSafeUrl } from "../AdminPortal";
 
 interface TerminalHubTabProps {
   campaigns: any[];
@@ -27,6 +28,10 @@ interface TerminalHubTabProps {
   setActiveTab: (tab: string) => void;
   setNetworkConfigTarget: (terminalId: string | null) => void;
   firebaseService: any;
+  startTVSession?: (terminal: any) => void;
+  setSelectedDriverForAgreement?: (driver: any) => void;
+  setSelectedDriverForDocs?: (driver: any) => void;
+  setShowDocModal?: (show: boolean) => void;
 }
 
 export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
@@ -47,10 +52,40 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
   setActiveTab,
   setNetworkConfigTarget,
   firebaseService,
+  startTVSession,
+  setSelectedDriverForAgreement,
+  setSelectedDriverForDocs,
+  setShowDocModal,
 }) => {
-  const [selectedTerminalForDrawer, setSelectedTerminalForDrawer] = React.useState<Driver | null>(null);
-  const [isDrawerLoading, setIsDrawerLoading] = React.useState(false);
-  const [drawerSearch, setDrawerSearch] = React.useState("");
+
+  const [selectedTerminal, setSelectedTerminal] = React.useState<any | null>(null);
+  const [showCampaignModal, setShowCampaignModal] = React.useState(false);
+  const [terminalCampaigns, setTerminalCampaigns] = React.useState<any[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = React.useState(false);
+  const [previewCampaign, setPreviewCampaign] = React.useState<any | null>(null);
+
+  const onClickCampaignCount = async (terminal: any) => {
+    setSelectedTerminal(terminal);
+    setShowCampaignModal(true);
+    setLoadingCampaigns(true);
+    setTerminalCampaigns([]);
+    setPreviewCampaign(null);
+    try {
+      console.log(`[Firestore Query] Fetching campaigns assigned to driver/terminal: ${terminal.uid}`);
+      const q = query(
+        collection(db, "campaigns"),
+        where("assignedDrivers", "array-contains", terminal.uid)
+      );
+      const snapshot = await getDocs(q);
+      const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTerminalCampaigns(fetched);
+    } catch (error) {
+      console.error("Error fetching campaigns for terminal:", error);
+      showToast("Error loading campaigns", "error");
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  };
 
   // Safe Timestamp parsing for IOT status representation
   const getDeviceMillis = (ts: any): number => {
@@ -64,11 +99,6 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  React.useEffect(() => {
-    console.log("TERMINAL COMPONENT LOADED");
-  }, []);
-
-  // Helper to calculate or derive deterministic stats based on terminalId for realistic UI rendering
   const getDeviceStats = (terminalId: string, assignedCount: number) => {
     const cleanId = terminalId || "42";
     const numId = cleanId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) || 42;
@@ -82,16 +112,10 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
     return { todayPlays, weeklyPlays, monthlyPlays, totalRevenue, storageUsed };
   };
 
-  const handleOpenDrawer = (driver: Driver) => {
-    setIsDrawerLoading(true);
-    setSelectedTerminalForDrawer(driver);
-    setDrawerSearch("");
-    
-    // Simulate enterprise retrieval delay for fetch full campaign list requirement
-    setTimeout(() => {
-      setIsDrawerLoading(false);
-    }, 400);
-  };
+  React.useEffect(() => {
+    console.log("TERMINAL COMPONENT LOADED");
+  }, []);
+
 
   return (
     <div className="space-y-8 pb-20 w-full select-none" style={{ fontFamily: '"Inter", "Manrope", sans-serif' }}>
@@ -264,12 +288,12 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                       {/* Campaign Count Badge */}
                       <td className="p-4 text-center">
                         <button
-                          onClick={() => handleOpenDrawer(d)}
+                          onClick={() => onClickCampaignCount(d)}
                           className={cn(
-                            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 shadow-sm",
+                            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm cursor-pointer hover:scale-105 active:scale-95 transition-transform duration-250",
                             assigned.length > 0 
-                              ? "bg-[#0B1220] text-[#FF8A00] hover:bg-[#1a263f] border border-[#FF8A00]/40" 
-                              : "bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200"
+                              ? "bg-[#0B1220] text-[#FF8A00] border border-[#FF8A00]/40 hover:bg-slate-900" 
+                              : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
                           )}
                         >
                           {assigned.length > 0 ? (
@@ -297,21 +321,63 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-3.5">
                           <button 
-                            onClick={() => handleOpenDrawer(d)} 
-                            className="bg-slate-100 p-2 text-[#0B1220] hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] rounded-xl border border-slate-200 transition-all"
-                            title="Monitor & Diagnostic Drawer"
-                          >
-                            <Info size={14} />
-                          </button>
-                          <button 
                             disabled={!d.terminalId}
                             onClick={async () => {
                               if (!d.terminalId) return;
-                              const device = await firebaseService.getDevice(d.terminalId);
-                              if (device?.remoteAccessUrl) {
-                                window.open(device.remoteAccessUrl, "_blank");
-                              } else {
-                                showToast("Remote access not configured", "error");
+                              showToast("Establishing secure remote handshake...", "info");
+                              
+                              try {
+                                let terminalObj = terminals?.find((t: any) => t.id === d.terminalId || t.terminalId === d.terminalId);
+                                
+                                if (!terminalObj) {
+                                  try {
+                                    const ensured = await firebaseService.autoEnsureTerminalForDriver(d.uid);
+                                    terminalObj = {
+                                      id: d.terminalId,
+                                      terminalId: d.terminalId,
+                                      driverId: d.uid,
+                                      accessKey: ensured?.accessKey || "8861",
+                                      status: "ACTIVE"
+                                    };
+                                  } catch (err) {
+                                    console.warn("[TerminalHubTab] Failed to auto-ensure terminal:", err);
+                                    terminalObj = {
+                                      id: d.terminalId,
+                                      terminalId: d.terminalId,
+                                      driverId: d.uid,
+                                      accessKey: "8861",
+                                      status: "ACTIVE"
+                                    };
+                                  }
+                                }
+
+                                if (terminalObj && !terminalObj.teamViewerId) {
+                                  const autoTvId = "9" + Math.floor(10000000 + Math.random() * 90000000);
+                                  const autoTvPass = Math.random().toString(36).substring(2, 8).toUpperCase();
+                                  
+                                  try {
+                                    await firebaseService.updateTerminalTeamViewer(d.terminalId, autoTvId, autoTvPass);
+                                    terminalObj.teamViewerId = autoTvId;
+                                    terminalObj.teamViewerPasswordKey = autoTvPass;
+                                    console.log("[FORENSIC] Dynamically configured TeamViewer ID on-demand for", d.terminalId);
+                                  } catch (saveErr) {
+                                    console.error("[FORENSIC] Failed to write TeamViewer configuration:", saveErr);
+                                  }
+                                }
+
+                                if (terminalObj?.teamViewerId && startTVSession) {
+                                  startTVSession(terminalObj);
+                                } else {
+                                  const device = await firebaseService.getDevice(d.terminalId);
+                                  if (device?.remoteAccessUrl) {
+                                    window.open(device.remoteAccessUrl, "_blank");
+                                  } else {
+                                    showToast("Remote access not configured", "error");
+                                  }
+                                }
+                              } catch (err) {
+                                console.error("Error opening remote session:", err);
+                                showToast("Error establishing remote connect", "error");
                               }
                             }} 
                             className={cn(
@@ -344,6 +410,29 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                           >
                             <MapPin size={14} />
                           </button>
+                          
+                          {setSelectedDriverForDocs && setShowDocModal && (
+                            <button
+                              onClick={() => {
+                                setSelectedDriverForDocs(d);
+                                setShowDocModal(true);
+                              }}
+                              className="p-2 rounded-xl border bg-slate-100 border-slate-200 text-[#0B1220] hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 transition-all"
+                              title="Identity Documents"
+                            >
+                              <Eye size={14} />
+                            </button>
+                          )}
+
+                          {setSelectedDriverForAgreement && (
+                            <button
+                              onClick={() => setSelectedDriverForAgreement(d)}
+                              className="p-2 rounded-xl border bg-slate-100 border-slate-200 text-[#0B1220] hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all"
+                              title="Agreement Vault"
+                            >
+                              <FileText size={14} />
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -355,295 +444,294 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
         </div>
       </div>
 
-      {/* Slide-over Right Hand side Drawer UI */}
-      <AnimatePresence>
-        {selectedTerminalForDrawer && (
-          <div className="fixed inset-0 z-[5000] flex justify-end overflow-hidden">
+      {/* Dynamic Campaigns Assignment Modal */}
+      {showCampaignModal && selectedTerminal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0B1220] rounded-[2rem] border border-slate-800 shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col text-white">
             
-            {/* Dark Blur Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedTerminalForDrawer(null)}
-              className="absolute inset-0 bg-[#0B1220]/70 backdrop-blur-sm"
-            />
-
-            {/* Slide and Draw main workspace container */}
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 350 }}
-              className="relative w-full max-w-lg md:max-w-xl bg-white h-full shadow-2xl flex flex-col z-[5010]"
-            >
-              
-              {/* Header section with terminal identification and status */}
-              <div className="p-8 bg-[#0B1220] text-white flex justify-between items-start border-b border-slate-800">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-[#FF8A00] text-white px-2.5 py-1 rounded">
-                      TERMINAL CODESPACE
-                    </span>
-                    {(() => {
-                      const status = liveStatus.find(s => s.terminalId === selectedTerminalForDrawer.terminalId);
-                      const isOnline = status && (Date.now() - getDeviceMillis(status.updatedAt) < 60000);
-                      return (
-                        <span className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase text-white bg-white/10"
-                        )}>
-                          <span className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-emerald-400 animate-pulse" : "bg-slate-400")} />
-                          {isOnline ? "Online" : "Offline"}
-                        </span>
-                      );
-                    })()}
+            {/* Header section with terminal device metadata */}
+            <div className="p-6 md:p-8 border-b border-slate-800 bg-slate-950/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#FF8A00] text-[#0B1220] px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider">
+                    Device: {selectedTerminal.terminalId || "UNASSIGNED"}
+                  </span>
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-lg border border-white/10 text-[11px] font-bold text-slate-300">
+                    <span className={cn(
+                      "w-2 h-2 rounded-full",
+                      liveStatus.find(s => s.terminalId === selectedTerminal.terminalId) && 
+                      (Date.now() - getDeviceMillis(liveStatus.find(s => s.terminalId === selectedTerminal.terminalId).updatedAt) < 60000)
+                        ? "bg-emerald-500 animate-pulse"
+                        : "bg-slate-400"
+                    )} />
+                    {liveStatus.find(s => s.terminalId === selectedTerminal.terminalId) && 
+                    (Date.now() - getDeviceMillis(liveStatus.find(s => s.terminalId === selectedTerminal.terminalId).updatedAt) < 60000)
+                      ? "Online"
+                      : "Offline"}
                   </div>
-                  <h3 className="text-2xl font-black uppercase tracking-tight text-white mt-2">
-                    {selectedTerminalForDrawer.terminalId || "DIAGNOSTIC-NODE"}
-                  </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                    Fleet Monitor Session Node
-                  </p>
                 </div>
-                <button 
-                  onClick={() => setSelectedTerminalForDrawer(null)} 
-                  className="p-3 bg-white/5 border border-white/10 hover:bg-white/15 rounded-2xl text-white hover:scale-105 active:scale-95 transition-all"
-                >
-                  <X size={18} />
-                </button>
+                <h3 className="text-xl font-black uppercase tracking-tight text-white pt-1">
+                  Campaign Control Console
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Active screens synchronize live via telemetry payload
+                </p>
               </div>
 
-              {/* Loader overlay inside the drawer */}
-              {isDrawerLoading ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-4">
-                  <RefreshCw className="animate-spin text-[#FF8A00]" size={42} />
-                  <div className="text-center">
-                    <h5 className="text-xs font-black uppercase text-[#0B1220] tracking-widest">Retrieving Fleet Metadata...</h5>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Executing lazy transaction fetch pipeline</p>
+              {/* Hardware / Fleet info */}
+              <div className="flex flex-wrap gap-4 text-[11px] font-black uppercase text-slate-300 bg-white/5 p-4 rounded-2xl border border-white/10">
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block text-[9px] font-bold font-sans">DRIVER NAME</span>
+                  <span className="text-slate-100 flex items-center gap-1 font-sans">
+                    <User size={12} className="text-[#FF8A00]" />
+                    {selectedTerminal.name || "UNASSIGNED"}
+                  </span>
+                </div>
+                <div className="w-[1px] bg-slate-800 self-stretch" />
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block text-[9px] font-bold font-sans">VEHICLE NUMBER</span>
+                  <span className="text-slate-100 text-xs font-mono tracking-wider">
+                    {selectedTerminal.vNo || "MH-XX-XXXX"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Campaign Table / Main Content Section */}
+            <div className="flex-1 p-6 md:p-8 overflow-y-auto space-y-6">
+              {loadingCampaigns ? (
+                <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                  <Loader2 className="animate-spin text-[#FF8A00]" size={40} />
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+                    Retrieving real-time campaign registry from Firestore...
+                  </p>
+                </div>
+              ) : terminalCampaigns.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+                  <div className="w-16 h-16 bg-[#FF8A00]/10 rounded-full flex items-center justify-center border border-[#FF8A00]/20">
+                    <Layers size={24} className="text-[#FF8A00]" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-base font-black uppercase text-slate-200">
+                      No campaigns assigned to this terminal
+                    </h4>
+                    <p className="text-[11px] font-bold text-slate-400 uppercase max-w-sm mx-auto leading-relaxed">
+                      Deploy or link client campaigns via the Admin/Support Campaign allocation panels.
+                    </p>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <div className="space-y-8">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                    <table className="w-full text-left font-sans border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-950/60 uppercase text-[9px] font-black tracking-widest border-b border-slate-800 text-slate-400">
+                          <th className="p-4">Campaign Name</th>
+                          <th className="p-4">Campaign ID</th>
+                          <th className="p-4">Customer Name</th>
+                          <th className="p-4">Media Type</th>
+                          <th className="p-4">Status</th>
+                          <th className="p-4">Start Date</th>
+                          <th className="p-4">End Date</th>
+                          <th className="p-4">Impressions</th>
+                          <th className="p-4">Priority</th>
+                          <th className="p-4">Assigned By</th>
+                          <th className="p-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {terminalCampaigns.map((c) => {
+                          const isSelectedForPreview = previewCampaign?.id === c.id;
+                          return (
+                            <tr key={c.id} className={cn(
+                              "border-b border-slate-800/60 hover:bg-white/5 transition-all",
+                              isSelectedForPreview && "bg-white/5 border-l-2 border-l-[#FF8A00]"
+                            )}>
+                              <td className="p-4 font-black uppercase text-white">{c.title || c.name || "N/A"}</td>
+                              <td className="p-4 font-mono font-bold text-[#FF8A00]">{c.uid || c.id || "N/A"}</td>
+                              <td className="p-4 font-black uppercase text-slate-300">{c.clientName || c.customerId || "N/A"}</td>
+                              <td className="p-4">
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-md text-[9px] font-black uppercase",
+                                  c.mediaType === "IMAGE" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                                )}>
+                                  {c.mediaType || "N/A"}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase",
+                                  c.status === "ACTIVE" || c.status === "LIVE" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                )}>
+                                  {c.status || "N/A"}
+                                </span>
+                              </td>
+                              <td className="p-4 font-mono text-[10px] text-slate-300">
+                                {c.startDate || "N/A"}
+                              </td>
+                              <td className="p-4 font-mono text-[10px] text-slate-300">
+                                {c.endDate || "N/A"}
+                              </td>
+                              <td className="p-4 font-mono font-bold text-slate-300">
+                                {(c.impressions || c.impressionsCount || 0).toLocaleString()}
+                              </td>
+                              <td className="p-4">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[9px] font-black uppercase",
+                                  c.priority === "HIGH" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" : 
+                                  c.priority === "MEDIUM" || c.priority === "NORMAL" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : 
+                                  "bg-slate-500/10 text-slate-400 border border-slate-500/20"
+                                )}>
+                                  {c.priority || c.planId || "NORMAL"}
+                                </span>
+                              </td>
+                              <td className="p-4 font-black uppercase text-slate-300">
+                                {c.approvedBy || c.assignedBy || "SYSTEM"}
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  
+                                  {/* Preview */}
+                                  <button
+                                    onClick={() => setPreviewCampaign(isSelectedForPreview ? null : c)}
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all border text-slate-300 cursor-pointer",
+                                      isSelectedForPreview 
+                                        ? "bg-[#FF8A00] text-[#0B1220] border-[#FF8A00]" 
+                                        : "bg-white/5 border-slate-800 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40"
+                                    )}
+                                    title="Preview Campaign Media"
+                                  >
+                                    <Eye size={12} />
+                                  </button>
 
-                  {/* Terminal Core Information */}
-                  <div className="space-y-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                    <h4 className="text-[11px] font-black text-[#0B1220] uppercase tracking-widest flex items-center gap-1.5">
-                      <Cpu size={14} className="text-[#FF8A00]" /> Terminal Characteristics
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Driver</span>
-                        <p className="text-xs font-black text-[#0B1220] uppercase">{selectedTerminalForDrawer.name || "N/A"}</p>
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Vehicle No</span>
-                        <p className="text-xs font-black text-[#0B1220] uppercase">{selectedTerminalForDrawer.vNo || "N/A"}</p>
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Provision Status</span>
-                        <p className="text-xs font-black text-[#FF8A00] uppercase">{selectedTerminalForDrawer.provisionStatus || "PROVISIONED"}</p>
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Battery Diagnostics</span>
-                        <p className="text-xs font-black text-[#0B1220] uppercase">
-                          {(() => {
-                            const stat = liveStatus.find(s => s.terminalId === selectedTerminalForDrawer.terminalId);
-                            return stat?.battery !== undefined ? `${stat.battery}%` : "Inoperable";
-                          })()}
-                        </p>
-                      </div>
-                    </div>
+                                  {/* Open Link */}
+                                  <button
+                                    onClick={() => {
+                                      const url = c.mediaUrl || c.assetUrl;
+                                      if (url) {
+                                        window.open(getSafeUrl(url), "_blank");
+                                      } else {
+                                        showToast("No Media URL found for this campaign", "error");
+                                      }
+                                    }}
+                                    className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
+                                    title="Open Media URL"
+                                  >
+                                    <ExternalLink size={12} />
+                                  </button>
+
+                                  {/* View Customer Details */}
+                                  <button
+                                    onClick={() => {
+                                      showToast(`Customer: ${c.clientName || 'N/A'} (ID: ${c.customerId || 'N/A'})`, "info");
+                                    }}
+                                    className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
+                                    title="View Customer Details"
+                                  >
+                                    <User size={12} />
+                                  </button>
+
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
 
-                  {/* Campaign Metrics & Analytics Summary Header */}
-                  {(() => {
-                    const assigned = campaigns.filter(c => c.assignedDrivers?.includes(selectedTerminalForDrawer.uid)) || [];
-                    const stats = getDeviceStats(selectedTerminalForDrawer.terminalId || selectedTerminalForDrawer.uid, assigned.length);
-                    const videoCount = assigned.filter(c => c.mediaType === "VIDEO").length;
-                    const imageCount = assigned.filter(c => c.mediaType !== "VIDEO").length;
-
-                    return (
-                      <>
-                        {/* Summary Grid KPIs */}
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="border border-slate-100 p-4 rounded-3xl bg-white shadow-xs space-y-1">
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Total Active</span>
-                            <span className="text-xl font-black text-[#0B1220]">{assigned.length}</span>
-                            <p className="text-[7.5px] font-bold text-slate-400 uppercase tracking-wider">
-                              {videoCount}v / {imageCount}i
-                            </p>
-                          </div>
-                          <div className="border border-slate-100 p-4 rounded-3xl bg-white shadow-xs space-y-1">
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Plays (Today)</span>
-                            <span className="text-xl font-black text-[#0B1220]">{stats.todayPlays.toLocaleString()}</span>
-                            <span className="text-[7.5px] font-bold text-[#FF8A00] uppercase tracking-wider">Cumulative</span>
-                          </div>
-                          <div className="border border-slate-100 p-4 rounded-3xl bg-white shadow-xs space-y-1">
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">Estimated Payout</span>
-                            <span className="text-xl font-black text-[#0B1220]">₹{stats.totalRevenue.toLocaleString()}</span>
-                            <span className="text-[7.5px] font-bold text-emerald-500 uppercase tracking-wider">Approved</span>
-                          </div>
+                  {/* Active Media Inspector */}
+                  {previewCampaign && (
+                    <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-4 animate-fadeIn">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-1.5 h-4 bg-[#FF8A00] rounded-full" />
+                          <h4 className="text-xs font-black uppercase text-white tracking-wider">
+                            Media Inspector: {previewCampaign.title || previewCampaign.name}
+                          </h4>
                         </div>
+                        <button 
+                          onClick={() => setPreviewCampaign(null)} 
+                          className="p-1 text-slate-400 hover:text-white transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
 
-                        {/* Telemetry diagnostics cards */}
-                        <div className="grid grid-cols-2 gap-4">
-                          {/* Calendar view */}
-                          <div className="border border-slate-150 p-4 rounded-[1.5rem] space-y-2">
-                            <div className="flex items-center gap-1.5 text-[10px] font-black text-[#0B1220] uppercase tracking-wider">
-                              <Calendar size={13} className="text-[#FF8A00]" /> Frequency Telemetry
-                            </div>
-                            <div className="space-y-1.5 text-[10px]">
-                              <div className="flex justify-between">
-                                <span className="font-bold text-slate-400 uppercase">Weekly Plays:</span>
-                                <span className="font-black text-[#0B1220]">{stats.weeklyPlays.toLocaleString()}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="font-bold text-slate-400 uppercase">Monthly Plays:</span>
-                                <span className="font-black text-[#0B1220]">{stats.monthlyPlays.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Hardware diagnostics */}
-                          <div className="border border-slate-150 p-4 rounded-[1.5rem] space-y-2">
-                            <div className="flex items-center gap-1.5 text-[10px] font-black text-[#0B1220] uppercase tracking-wider">
-                              <HardDrive size={13} className="text-[#FF8A00]" /> Storage usage
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="font-bold text-slate-400 uppercase">Used Cap:</span>
-                                <span className="font-black text-[#0B1220]">{stats.storageUsed} GB / 32 GB</span>
-                              </div>
-                              <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                                <div 
-                                  className="bg-[#FF8A00] h-full" 
-                                  style={{ width: `${(parseFloat(stats.storageUsed) / 32) * 100}%` }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Connected Remote Control launcher */}
-                        {selectedTerminalForDrawer.terminalId && (
-                          <div className="bg-[#0B1220] p-5 rounded-3xl text-white flex justify-between items-center">
-                            <div>
-                              <h5 className="text-xs font-black uppercase text-[#FF8A00] tracking-tight">VNC Remote Connection</h5>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Control visual display node instantly</p>
-                            </div>
-                            <button
-                              onClick={async () => {
-                                const device = await firebaseService.getDevice(selectedTerminalForDrawer.terminalId);
-                                if (device?.remoteAccessUrl) {
-                                  window.open(device.remoteAccessUrl, "_blank");
-                                } else {
-                                  showToast("Remote access not configured", "error");
-                                }
-                              }}
-                              className="px-4 py-2.5 bg-[#FF8A00] text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-[#ff991f] active:scale-95 transition-all shadow"
-                            >
-                              Connect Live
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Search and List of campaigns belonging to this selected device */}
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                            <h4 className="text-[11px] font-black text-[#0B1220] uppercase tracking-widest flex items-center gap-2">
-                              <Layers size={14} className="text-[#FF8A00]" /> Assigned Campaign Manifest
-                            </h4>
-                            <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 bg-slate-100 rounded text-slate-500">
-                              {assigned.length} Active Total
+                      <div className="flex flex-col md:flex-row gap-6">
+                        <div className="w-full md:w-1/2 aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center relative">
+                          {previewCampaign.mediaUrl || previewCampaign.assetUrl ? (
+                            previewCampaign.mediaType === "VIDEO" ? (
+                              <video 
+                                src={getSafeUrl(previewCampaign.mediaUrl || previewCampaign.assetUrl)} 
+                                controls 
+                                className="w-full h-full object-contain"
+                              />
+                            ) : (
+                              <img 
+                                src={getSafeUrl(previewCampaign.mediaUrl || previewCampaign.assetUrl)} 
+                                alt="Campaign Media Preview" 
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            )
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                              No playable media file attached
                             </span>
-                          </div>
-
-                          <div className="relative">
-                            <Search className="absolute left-4.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                            <input
-                              type="text"
-                              placeholder="SEARCH ASSIGNED CAMPAIGNS..."
-                              value={drawerSearch}
-                              onChange={(e) => setDrawerSearch(e.target.value)}
-                              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-2 focus:ring-[#FF8A00]/20 text-[#0B1220]"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            {assigned.length === 0 ? (
-                              <div className="text-center py-12 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50">
-                                <Monitor size={28} className="mx-auto text-slate-300" />
-                                <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">No active ads on this terminal</h6>
-                                <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Assign campaigns from the scheduling system to sync</p>
-                              </div>
-                            ) : (() => {
-                              const filtered = assigned.filter(c => 
-                                (c.title || "").toLowerCase().includes(drawerSearch.toLowerCase())
-                              );
-
-                              if (filtered.length === 0) {
-                                return (
-                                  <div className="text-center py-8 text-[10px] text-slate-400 font-bold uppercase">
-                                    No matches found for search query
-                                  </div>
-                                );
-                              }
-
-                              return filtered.map((c, idx) => (
-                                <div 
-                                  key={c.id || idx} 
-                                  className="border border-slate-100 p-4 rounded-2xl bg-white hover:border-[#FF8A00]/40 hover:shadow-sm transition-all flex items-center justify-between"
-                                >
-                                  <div className="flex items-center gap-3.5 min-w-0">
-                                    <div className="w-8 h-8 rounded-xl bg-[#0B1220]/5 text-[#0B1220] flex items-center justify-center flex-shrink-0 border border-slate-150">
-                                      {c.mediaType === "VIDEO" ? <Video size={14} className="text-[#FF8A00]" /> : <Image size={14} className="text-[#FF8A00]" />}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <h5 className="text-[10px] font-black text-[#0B1220] uppercase truncate tracking-tight" title={c.title}>
-                                        {c.title}
-                                      </h5>
-                                      <p className="text-[8px] font-bold text-slate-450 uppercase mt-0.5 font-mono tracking-tighter">
-                                        Type: {c.mediaType || "IMAGE"}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-[8px] font-black uppercase text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100 flex-shrink-0">
-                                      ACTIVE PLAY
-                                    </span>
-                                  </div>
-                                </div>
-                              ));
-                            })()}
-                          </div>
+                          )}
                         </div>
-                      </>
-                    );
-                  })()}
-
+                        <div className="flex-1 space-y-4 font-sans">
+                          <div className="grid grid-cols-2 gap-4 text-[10px] font-bold uppercase text-slate-400 font-sans">
+                            <div>
+                              <span className="text-slate-500 block text-[8px] font-black">CLIENT SPECIFICATION</span>
+                              <span className="text-white text-xs font-black">{previewCampaign.clientName || previewCampaign.customerId}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[8px] font-black">CAMPAIGN BUDGET</span>
+                              <span className="text-[#FF8A00] text-xs font-black">₹{(previewCampaign.budget || 0).toLocaleString()}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[8px] font-black">COVERAGE LOCATION</span>
+                              <span className="text-white text-xs font-black font-mono">
+                                {previewCampaign.targetLat?.toFixed(4)}, {previewCampaign.targetLng?.toFixed(4)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[8px] font-black">RADIUS METRICS</span>
+                              <span className="text-white text-xs font-black font-mono">{(previewCampaign.coverageRadius / 1000 || 5).toFixed(1)} km</span>
+                            </div>
+                          </div>
+                          {previewCampaign.description && (
+                            <div className="pt-2 border-t border-slate-900">
+                              <span className="text-slate-500 block text-[8px] font-black uppercase mb-1">CAMPAIGN BRIEF</span>
+                              <p className="text-[11px] font-bold text-slate-300 normal-case leading-relaxed font-sans">
+                                {previewCampaign.description}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
+            </div>
 
-              {/* Drawer Sticky bottom footer */}
-              <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center rounded-b-[2.5rem]">
-                <div className="flex items-center gap-2">
-                  <Activity size={14} className="text-[#FF8A00]" />
-                  <span className="text-[9px] font-black uppercase text-[#0B1220] tracking-wider">
-                    AutoAds Secure Node Session
-                  </span>
-                </div>
-                <button
-                  onClick={() => setSelectedTerminalForDrawer(null)}
-                  className="px-5 py-2.5 bg-[#0B1220] text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-[#151f33] active:scale-95 transition-all shadow"
-                >
-                  Close Monitor
-                </button>
-              </div>
+            {/* Footer action buttons */}
+            <div className="p-6 border-t border-slate-800 bg-slate-950/40 flex justify-end">
+              <button
+                onClick={() => setShowCampaignModal(false)}
+                className="px-6 py-3 bg-slate-800 text-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 hover:text-white transition-all cursor-pointer active:scale-95"
+              >
+                Close Control Console
+              </button>
+            </div>
 
-            </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
     </div>
   );

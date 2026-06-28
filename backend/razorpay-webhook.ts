@@ -1,13 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 import { dbAdm, admin } from './_lib/firebase-admin';
+import { getCredential } from '../lib/env.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const webhookSecret = getCredential('RAZORPAY_WEBHOOK_SECRET');
   const signature = req.headers['x-razorpay-signature'];
 
   if (!webhookSecret || !signature) {

@@ -22,15 +22,29 @@ async function trackAwsAction(success: boolean) {
     updateData.firestoreWrites = admin.firestore.FieldValue.increment(1);
     await docRef.set(updateData, { merge: true });
   } catch (err: any) {
-    console.warn("[Telemetry Sync Warning] Failed to track AWS upload:", err.message);
+    if (err.message?.includes('PERMISSION_DENIED')) {
+      console.info("[Telemetry Info] AWS action tracking skipped (permission denied).");
+    } else {
+      console.warn("[Telemetry Sync Warning] Failed to track AWS upload:", err.message);
+    }
   }
 }
 
 export default async function handler(req: any, res: any) {
-  console.log("UPLOAD_ROUTE_ENTERED");
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  console.log("UPLOAD_ROUTE_ENTERED", { method: req.method, url: req.url });
+  
+  // Ensure we always have a JSON content type if we send JSON
+  const sendJson = (status: number, body: any) => {
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json');
+      res.status(status).json(body);
+    }
+  };
+
+  try {
+    if (req.method !== 'POST') {
+      return sendJson(405, { error: 'Method not allowed' });
+    }
 
   const form = formidable({
     keepExtensions: true,
@@ -40,14 +54,15 @@ export default async function handler(req: any, res: any) {
   return new Promise<void>((resolve) => {
     form.parse(req, async (err, fields, files) => {
       if (err) {
-        console.error('[UPLOAD_ERROR]', err);
-        res.status(500).json({ error: 'Error parsing the upload.' });
+        console.error('[UPLOAD_ERROR] formidable parse error:', err);
+        sendJson(500, { error: 'Error parsing the upload.', details: err.message });
         return resolve();
       }
 
       const fileField = files.file;
       if (!fileField) {
-        res.status(400).json({ error: 'No file uploaded under key "file"' });
+        console.warn('[UPLOAD_WARN] No file field found in request');
+        sendJson(400, { error: 'No file uploaded under key "file"' });
         return resolve();
       }
 
@@ -95,18 +110,23 @@ export default async function handler(req: any, res: any) {
 
         const successResponse = { url: fileUrl };
         console.log("RESPONSE_SENT", { status: 200, body: successResponse });
-        res.status(200).json(successResponse);
+        sendJson(200, successResponse);
         resolve();
       } catch (writeErr: any) {
-        console.log("S3_UPLOAD_ERROR");
-        console.error("FULL ERROR:", writeErr);
+        console.error("S3_UPLOAD_ERROR failure:", writeErr);
         await trackAwsAction(false);
 
-        const errorResponse = { error: 'Failed to write uploaded file to S3.' };
+        const errorResponse = { error: 'Failed to write uploaded file to S3.', details: writeErr.message };
         console.log("RESPONSE_SENT", { status: 500, body: errorResponse });
-        res.status(500).json(errorResponse);
+        sendJson(500, errorResponse);
         resolve();
       }
     });
   });
+  } catch (err: any) {
+    console.error("[UPLOAD_GLOBAL_ERROR]", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error', details: err.message });
+    }
+  }
 }

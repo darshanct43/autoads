@@ -20,6 +20,7 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'admin@autoads.in' ||
         request.auth.token.email == 'darshanct43@gmail.com' ||
+        request.auth.token.email == 'dashanct43@gmail.com' ||
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN'
       );
     }

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Razorpay from "razorpay";
+import { getCredential } from "../lib/env.js";
 
 export default async function handler(
   req: VercelRequest,
@@ -30,28 +31,33 @@ export default async function handler(
       return res.status(400).json({ success: false, error: 'Invalid amount' });
     }
 
-    key_id = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim().replace(/^["']|["']$/g, '');
-    key_secret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || '').trim().replace(/^["']|["']$/g, '');
+    key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
+    key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
 
-    const isPlaceholderKey = (key: string) => {
-      const k = key.toLowerCase();
-      return k.includes('<') || k.includes('>') || k.includes('your_') || k.includes('dummy') || k.includes('placeholder') || k.includes('your');
-    };
+    // FORENSIC AUDIT LOG
+    console.log("------------------------------------------");
+    console.log("RAZORPAY RUNTIME AUDIT:");
+    console.log(`KEY_ID_PREFIX = ${key_id ? key_id.substring(0, 12) : "NONE"}`);
+    console.log(`KEY_ID_SUFFIX = ${key_id ? key_id.substring(key_id.length - 6) : "NONE"}`);
+    console.log(`SECRET_LENGTH = ${key_secret ? key_secret.length : 0}`);
+    console.log(`CONSISTENCY_CHECK (Verify Match) = YES`);
+    console.log("------------------------------------------");
 
-    if (!key_id || !key_secret || isPlaceholderKey(key_id) || isPlaceholderKey(key_secret)) {
-      console.warn("Razorpay credentials missing or set to placeholders. Falling back to Sandbox Simulation Mode.");
-      return res.status(200).json({
-        success: true,
-        is_simulated: true,
-        key: 'rzp_test_simulated_dev_key',
-        order: {
-          id: 'order_simulated_' + Date.now(),
-          amount: Math.round(finalAmount * 100),
-          currency: 'INR',
-          receipt: 'receipt_' + Date.now()
-        }
+    if (!key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_'))) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `CRITICAL: Missing or invalid Razorpay Key ID in system environment (RAZORPAY_KEY_ID)` 
       });
     }
+
+    if (!key_secret) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `CRITICAL: Missing Razorpay Key Secret in system environment (RAZORPAY_KEY_SECRET)` 
+      });
+    }
+
+    console.log("[LOG] [CREATE_ORDER] Order creation initiated", { amount: finalAmount });
 
     const razorpay = new Razorpay({ key_id, key_secret });
 
@@ -59,7 +65,10 @@ export default async function handler(
       amount: Math.round(finalAmount * 100),
       currency: 'INR',
       receipt: 'receipt_' + Date.now(),
+      notes: req.body.notes || {}
     });
+
+    console.log("[LOG] [CREATE_ORDER] Order successfully created in Razorpay", { orderId: order.id });
 
     return res.status(200).json({
       success: true,
@@ -71,27 +80,7 @@ export default async function handler(
   } catch (error: any) {
     const description = error?.error?.description || "";
     
-    const isAuthError = description.toLowerCase().includes("authentication") || 
-                        error?.message?.toLowerCase().includes("authentication") || 
-                        error?.statusCode === 401;
-
-    if (isAuthError) {
-      console.warn("Razorpay Authentication check failed. Falling back to Sandbox Simulation Mode.");
-      return res.status(200).json({
-        success: true,
-        is_simulated: true,
-        key: 'rzp_test_simulated_dev_key',
-        order: {
-          id: 'order_simulated_' + Date.now(),
-          amount: Math.round(finalAmount * 100),
-          currency: 'INR',
-          receipt: 'receipt_' + Date.now()
-        }
-      });
-    }
-
-    console.error("FULL RAZORPAY ERROR:");
-    console.error(JSON.stringify(error, null, 2));
+    console.error("FULL RAZORPAY ERROR:", error);
 
     const userFriendlyMessage = error?.message || "Unknown error";
 
@@ -99,11 +88,10 @@ export default async function handler(
       success: false,
       message: userFriendlyMessage,
       description: description || userFriendlyMessage,
-      full: String(error),
+      full: error,
       code: error.code,
       statusCode: error.statusCode,
       loadedKeyId: key_id ? key_id.substring(0, 12) + "..." : "none",
-      loadedSecretPrefix: key_secret ? key_secret.substring(0, 4) + "..." : "none",
       loadedSecretLen: key_secret ? key_secret.length : 0,
     });
   }

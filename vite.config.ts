@@ -3,24 +3,19 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
-  define: {
-    'process.env': {},
-  },
-  build: {
-    outDir: 'dist',
-    emptyOutDir: true,
-    target: 'chrome91',
-  },
-  plugins: [
-    react()
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve('./src'),
+      '@': path.resolve(__dirname, './src'),
     },
   },
   server: {
     port: 3000,
-    host: '0.0.0.0'
-  }
+    host: '0.0.0.0',
+  },
+  build: {
+    target: ['chrome66', 'es2015'],
+    cssTarget: 'chrome66',
+    sourcemap: true,
+  },
 });

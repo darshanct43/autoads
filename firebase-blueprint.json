@@ -59,7 +59,8 @@
         "title": { "type": "string" },
         "mediaUrl": { "type": "string" },
         "mediaType": { "type": "string", "enum": ["IMAGE", "VIDEO"] },
-        "status": { "type": "string", "enum": ["PENDING", "ACTIVE", "REJECTED"] },
+        "status": { "type": "string", "enum": ["PENDING", "ACTIVE", "REJECTED", "APPROVED"] },
+        "operationalStatus": { "type": "string", "enum": ["ACTIVE", "PAUSED"], "description": "Manual override for playback" },
         "durationDays": { "type": "number", "description": "Number of days the campaign will run" },
         "hoursPerDay": { "type": "number", "description": "Hours per day for playback" },
         "maxAutos": { "type": "number", "description": "Number of vehicles assigned" },
@@ -186,6 +187,18 @@
         "resolvedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["driverId", "title", "description", "status", "createdAt"]
+    },
+    "staffWhitelist": {
+      "title": "Staff Whitelist",
+      "description": "Authorized email addresses for staff access",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPPORT_MANAGER", "SUPPORT_AGENT", "SUPPORT_TEAM", "ADMIN"] },
+        "addedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
     },
     "user": {
       "title": "User",
@@ -337,6 +350,10 @@
     }
   },
   "firestore": {
+    "/staffWhitelist/{email}": {
+      "schema": "staffWhitelist",
+      "description": "Whitelist for staff access"
+    },
     "/invitations/{invitationId}": {
       "schema": "invitations",
       "description": "Franchise owner onboarding invitations"
