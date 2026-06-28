@@ -18,75 +18,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
 
-    const isSimulated = req.body.is_simulated || (razorpay_order_id && razorpay_order_id.startsWith('order_sim')) || razorpay_signature === 'simulated_signature' || razorpay_payment_id?.startsWith('pay_simulated_');
+    // 2. VERIFY KEYS
+    const key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
+    const key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
 
-    if (!isSimulated) {
-      const key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
-      const key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
+    // FORENSIC AUDIT LOG
+    console.log("------------------------------------------");
+    console.log("RAZORPAY VERIFY RUNTIME AUDIT:");
+    console.log(`KEY_ID_PREFIX = ${key_id ? key_id.substring(0, 12) : "NONE"}`);
+    console.log(`KEY_ID_SUFFIX = ${key_id ? key_id.substring(key_id.length - 6) : "NONE"}`);
+    console.log(`SECRET_LENGTH = ${key_secret ? key_secret.length : 0}`);
+    console.log(`CONSISTENCY_CHECK (Verify Match) = YES`);
+    console.log("------------------------------------------");
 
-      // FORENSIC AUDIT LOG
-      console.log("------------------------------------------");
-      console.log("RAZORPAY VERIFY RUNTIME AUDIT:");
-      console.log(`KEY_ID_PREFIX = ${key_id ? key_id.substring(0, 12) : "NONE"}`);
-      console.log(`KEY_ID_SUFFIX = ${key_id ? key_id.substring(key_id.length - 6) : "NONE"}`);
-      console.log(`SECRET_LENGTH = ${key_secret ? key_secret.length : 0}`);
-      console.log(`CONSISTENCY_CHECK (Verify Match) = YES`);
-      console.log("------------------------------------------");
+    if (!key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_'))) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `CRITICAL: Missing or invalid Razorpay Key ID in system environment (RAZORPAY_KEY_ID)` 
+      });
+    }
 
-      // 2. VERIFY KEYS
-      if (!key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_'))) {
-        return res.status(500).json({ 
-          success: false, 
-          error: `CRITICAL: Missing or invalid Razorpay Key ID in system environment (RAZORPAY_KEY_ID)` 
-        });
+    if (!key_secret) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `CRITICAL: Missing Razorpay Key Secret in system environment (RAZORPAY_KEY_SECRET)` 
+      });
+    }
+
+    const generated_signature = crypto
+        .createHmac("sha256", key_secret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+
+    if (generated_signature !== razorpay_signature) {
+      console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed against configured Secret.');
+      return res.status(400).json({ success: false, error: "Invalid signature" });
+    }
+
+    console.log(`[RAZORPAY] Signature verified successfully.`);
+
+    // CAPTURE PAYMENT USING THE MATCHING SECRET
+    const razorpay = new Razorpay({ key_id, key_secret });
+    console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
+    try {
+      await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
+    } catch (err: any) {
+      console.log("ERR RAW:", err);
+      console.log("ERR JSON:", JSON.stringify(err, null, 2));
+      console.log("ERR MESSAGE:", err?.message);
+      console.log("ERR DESCRIPTION:", err?.description);
+      console.log("ERR ERROR:", err?.error);
+      console.log("ERR ERROR DESCRIPTION:", err?.error?.description);
+
+      console.error("[RAZORPAY] Capture failed:", err);
+      
+      // Sometimes the error details are hidden in err.error
+      const errorMessage = (err?.message || err?.error?.description || '').toLowerCase();
+      
+      if (errorMessage.includes("already been captured") || errorMessage.includes("payment has already been captured")) {
+        console.log("ALREADY_CAPTURED_BRANCH_REACHED");
+        console.log("[RAZORPAY] Payment already captured, proceeding.");
+      } else {
+        throw err;
       }
-
-      if (!key_secret) {
-        return res.status(500).json({ 
-          success: false, 
-          error: `CRITICAL: Missing Razorpay Key Secret in system environment (RAZORPAY_KEY_SECRET)` 
-        });
-      }
-
-      const generated_signature = crypto
-          .createHmac("sha256", key_secret)
-          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-          .digest("hex");
-
-      if (generated_signature !== razorpay_signature) {
-        console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed against configured Secret.');
-        return res.status(400).json({ success: false, error: "Invalid signature" });
-      }
-
-      console.log(`[RAZORPAY] Signature verified successfully.`);
-
-      // CAPTURE PAYMENT USING THE MATCHING SECRET
-      const razorpay = new Razorpay({ key_id, key_secret });
-      console.log("[RAZORPAY] Capture attempt with amount:", planData?.amount);
-      try {
-        await razorpay.payments.capture(razorpay_payment_id, Math.round((planData?.amount || 0) * 100), "INR");
-      } catch (err: any) {
-        console.log("ERR RAW:", err);
-        console.log("ERR JSON:", JSON.stringify(err, null, 2));
-        console.log("ERR MESSAGE:", err?.message);
-        console.log("ERR DESCRIPTION:", err?.description);
-        console.log("ERR ERROR:", err?.error);
-        console.log("ERR ERROR DESCRIPTION:", err?.error?.description);
-
-        console.error("[RAZORPAY] Capture failed:", err);
-        
-        // Sometimes the error details are hidden in err.error
-        const errorMessage = (err?.message || err?.error?.description || '').toLowerCase();
-        
-        if (errorMessage.includes("already been captured") || errorMessage.includes("payment has already been captured")) {
-          console.log("ALREADY_CAPTURED_BRANCH_REACHED");
-          console.log("[RAZORPAY] Payment already captured, proceeding.");
-        } else {
-          throw err;
-        }
-      }
-    } else {
-      console.log("[LOG] [VERIFY_PAYMENT] Simulation Mode Bypassing actual Razorpay gateway validation.");
     }
 
     const { FieldValue } = admin.firestore;

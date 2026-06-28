@@ -46,19 +46,10 @@ export default async function handler(
     const isMockOrUnconfigured = !key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_')) || !key_secret || key_secret.includes('PLACEHOLDER');
 
     if (isMockOrUnconfigured) {
-      console.log("[LOG] [CREATE_ORDER] Missing or unconfigured Razorpay credentials. Falling back to Sandbox Simulation.");
-      const mockOrder = {
-        id: 'order_simulated_' + Math.random().toString(36).substring(2, 10),
-        amount: Math.round(finalAmount * 100),
-        currency: 'INR',
-        is_simulated: true
-      };
-      return res.status(200).json({
-        success: true,
-        is_simulated: true,
-        order: mockOrder,
-        key: 'rzp_test_simulated_key',
-        key_id: 'rzp_test_simulated_key'
+      console.error("[ERROR] [CREATE_ORDER] Missing or unconfigured Razorpay credentials.");
+      return res.status(500).json({
+        success: false,
+        error: "Missing or unconfigured Razorpay credentials. Please check .env file."
       });
     }
 
@@ -84,24 +75,12 @@ export default async function handler(
 
   } catch (error: any) {
     const description = error?.error?.description || "";
-    const errorCode = error?.error?.code || error?.code || "";
     
     console.error("FULL RAZORPAY ERROR:", error);
-    console.log("[LOG] [CREATE_ORDER] Razorpay order creation failed. Falling back to Sandbox Simulation to ensure seamless experience.");
-
-    const mockOrder = {
-      id: 'order_simulated_' + Math.random().toString(36).substring(2, 10),
-      amount: Math.round(finalAmount * 100),
-      currency: 'INR',
-      is_simulated: true
-    };
-    return res.status(200).json({
-      success: true,
-      is_simulated: true,
-      order: mockOrder,
-      key: 'rzp_test_simulated_key',
-      key_id: 'rzp_test_simulated_key',
-      fallback_reason: description || error.message || "Razorpay API error"
+    
+    return res.status(500).json({
+      success: false,
+      error: description || error.message || "Razorpay API error"
     });
   }
 }
