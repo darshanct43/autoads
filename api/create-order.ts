@@ -34,18 +34,6 @@ export default async function handler(
     key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
     key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
 
-    // FORENSIC AUDIT LOG
-    console.log("------------------------------------------");
-    console.log("RAZORPAY RUNTIME AUDIT:");
-    console.log(`KEY_ID_PREFIX = ${key_id ? key_id.substring(0, 12) : "NONE"}`);
-    console.log(`KEY_ID_SUFFIX = ${key_id ? key_id.substring(key_id.length - 6) : "NONE"}`);
-    console.log(`SECRET_LENGTH = ${key_secret ? key_secret.length : 0}`);
-    console.log(`CONSISTENCY_CHECK (Verify Match) = YES`);
-    console.log("VERCEL_ENV =", process.env.VERCEL_ENV);
-    console.log("KEY_ID_EXISTS =", !!key_id);
-    console.log("KEY_SECRET_EXISTS =", !!key_secret);
-    console.log("KEY_SECRET_LENGTH =", key_secret?.length || 0);
-    console.log("------------------------------------------");
 
     const isMockOrUnconfigured = !key_id || (!key_id.startsWith('rzp_live_') && !key_id.startsWith('rzp_test_')) || !key_secret || key_secret.includes('PLACEHOLDER');
 
