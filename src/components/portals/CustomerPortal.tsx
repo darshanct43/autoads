@@ -1114,69 +1114,60 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         description: "Campaign Payment",
         order_id: currentOrderData.id,
         handler: async function (response: any) {
-          console.log("HANDLER_ENTERED");
-          console.log("PAYMENT_ID:", response?.razorpay_payment_id);
-          console.log("ORDER_ID:", response?.razorpay_order_id);
-          console.log("SIGNATURE:", response?.razorpay_signature);
-          console.log("RAZORPAY_HANDLER_TRIGGERED");
-          console.log(response);
-          alert("RAZORPAY CALLBACK FIRED");
-          console.log("STEP 1");
-          console.log("RAZORPAY CALLBACK SUCCESS", response);
-          localStorage.setItem("payment_pending", currentOrderData.id);
-          console.log("STEP 2");
-          setLoading(true);
           try {
+            console.log("STEP_1_HANDLER_ENTERED");
+            alert("STEP_1_HANDLER_ENTERED");
+            console.log("STEP_2_PAYMENT_RESPONSE", response);
+            console.log("STEP_3_BEFORE_VERIFY_PAYMENT");
+            setLoading(true);
+
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
             const totalAmount = baseAmount + getAddonsTotal();
 
-            console.log("VERIFY_PAYMENT_REQUEST");
-            console.log("VERIFY_PAYMENT_ABOUT_TO_CALL");
-            console.log("VERIFY_REQUEST_BODY", {
-              paymentId: response?.razorpay_payment_id,
-              orderId: response?.razorpay_order_id,
-              signature: response?.razorpay_signature
-            });
+            console.log("STEP_4_VERIFY_PAYMENT_FETCH_START");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json"
-               },
-               body: JSON.stringify({
-                 ...response,
-                 uid: user?.uid,
-                 campaignId: createdCampaignId,
-                 planData: { amount: totalAmount }
-               })
-             });
-             console.log("VERIFY_PAYMENT_RESPONSE_STATUS", verifyRes.status);
-             console.log("VERIFY_PAYMENT_RESPONSE_TEXT", await verifyRes.clone().text());
-             console.log("AFTER_VERIFY");
-             const verifyData = await verifyRes.json();
-             console.log("VERIFY_PAYMENT_RESPONSE", verifyData);
-             console.log("STEP 3");
-             console.log("VERIFY RESULT:", verifyData);
+              },
+              body: JSON.stringify({
+                ...response,
+                uid: user?.uid,
+                campaignId: createdCampaignId,
+                planData: { amount: totalAmount }
+              })
+            });
 
-             if (verifyData.success) {
-               localStorage.removeItem("payment_pending");
-               console.log("[LOG] [SUCCESS_SCREEN] Razorpay live verification success. Dispatching SET_SUCCESS.");
-               triggerToast("Payment successful!", "success");
-               dispatch({ type: 'SET_SUCCESS' });
-             } else {
-               throw new Error(verifyData.error || "Verification failed");
-             }
-           } catch (err: any) {
-             console.error("VERIFY_PAYMENT_EXCEPTION", err);
-             console.error("[LOG] [FAILED_SCREEN] VERIFY ERROR:", err);
-             triggerToast("Payment verification failed: " + err.message, "error");
-             dispatch({
-               type: 'SET_FAILED',
-               error: err.message || "Payment verification failed"
-             });
-           } finally {
-             setLoading(false);
-           }
-         },
+            console.log("STEP_5_VERIFY_PAYMENT_FETCH_RETURNED");
+            console.log("STEP_6_VERIFY_PAYMENT_STATUS", verifyRes.status);
+            const responseText = await verifyRes.clone().text();
+            console.log("STEP_7_VERIFY_PAYMENT_RESPONSE", responseText);
+            
+            const verifyData = await verifyRes.json();
+
+            if (verifyData.success) {
+              localStorage.removeItem("payment_pending");
+              console.log("STEP_8_SUCCESS_SCREEN_TRIGGER");
+              triggerToast("Payment successful!", "success");
+              dispatch({ type: 'SET_SUCCESS' });
+              console.log("RETURN_REACHED");
+              return;
+            } else {
+              throw new Error(verifyData.error || "Verification failed");
+            }
+          } catch (error: any) {
+            console.error("STEP_EXCEPTION", error);
+            alert("STEP_EXCEPTION");
+            triggerToast("Payment verification failed: " + error.message, "error");
+            dispatch({
+              type: 'SET_FAILED',
+              error: error.message || "Payment verification failed"
+            });
+            console.log("RETURN_REACHED");
+          } finally {
+            setLoading(false);
+          }
+        },
          modal: {
            ondismiss: function () {
              console.log("PAYMENT CANCELLED");
