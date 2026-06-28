@@ -1114,6 +1114,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         description: "Campaign Payment",
         order_id: currentOrderData.id,
         handler: async function (response: any) {
+          console.log("HANDLER_ENTERED");
+          console.log("PAYMENT_ID", response.razorpay_payment_id);
+          console.log("ORDER_ID", response.razorpay_order_id);
+          console.log("RAZORPAY_HANDLER_TRIGGERED");
+          console.log(response);
           alert("RAZORPAY CALLBACK FIRED");
           console.log("STEP 1");
           console.log("RAZORPAY CALLBACK SUCCESS", response);
@@ -1124,7 +1129,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
             const totalAmount = baseAmount + getAddonsTotal();
 
-            console.log("BEFORE_VERIFY");
+            console.log("VERIFY_PAYMENT_REQUEST");
+            console.log("VERIFY_PAYMENT_ABOUT_TO_CALL");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -1137,8 +1143,10 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                  planData: { amount: totalAmount }
                })
              });
+             console.log("VERIFY_PAYMENT_RESPONSE_STATUS", verifyRes.status);
              console.log("AFTER_VERIFY");
              const verifyData = await verifyRes.json();
+             console.log("VERIFY_PAYMENT_RESPONSE", verifyData);
              console.log("STEP 3");
              console.log("VERIFY RESULT:", verifyData);
 
@@ -1151,6 +1159,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                throw new Error(verifyData.error || "Verification failed");
              }
            } catch (err: any) {
+             console.error("VERIFY_PAYMENT_EXCEPTION", err);
              console.error("[LOG] [FAILED_SCREEN] VERIFY ERROR:", err);
              triggerToast("Payment verification failed: " + err.message, "error");
              dispatch({
