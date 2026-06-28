@@ -1115,8 +1115,9 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         order_id: currentOrderData.id,
         handler: async function (response: any) {
           console.log("HANDLER_ENTERED");
-          console.log("PAYMENT_ID", response.razorpay_payment_id);
-          console.log("ORDER_ID", response.razorpay_order_id);
+          console.log("PAYMENT_ID:", response?.razorpay_payment_id);
+          console.log("ORDER_ID:", response?.razorpay_order_id);
+          console.log("SIGNATURE:", response?.razorpay_signature);
           console.log("RAZORPAY_HANDLER_TRIGGERED");
           console.log(response);
           alert("RAZORPAY CALLBACK FIRED");
@@ -1131,6 +1132,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
             console.log("VERIFY_PAYMENT_REQUEST");
             console.log("VERIFY_PAYMENT_ABOUT_TO_CALL");
+            console.log("VERIFY_REQUEST_BODY", {
+              paymentId: response?.razorpay_payment_id,
+              orderId: response?.razorpay_order_id,
+              signature: response?.razorpay_signature
+            });
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -1144,6 +1150,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                })
              });
              console.log("VERIFY_PAYMENT_RESPONSE_STATUS", verifyRes.status);
+             console.log("VERIFY_PAYMENT_RESPONSE_TEXT", await verifyRes.clone().text());
              console.log("AFTER_VERIFY");
              const verifyData = await verifyRes.json();
              console.log("VERIFY_PAYMENT_RESPONSE", verifyData);
