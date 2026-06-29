@@ -521,8 +521,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         return { workflowState: 'PAYMENT_PROCESSING', error: null };
       case 'SET_ACTIVE':
         return { workflowState: 'ACTIVE', error: null };
-      case 'SET_SUCCESS':
-        return { workflowState: 'SUCCESS', error: null };
+      case 'SET_SUCCESS': {
+        console.log("STATE_BEFORE_SUCCESS", state);
+        console.log("SET_SUCCESS_DISPATCHED");
+        const nextState: MachineState = { workflowState: 'SUCCESS', error: null };
+        console.log("STATE_AFTER_SUCCESS", nextState);
+        return nextState;
+      }
       case 'SET_FAILED':
         return { workflowState: 'FAILED', error: action.error };
       default:
@@ -533,9 +538,14 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [machineState, dispatch] = useReducer(machineReducer, {
     workflowState: 'DETAILS',
     error: null
-  });
+  } as MachineState);
 
   const workflowState = machineState.workflowState;
+
+  const workflowStateRef = useRef<WorkflowState>(workflowState);
+  useEffect(() => {
+    workflowStateRef.current = workflowState;
+  }, [workflowState]);
 
   const paymentMode = 'API';
 
@@ -554,20 +564,44 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
     // Engine 1: Realtime Snapshot Listener
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if ((workflowStateRef.current as any) === 'SUCCESS') {
+        console.log('SUCCESS_STATE_LOCK_ACTIVE');
+        return;
+      }
       if (docSnap.exists()) {
         const campaign = docSnap.data();
         setActiveCampaignData(campaign);
 
         if (campaign.status === 'ACTIVE' || campaign.status === 'APPROVED' || campaign.status === 'LIVE') {
+          if ((workflowStateRef.current as any) === 'SUCCESS') {
+            console.log('SUCCESS_STATE_LOCK_ACTIVE');
+            return;
+          }
           dispatch({ type: 'SET_ACTIVE' });
         } else if (campaign.status === 'PENDING_VERIFICATION' || campaign.status === 'VERIFYING' || campaign.status === 'PAYMENT_PROCESSING') {
+          if ((workflowStateRef.current as any) === 'SUCCESS') {
+            console.log('SUCCESS_STATE_LOCK_ACTIVE');
+            return;
+          }
           dispatch({ type: 'SET_PAYMENT_PROCESSING' });
         } else if (campaign.status === 'FAILED' || campaign.status === 'REJECTED') {
+          if ((workflowStateRef.current as any) === 'SUCCESS') {
+            console.log('SUCCESS_STATE_LOCK_ACTIVE');
+            return;
+          }
           dispatch({ type: 'SET_FAILED', error: campaign.failureReason || 'Verification failed. Please check payment logs.' });
         } else {
+          if ((workflowStateRef.current as any) === 'SUCCESS') {
+            console.log('SUCCESS_STATE_LOCK_ACTIVE');
+            return;
+          }
           dispatch({ type: 'SET_AWAITING_PAYMENT' });
         }
       } else {
+         if ((workflowStateRef.current as any) === 'SUCCESS') {
+           console.log('SUCCESS_STATE_LOCK_ACTIVE');
+           return;
+         }
          dispatch({ type: 'SET_AWAITING_PAYMENT' });
       }
     }, (err) => {
@@ -967,6 +1001,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         
         localStorage.removeItem("payment_pending");
         setShowSandboxOverlay(false);
+        workflowStateRef.current = 'SUCCESS';
         dispatch({ type: 'SET_SUCCESS' });
       } else {
         throw new Error(verifyData.error || "Simulation Verification failed");
@@ -1114,17 +1149,16 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         description: "Campaign Payment",
         order_id: currentOrderData.id,
         handler: async function (response: any) {
-          console.log("STEP_1_HANDLER_ENTERED");
-          alert("STEP_1_HANDLER_ENTERED");
-          console.log("STEP_2_PAYMENT_RESPONSE", response);
-          console.log("STEP_3_BEFORE_VERIFY_PAYMENT");
+          console.log("HANDLER_ENTERED");
+          console.log("RAZORPAY_RESPONSE", response);
           setLoading(true);
 
           try {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
             const totalAmount = baseAmount + getAddonsTotal();
 
-            console.log("STEP_4_VERIFY_PAYMENT_FETCH_START");
+            console.log("VERIFY_PAYMENT_FETCH_START");
+            console.log("VERIFY_FETCH_START");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -1138,12 +1172,11 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               })
             });
 
-            console.log("STEP_5_VERIFY_PAYMENT_FETCH_RETURNED");
-            console.log("STEP_6_VERIFY_PAYMENT_STATUS", verifyRes.status);
+            const verifyResponse = verifyRes;
+            console.log("VERIFY_PAYMENT_FETCH_RESPONSE", verifyResponse.status);
+            console.log("VERIFY_FETCH_STATUS", verifyRes.status);
             
-            // Capture the response text before parsing JSON
-            const responseText = await verifyRes.clone().text();
-            console.log("STEP_7_VERIFY_PAYMENT_RESPONSE", responseText);
+            const responseText = await verifyRes.text();
             
             let verifyData;
             try {
@@ -1152,25 +1185,28 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               throw new Error(`Failed to parse response as JSON: ${responseText}`);
             }
 
+            const verifyResult = verifyData;
+            console.log("VERIFY_PAYMENT_RESPONSE_BODY", verifyResult);
+            console.log("VERIFY_FETCH_BODY", verifyData);
+
             if (verifyData.success) {
               localStorage.removeItem("payment_pending");
-              console.log("STEP_8_SUCCESS_SCREEN_TRIGGER");
+              console.log("SUCCESS_SCREEN_TRIGGER");
+              console.log("SUCCESS_DISPATCH");
               triggerToast("Payment successful!", "success");
+              workflowStateRef.current = 'SUCCESS';
               dispatch({ type: 'SET_SUCCESS' });
-              console.log("RETURN_REACHED");
               return;
             } else {
               throw new Error(verifyData.error || "Verification failed");
             }
           } catch (error: any) {
-            console.error("STEP_EXCEPTION", error);
-            alert("STEP_EXCEPTION: " + error.message);
+            console.log("VERIFY_EXCEPTION", error);
             triggerToast("Payment verification failed: " + error.message, "error");
             dispatch({
               type: 'SET_FAILED',
               error: error.message || "Payment verification failed"
             });
-            console.log("RETURN_REACHED");
           } finally {
             setLoading(false);
           }
@@ -3226,32 +3262,37 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
                     </div>
                   </div>
                 ) : workflowState === 'SUCCESS' ? (
-                  <div className="space-y-6 py-8 text-center font-sans">
-                     <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20">
-                        <CheckCircle2 size={40} className="stroke-[2.5]" />
-                     </div>
-                     <div>
-                        <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Successful</h4>
-                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Transaction Completed & Verified</p>
-                     </div>
-                     <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-[11px] font-mono leading-relaxed text-left">
-                        <p className="font-bold text-center text-emerald-900">Campaign Activated!</p>
-                        <p className="mt-2 text-slate-600 text-[10.5px]">Your payment has been successfully recorded. You can now close this screen to view your active campaign on the dashboard, update media uploads, and start publishing.</p>
-                     </div>
-                     <div className="pt-4">
-                        <button 
-                          onClick={() => {
-                            console.log("[LOG] [SUCCESS_SCREEN] User closed success page. Dispatching SET_ACTIVE.");
-                            localStorage.removeItem("payment_pending");
-                            setShowPaymentState(false);
-                            dispatch({ type: 'SET_ACTIVE' });
-                          }} 
-                          className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
-                        >
-                           Continue to Dashboard
-                        </button>
-                     </div>
-                  </div>
+                  (() => {
+                    console.log("SUCCESS_COMPONENT_RENDERED");
+                    return (
+                      <div className="space-y-6 py-8 text-center font-sans">
+                         <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20">
+                            <CheckCircle2 size={40} className="stroke-[2.5]" />
+                         </div>
+                         <div>
+                            <h4 className="text-2xl font-black italic uppercase tracking-tight text-slate-900">Payment Successful</h4>
+                            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Transaction Completed & Verified</p>
+                         </div>
+                         <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-[11px] font-mono leading-relaxed text-left">
+                            <p className="font-bold text-center text-emerald-900">Campaign Activated!</p>
+                            <p className="mt-2 text-slate-600 text-[10.5px]">Your payment has been successfully recorded. You can now close this screen to view your active campaign on the dashboard, update media uploads, and start publishing.</p>
+                         </div>
+                         <div className="pt-4">
+                            <button 
+                              onClick={() => {
+                                console.log("[LOG] [SUCCESS_SCREEN] User closed success page. Dispatching SET_ACTIVE.");
+                                localStorage.removeItem("payment_pending");
+                                setShowPaymentState(false);
+                                dispatch({ type: 'SET_ACTIVE' });
+                              }} 
+                              className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+                            >
+                               Continue to Dashboard
+                            </button>
+                         </div>
+                      </div>
+                    );
+                  })()
                 ) : workflowState === 'FAILED' ? (
                   <div className="space-y-6 py-8 text-center font-sans">
                      <div className="w-20 h-20 bg-red-100 text-red-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl shadow-red-500/20">
