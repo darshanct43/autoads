@@ -99,13 +99,15 @@ export default function App() {
               }
               
               const isAdminEmail = email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com';
-              if (isAdminEmail && profile.role !== 'ADMIN') {
-                console.log("[FORENSIC] Admin email profile exists with wrong role:", profile.role, "- updating to ADMIN");
-                try {
-                  await firebaseService.updateUserRole(firebaseUser.uid, 'ADMIN');
+              if (isAdminEmail) {
+                if (profile.role !== 'ADMIN') {
+                  console.log("[FORENSIC] Admin email profile exists with wrong role:", profile.role, "- updating to ADMIN");
+                  try {
+                    await firebaseService.updateUserRole(firebaseUser.uid, 'ADMIN');
+                  } catch (updErr) {
+                    console.error("[FORENSIC] Failed to update role for admin:", updErr);
+                  }
                   profile.role = 'ADMIN';
-                } catch (updErr) {
-                  console.error("[FORENSIC] Failed to update role for admin:", updErr);
                 }
               }
               
@@ -172,11 +174,11 @@ export default function App() {
           if (email === 'vijayathrishu@gmail.com') {
             role = 'SUPPORT_MANAGER';
             localStorage.setItem('auto_ads_last_role', 'SUPPORT_MANAGER');
+          } else if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
+            role = 'ADMIN';
+            localStorage.setItem('auto_ads_last_role', 'ADMIN');
           } else if (!resolvedRole) {
-            if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
-              role = 'ADMIN';
-              localStorage.setItem('auto_ads_last_role', 'ADMIN');
-            } else if (email.includes('support')) {
+            if (email.includes('support')) {
               role = 'SUPPORT_TEAM';
               localStorage.setItem('auto_ads_last_role', 'SUPPORT_TEAM');
             } else if (email === 'franchise@autoads.in' || email.includes('franchise')) {

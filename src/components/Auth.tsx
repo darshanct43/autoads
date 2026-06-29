@@ -174,13 +174,15 @@ export default function Auth({ onLogin }: AuthProps) {
           
           if (profile) {
             const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
-            if (isAdminEmail && profile.role !== 'ADMIN') {
-              console.log("[FORENSIC] Admin email profile exists on check with wrong role:", profile.role, "- auto-escalating to ADMIN");
-              try {
-                await firebaseService.updateUserRole(user.uid, 'ADMIN');
+            if (isAdminEmail) {
+              if (profile.role !== 'ADMIN') {
+                console.log("[FORENSIC] Admin email profile exists on check with wrong role:", profile.role, "- auto-escalating to ADMIN");
+                try {
+                  await firebaseService.updateUserRole(user.uid, 'ADMIN');
+                } catch (updErr) {
+                  console.error("[FORENSIC] Failed to auto-escalate user role:", updErr);
+                }
                 profile.role = 'ADMIN';
-              } catch (updErr) {
-                console.error("[FORENSIC] Failed to auto-escalate user role:", updErr);
               }
             }
             userRole = profile.role as UserRole;
@@ -210,6 +212,13 @@ export default function Auth({ onLogin }: AuthProps) {
             } else if (driverProfile) {
               userRole = 'DRIVER';
             }
+          }
+
+          const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
+          if (isAdminEmail) {
+            userRole = 'ADMIN';
+          } else if (emailLower === 'vijayathrishu@gmail.com') {
+            userRole = 'SUPPORT_MANAGER';
           }
 
           setRole(userRole);
@@ -381,13 +390,15 @@ export default function Auth({ onLogin }: AuthProps) {
 
       if (profile) {
         const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
-        if (isAdminEmail && profile.role !== 'ADMIN') {
-          console.log("[FORENSIC] Admin email profile exists on login submit with wrong role:", profile.role, "- auto-escalating to ADMIN");
-          try {
-            await firebaseService.updateUserRole(user.uid, 'ADMIN');
+        if (isAdminEmail) {
+          if (profile.role !== 'ADMIN') {
+            console.log("[FORENSIC] Admin email profile exists on login submit with wrong role:", profile.role, "- auto-escalating to ADMIN");
+            try {
+              await firebaseService.updateUserRole(user.uid, 'ADMIN');
+            } catch (updErr) {
+              console.error("[FORENSIC] Failed to auto-escalate user role on login:", updErr);
+            }
             profile.role = 'ADMIN';
-          } catch (updErr) {
-            console.error("[FORENSIC] Failed to auto-escalate user role on login:", updErr);
           }
         }
         userRole = profile.role as UserRole;
@@ -417,6 +428,13 @@ export default function Auth({ onLogin }: AuthProps) {
         } else if (driverProfile) {
           userRole = 'DRIVER';
         }
+      }
+
+      const isAdminEmailCheck = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
+      if (isAdminEmailCheck) {
+        userRole = 'ADMIN';
+      } else if (emailLower === 'vijayathrishu@gmail.com') {
+        userRole = 'SUPPORT_MANAGER';
       }
       
       console.log("[Auth] Resolved role:", userRole);

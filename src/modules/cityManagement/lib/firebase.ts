@@ -71,7 +71,7 @@ try {
   throw appErr;
 }
 
-const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || (firebaseAppletConfig as any).firestoreDatabaseId || '(default)');
+const firestoreDbId = (import.meta.env.VITE_FIRESTORE_DATABASE_ID as string || (firebaseAppletConfig as any).firestoreDatabaseId || 'ai-studio-autoadsdriverfle-2d7c0ec8-7f5b-426d-8e1a-dc77926ec5fb');
 console.log("[FORENSIC] [Firebase] Database ID resolved as:", firestoreDbId);
 
 let dbInstance: Firestore;
