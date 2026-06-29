@@ -5,6 +5,7 @@ import {
   browserLocalPersistence, 
   GoogleAuthProvider, 
   signInWithRedirect,
+  signInWithPopup,
   getRedirectResult,
   Auth
 } from 'firebase/auth';
@@ -165,8 +166,28 @@ export const googleLogin = async () => {
   provider.addScope('https://www.googleapis.com/auth/userinfo.email');
   
   try {
-    console.log("[Firebase Auth] Initiating signInWithRedirect...");
-    await signInWithRedirect(auth, provider);
+    console.log("[Firebase Auth] Trying signInWithPopup first for smooth experience...");
+    try {
+      const result = await signInWithPopup(auth, provider);
+      if (result) {
+        console.log("[Firebase Auth] Successful sign-in with popup. Email:", result.user?.email);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          cachedAccessToken = credential.accessToken;
+          console.log("[Firebase Auth] Saved Google OAuth access token from popup");
+        }
+        return result;
+      }
+    } catch (popupError: any) {
+      // If popup is blocked or closed by the user, we try redirect
+      console.warn("[Firebase Auth] signInWithPopup failed or was blocked. Falling back to signInWithRedirect...", popupError);
+      if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/popup-closed-by-user' || popupError.code === 'auth/cancelled-popup-request') {
+        console.log("[Firebase Auth] Initiating fallback signInWithRedirect...");
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      throw popupError;
+    }
   } catch (error: any) {
     console.error("[Firebase Auth Error]", error);
     if (error.code === 'auth/network-request-failed') {
@@ -176,7 +197,7 @@ export const googleLogin = async () => {
        throw new Error("Google Sign-in is not enabled in your Firebase Console. Please enable it in Authentication > Sign-in method.");
     }
     if (error.code === 'auth/unauthorized-domain') {
-       throw new Error("This domain is not authorized for Google Login. Please add the current preview URL to the authorized domains in your Firebase Console.");
+       throw new Error(`This domain (${window.location.hostname}) is not authorized for Google Login. Please add "${window.location.hostname}" to the Authorized Domains list in your Firebase Console under Authentication > Settings.`);
     }
     throw error;
   } finally {
