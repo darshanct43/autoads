@@ -17,6 +17,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-iam": "^3.1075.0",
     "@aws-sdk/client-s3": "^3.1060.0",
     "@aws-sdk/lib-storage": "^3.1060.0",
     "@aws-sdk/s3-request-presigner": "^3.1060.0",
@@ -51,6 +52,7 @@
     "vite": "^5.2.11"
   },
   "devDependencies": {
+    "@aws-sdk/client-sts": "^3.1075.0",
     "@types/express": "^4.17.21",
     "@types/formidable": "^3.5.1",
     "@types/leaflet": "^1.9.21",
