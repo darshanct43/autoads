@@ -97,6 +97,18 @@ export default function App() {
                   console.error("[FORENSIC] Failed to update role for vijayathrishu:", updErr);
                 }
               }
+              
+              const isAdminEmail = email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com';
+              if (isAdminEmail && profile.role !== 'ADMIN') {
+                console.log("[FORENSIC] Admin email profile exists with wrong role:", profile.role, "- updating to ADMIN");
+                try {
+                  await firebaseService.updateUserRole(firebaseUser.uid, 'ADMIN');
+                  profile.role = 'ADMIN';
+                } catch (updErr) {
+                  console.error("[FORENSIC] Failed to update role for admin:", updErr);
+                }
+              }
+              
               resolvedRole = profile.role as UserRole;
               console.log("[FORENSIC] Firestore user profile found. Using profile.role only:", resolvedRole);
             } else {
