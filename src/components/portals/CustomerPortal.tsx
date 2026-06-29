@@ -1114,13 +1114,13 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         description: "Campaign Payment",
         order_id: currentOrderData.id,
         handler: async function (response: any) {
-          try {
-            console.log("STEP_1_HANDLER_ENTERED");
-            alert("STEP_1_HANDLER_ENTERED");
-            console.log("STEP_2_PAYMENT_RESPONSE", response);
-            console.log("STEP_3_BEFORE_VERIFY_PAYMENT");
-            setLoading(true);
+          console.log("STEP_1_HANDLER_ENTERED");
+          alert("STEP_1_HANDLER_ENTERED");
+          console.log("STEP_2_PAYMENT_RESPONSE", response);
+          console.log("STEP_3_BEFORE_VERIFY_PAYMENT");
+          setLoading(true);
 
+          try {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
             const totalAmount = baseAmount + getAddonsTotal();
 
@@ -1140,10 +1140,17 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
             console.log("STEP_5_VERIFY_PAYMENT_FETCH_RETURNED");
             console.log("STEP_6_VERIFY_PAYMENT_STATUS", verifyRes.status);
+            
+            // Capture the response text before parsing JSON
             const responseText = await verifyRes.clone().text();
             console.log("STEP_7_VERIFY_PAYMENT_RESPONSE", responseText);
             
-            const verifyData = await verifyRes.json();
+            let verifyData;
+            try {
+              verifyData = JSON.parse(responseText);
+            } catch (jsonErr) {
+              throw new Error(`Failed to parse response as JSON: ${responseText}`);
+            }
 
             if (verifyData.success) {
               localStorage.removeItem("payment_pending");
@@ -1157,7 +1164,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
             }
           } catch (error: any) {
             console.error("STEP_EXCEPTION", error);
-            alert("STEP_EXCEPTION");
+            alert("STEP_EXCEPTION: " + error.message);
             triggerToast("Payment verification failed: " + error.message, "error");
             dispatch({
               type: 'SET_FAILED',
@@ -1186,9 +1193,6 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
        localStorage.setItem("pending_order", currentOrderData.id);
        const razor = new (window as any).Razorpay(options);
        activeRazorpayRef.current = razor;
-       razor.on('payment.success', function(resp: any) {
-         console.log("EVENT SUCCESS", resp);
-       });
        razor.open();
        console.log("CHECKOUT_OPENED");
     } catch (e: any) {
