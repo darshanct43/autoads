@@ -623,7 +623,15 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
       
       // Close active Razorpay Modal if any reference is held
       if (activeRazorpayRef.current && typeof activeRazorpayRef.current.close === 'function') {
+        if (paymentCompletedRef.current !== true) {
+          console.log("FORCE_CLOSE_BLOCKED_DURING_PAYMENT");
+          console.log("PAYMENT_COMPLETED_REF", paymentCompletedRef.current);
+          return;
+        }
         try {
+          console.log("RAZORPAY_FORCE_CLOSE_TRIGGERED");
+          console.log("WORKFLOW_STATE_AT_CLOSE", workflowState);
+          console.log("RAZORPAY_IS_OPEN_WHEN_CLOSED");
           activeRazorpayRef.current.close();
           console.log("[PAYMENT_STRICT_DEBUG] Closed active Razorpay modal.");
         } catch (err) {
@@ -673,6 +681,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const paymentProcessedRef = useRef(false);
   const activeRazorpayRef = useRef<any>(null);
+  const paymentCompletedRef = useRef(false);
 
   useEffect(() => {
     // Sync selected plan with mergedPlans or default to the first plan if not set
@@ -1002,6 +1011,7 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         localStorage.removeItem("payment_pending");
         setShowSandboxOverlay(false);
         workflowStateRef.current = 'SUCCESS';
+        paymentCompletedRef.current = true;
         dispatch({ type: 'SET_SUCCESS' });
       } else {
         throw new Error(verifyData.error || "Simulation Verification failed");
@@ -1117,6 +1127,8 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
 
     if (isPreparingOrder) return;
     
+    paymentCompletedRef.current = false;
+    
     try {
       console.log("PREPARE_ORDER_CALLED");
       let currentOrderData = orderData;
@@ -1149,16 +1161,12 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
         description: "Campaign Payment",
         order_id: currentOrderData.id,
         handler: async function (response: any) {
-          console.log("HANDLER_ENTERED");
-          console.log("RAZORPAY_RESPONSE", response);
+          console.log("STEP_1_HANDLER_ENTERED");
           setLoading(true);
-
           try {
             const baseAmount = typeof selectedPlan.price === 'string' ? parseFloat(selectedPlan.price.replace(/[^0-9.]/g, '')) : selectedPlan.price;
             const totalAmount = baseAmount + getAddonsTotal();
 
-            console.log("VERIFY_PAYMENT_FETCH_START");
-            console.log("VERIFY_FETCH_START");
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: {
@@ -1172,32 +1180,31 @@ export default function CustomerPortal({ onLogout }: CustomerPortalProps) {
               })
             });
 
-            const verifyResponse = verifyRes;
-            console.log("VERIFY_PAYMENT_FETCH_RESPONSE", verifyResponse.status);
-            console.log("VERIFY_FETCH_STATUS", verifyRes.status);
-            
+            console.log("STEP_2_STATUS", verifyRes.status);
+
             const responseText = await verifyRes.text();
-            
+
+            console.log("STEP_3_RAW_RESPONSE", responseText);
+
             let verifyData;
             try {
               verifyData = JSON.parse(responseText);
-            } catch (jsonErr) {
-              throw new Error(`Failed to parse response as JSON: ${responseText}`);
+            } catch (e) {
+              console.log("STEP_4_JSON_PARSE_FAILED");
+              throw e;
             }
 
-            const verifyResult = verifyData;
-            console.log("VERIFY_PAYMENT_RESPONSE_BODY", verifyResult);
-            console.log("VERIFY_FETCH_BODY", verifyData);
+            console.log("STEP_5_PARSED_RESPONSE", verifyData);
 
             if (verifyData.success) {
               localStorage.removeItem("payment_pending");
-              console.log("SUCCESS_SCREEN_TRIGGER");
-              console.log("SUCCESS_DISPATCH");
-              triggerToast("Payment successful!", "success");
+              console.log("STEP_6_SUCCESS_DISPATCH");
               workflowStateRef.current = 'SUCCESS';
-              dispatch({ type: 'SET_SUCCESS' });
+              paymentCompletedRef.current = true;
+              dispatch({ type: "SET_SUCCESS" });
               return;
             } else {
+              console.log("STEP_7_VERIFY_FAILED", verifyData);
               throw new Error(verifyData.error || "Verification failed");
             }
           } catch (error: any) {

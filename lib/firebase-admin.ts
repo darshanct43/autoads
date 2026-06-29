@@ -21,6 +21,11 @@ const firebaseProjectId = getCredential('GOOGLE_CLOUD_PROJECT') || getCredential
 const firebaseDatabaseId = appletConfig.firestoreDatabaseId || getCredential('FIRESTORE_DATABASE_ID') || process.env.FIRESTORE_DATABASE_ID || '(default)';
 
 let rawSA = getCredential('FIREBASE_SERVICE_ACCOUNT') || process.env.FIREBASE_SERVICE_ACCOUNT;
+
+if (rawSA && rawSA.trim().includes('mayaan_webhook_secure_2026')) {
+  console.warn('[FIREBASE_DIAGNOSTICS] CRITICAL CONFIGURATION ISSUE: The environment variable "FIREBASE_SERVICE_ACCOUNT" is incorrectly set to the Razorpay webhook secret string ("mayaan_webhook_secure_2026") instead of a valid Firebase Service Account JSON key. This causes Firebase Admin initialization to fail/fallback.');
+}
+
 let serviceAccount = parseServiceAccount(rawSA);
 
 if (!serviceAccount) {

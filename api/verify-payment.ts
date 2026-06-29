@@ -15,6 +15,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secrets_candidates: { name: string; value: string }[] = [];
 
   try {
+    console.log("VERIFY_ENDPOINT_ENTERED");
+    console.log("VERIFY_REQUEST_BODY", req.body);
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, campaignData, planData, uid } = req.body;
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
 
@@ -188,8 +190,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log("LOG_10_SUCCESS_RESPONSE");
     console.log("[LOG] [VERIFY_PAYMENT] All payments and campaign documents updated successfully. Returning SUCCESS.");
+    console.log("VERIFY_SUCCESS_RESPONSE_SENT");
     res.status(200).json({ success: true, status: "SUCCESS" });
   } catch (error: any) {
+    console.log("VERIFY_EXCEPTION", error);
     console.error("ACTUAL_ERROR_NAME=", error.name);
     console.error("ACTUAL_ERROR_MESSAGE=", error.message);
     console.error("ACTUAL_ERROR_STACK=", error.stack);
