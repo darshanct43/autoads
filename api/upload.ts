@@ -99,7 +99,10 @@ export default async function handler(req: any, res: any) {
             filename,
             mimetype,
             bucket: process.env.AWS_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || 'undefined',
-            region: process.env.AWS_REGION || 'undefined'
+            region: process.env.AWS_REGION || 'undefined',
+            hasAccessKey: !!process.env.AWS_ACCESS_KEY,
+            hasAccessKeyId: !!process.env.AWS_ACCESS_KEY_ID,
+            hasSecret: !!process.env.AWS_SECRET_ACCESS_KEY
           });
 
           // Upload to S3 using s3Service
@@ -118,6 +121,8 @@ export default async function handler(req: any, res: any) {
           resolve();
         } catch (writeErr: any) {
           console.error("S3_UPLOAD_ERROR failure:", writeErr);
+          // Log full error object to help debug
+          console.error("S3_UPLOAD_ERROR details:", JSON.stringify(writeErr, Object.getOwnPropertyNames(writeErr)));
           await trackAwsAction(false);
 
           const errorResponse = { error: 'Failed to write uploaded file to S3.', details: writeErr.message };
