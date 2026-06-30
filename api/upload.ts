@@ -136,7 +136,7 @@ export default async function handler(req: any, res: any) {
           const errorResponse = { error: 'Failed to write uploaded file to S3.', details: writeErr.message };
           console.log("RESPONSE_SENT", { status: 500, body: errorResponse });
           sendJson(500, errorResponse);
-          resolve();
+          return resolve();
         }
       });
     });
