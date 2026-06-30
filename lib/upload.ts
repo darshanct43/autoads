@@ -110,11 +110,25 @@ export default async function handler(req: any, res: any) {
           region: process.env.AWS_REGION || 'undefined'
         });
 
-        // Upload to S3 using s3Service
-        console.log("S3_UPLOAD_START");
-        const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
-        console.log("S3_UPLOAD_SUCCESS");
-        await trackAwsAction(true);
+        // Upload to S3 using s3Service with fallback to local server storage
+        let fileUrl;
+        try {
+          console.log("S3_UPLOAD_START");
+          fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
+          console.log("S3_UPLOAD_SUCCESS", fileUrl);
+          await trackAwsAction(true);
+        } catch (s3Err: any) {
+          console.warn("[UPLOAD_WARNING] S3 upload failed, falling back to local server storage:", s3Err.message);
+          const uploadsDir = path.join(process.cwd(), 'uploads');
+          if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+          }
+          const localPath = path.join(uploadsDir, filename);
+          fs.writeFileSync(localPath, fileBuffer);
+          fileUrl = `/uploads/${filename}`;
+          console.log("[UPLOAD] Local fallback storage success:", fileUrl);
+          await trackAwsAction(false);
+        }
 
         const successResponse = { url: fileUrl };
         console.log("RESPONSE_SENT", { status: 200, body: successResponse });

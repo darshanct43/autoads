@@ -144,15 +144,29 @@ export default async function handler(req: any, res: any) {
             hasSecret: !!process.env.AWS_SECRET_ACCESS_KEY
           });
 
-          // Upload to S3 using s3Service
-          console.log("S3_UPLOAD_START");
-          console.log("AWS_KEY_LAST4_LOGS:", 
-            process.env.AWS_ACCESS_KEY ? process.env.AWS_ACCESS_KEY.slice(-4) : "UNSET",
-            process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.slice(-4) : "UNSET"
-          );
-          const fileUrl = await uploadFileToS3(filename, fileBuffer, mimetype);
-          console.log("S3_UPLOAD_SUCCESS");
-          await trackAwsAction(true);
+          // Upload to S3 using s3Service with fallback to local server storage
+          let fileUrl;
+          try {
+            console.log("S3_UPLOAD_START");
+            console.log("AWS_KEY_LAST4_LOGS:", 
+              process.env.AWS_ACCESS_KEY ? process.env.AWS_ACCESS_KEY.slice(-4) : "UNSET",
+              process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.slice(-4) : "UNSET"
+            );
+            fileUrl = await uploadFileToS3(filename, fileBuffer, mimetype);
+            console.log("S3_UPLOAD_SUCCESS", fileUrl);
+            await trackAwsAction(true);
+          } catch (s3Err: any) {
+            console.warn("[UPLOAD_WARNING] S3 upload failed, falling back to local server storage:", s3Err.message);
+            const uploadsDir = path.join(process.cwd(), 'uploads');
+            if (!fs.existsSync(uploadsDir)) {
+              fs.mkdirSync(uploadsDir, { recursive: true });
+            }
+            const localPath = path.join(uploadsDir, filename);
+            fs.writeFileSync(localPath, fileBuffer);
+            fileUrl = `/uploads/${filename}`;
+            console.log("[UPLOAD] Local fallback storage success:", fileUrl);
+            await trackAwsAction(false);
+          }
 
           const successResponse = { url: fileUrl };
           console.log("RESPONSE_SENT", { status: 200, body: successResponse });

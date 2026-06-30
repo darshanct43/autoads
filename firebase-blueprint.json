@@ -51,6 +51,21 @@
       },
       "required": ["type", "timestamp"]
     },
+    "driverAgreement": {
+      "title": "Driver Agreement",
+      "description": "The signed digital partnership agreement for a driver",
+      "type": "object",
+      "properties": {
+        "agreementAccepted": { "type": "boolean" },
+        "signedAt": { "type": "string", "format": "date-time" },
+        "signatureUrl": { "type": "string" },
+        "agreementPdfUrl": { "type": "string" },
+        "verificationSelfieUrl": { "type": "string" },
+        "agreementVersion": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["agreementAccepted", "signedAt", "signatureUrl", "agreementPdfUrl", "status"]
+    },
     "campaign": {
       "title": "Campaign",
       "description": "A media campaign uploaded by a client or staff",
@@ -393,6 +408,10 @@
     "/drivers/{driverId}/logs/{logId}": {
       "schema": "driverLog",
       "description": "Driver activity logs"
+    },
+    "/drivers/{driverId}/agreement/{agreementId}": {
+      "schema": "driverAgreement",
+      "description": "Signed partnership agreement details"
     },
     "/campaigns/{campaignId}": {
       "schema": "campaign",

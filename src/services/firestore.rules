@@ -138,6 +138,10 @@ service cloud.firestore {
         allow create: if isOwner(driverId);
         allow read: if isOwner(driverId) || isAdmin();
       }
+
+      match /agreement/{agreementId} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
     }
 
     // Latest location

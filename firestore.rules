@@ -219,6 +219,9 @@ service cloud.firestore {
       match /logs/{logId} {
         allow read, write: if isHQ() || isOwner(driverId);
       }
+      match /agreement/{agreementId} {
+        allow read, write: if isHQ() || isOwner(driverId);
+      }
     }
 
     match /campaigns/{campaignId} {
