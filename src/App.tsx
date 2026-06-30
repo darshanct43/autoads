@@ -82,133 +82,46 @@ export default function App() {
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          // Resolve role with robust fallback to cache under bad connectivity / offline modes
+          // Resolve role strictly from Firestore
           let resolvedRole: UserRole | null = null;
           try {
             const profile = await firebaseService.getUserProfile(firebaseUser.uid);
             const email = firebaseUser.email?.toLowerCase() || '';
-            if (profile) {
-              if (email === 'vijayathrishu@gmail.com' && profile.role !== 'SUPPORT_MANAGER') {
-                console.log("[FORENSIC] vijayathrishu@gmail.com profile exists but with wrong role:", profile.role, "- updating to SUPPORT_MANAGER");
-                try {
-                  await firebaseService.updateUserRole(firebaseUser.uid, 'SUPPORT_MANAGER');
-                  profile.role = 'SUPPORT_MANAGER';
-                } catch (updErr) {
-                  console.error("[FORENSIC] Failed to update role for vijayathrishu:", updErr);
-                }
-              }
-              
-              const isAdminEmail = email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com';
-              if (isAdminEmail) {
-                if (profile.role !== 'ADMIN') {
-                  console.log("[FORENSIC] Admin email profile exists with wrong role:", profile.role, "- updating to ADMIN");
-                  try {
-                    await firebaseService.updateUserRole(firebaseUser.uid, 'ADMIN');
-                  } catch (updErr) {
-                    console.error("[FORENSIC] Failed to update role for admin:", updErr);
-                  }
-                  profile.role = 'ADMIN';
-                }
-              }
-              
-              resolvedRole = profile.role as UserRole;
-              console.log("[FORENSIC] Firestore user profile found. Using profile.role only:", resolvedRole);
-            } else {
-              // Self-heal: If profile is missing for a privileged email, create it in USERS_COLLECTION
-              if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
-                console.log("[FORENSIC] Missing ADMIN profile detected during auth listener for email:", email, "Saving profile...");
-                try {
-                  await firebaseService.saveUserProfile(
-                    firebaseUser.uid,
-                    firebaseUser.displayName || 'Admin Darshan',
-                    firebaseUser.phoneNumber || '+919999999999',
-                    'ADMIN',
-                    'ENTERPRISE',
-                    { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
-                  );
-                  resolvedRole = 'ADMIN';
-                  console.log("[FORENSIC] Successfully created missing ADMIN profile.");
-                } catch (saveErr) {
-                  console.error("[FORENSIC] Failed to save ADMIN profile:", saveErr);
-                }
-              } else if (email === 'vijayathrishu@gmail.com') {
-                console.log("[FORENSIC] Missing SUPPORT_MANAGER profile detected during auth listener for email:", email, "Saving profile...");
-                try {
-                  await firebaseService.saveUserProfile(
-                    firebaseUser.uid,
-                    firebaseUser.displayName || 'Vijayathrishu Support',
-                    firebaseUser.phoneNumber || '+919999999999',
-                    'SUPPORT_MANAGER',
-                    'FREE',
-                    { stateId: 'KA', territoryId: 'HQ', cityId: 'HQ', franchiseId: null }
-                  );
-                  resolvedRole = 'SUPPORT_MANAGER';
-                  console.log("[FORENSIC] Successfully created missing SUPPORT_MANAGER profile for vijayathrishu.");
-                } catch (saveErr) {
-                  console.error("[FORENSIC] Failed to save SUPPORT_MANAGER profile:", saveErr);
-                }
-              }
-            }
             
-            if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
-              console.log("[FORENSIC] Role forced to DEVICE due to Terminal Mode toggle. Previous resolvedRole =", resolvedRole);
-              resolvedRole = 'DEVICE';
-              console.log("[FORENSIC] Role now =", resolvedRole);
+            if (profile && profile.role) {
+                resolvedRole = profile.role as UserRole;
+                console.log("[AUTH] Firestore role found:", resolvedRole);
+            } else {
+                // Known administrative overrides
+                if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
+                    resolvedRole = 'ADMIN';
+                } else if (email === 'vijayathrishu@gmail.com') {
+                    resolvedRole = 'SUPPORT_MANAGER';
+                } else {
+                    console.warn("[AUTH] No role found for user:", firebaseUser.uid);
+                    resolvedRole = 'NO_ROLE';
+                }
             }
-          } catch (e) {
-            console.warn("[FORENSIC] App profile fetch failed. Recovering cached role fallback.", e);
-          }
 
-          if (!resolvedRole) {
-            resolvedRole = localStorage.getItem('auto_ads_last_role') as UserRole || 'CUSTOMER';
-            console.log("[FORENSIC] Role forced to fallback =", resolvedRole);
-          } else {
-            localStorage.setItem('auto_ads_last_role', resolvedRole);
-            console.log("[FORENSIC] Role stored in auto_ads_last_role =", resolvedRole);
-          }
-          
-          const email = firebaseUser.email?.toLowerCase() || '';
-          let role: UserRole = resolvedRole;
-          
-          // Fallback logic for emails without pre-existing user profiles or when offline/cache-fallback is active
-          if (email === 'vijayathrishu@gmail.com') {
-            role = 'SUPPORT_MANAGER';
-            localStorage.setItem('auto_ads_last_role', 'SUPPORT_MANAGER');
-          } else if (email === 'admin@autoads.in' || email === 'darshanct43@gmail.com' || email === 'dashanct43@gmail.com') {
-            role = 'ADMIN';
-            localStorage.setItem('auto_ads_last_role', 'ADMIN');
-          } else if (!resolvedRole) {
-            if (email.includes('support')) {
-              role = 'SUPPORT_TEAM';
-              localStorage.setItem('auto_ads_last_role', 'SUPPORT_TEAM');
-            } else if (email === 'franchise@autoads.in' || email.includes('franchise')) {
-              role = 'FRANCHISE_OWNER';
-              localStorage.setItem('auto_ads_last_role', 'FRANCHISE_OWNER');
+            // Terminal override
+            if (localStorage.getItem('auto_ads_is_terminal') === 'true') {
+              resolvedRole = 'DEVICE';
             }
+
+            // Audit logging
+            console.log("LOGIN_UID=", firebaseUser.uid);
+            console.log("PHONE=", firebaseUser.phoneNumber);
+            console.log("ROLE=", resolvedRole);
+            console.log("ROUTE_SELECTED=", resolvedRole);
+
+            setRole(resolvedRole);
+          } catch (e) {
+            console.error("[AUTH] Profile fetch failed:", e);
+            setRole('NO_ROLE');
           }
-          
-          // Debug role resolution
-          const isTerminalStored = typeof window !== 'undefined' && localStorage.getItem('auto_ads_is_terminal') === 'true';
-          const allLocalStorage = typeof window !== 'undefined' ? JSON.stringify(localStorage) : 'undefined';
-          console.log("[FORENSIC] Auth Resolution - User:", firebaseUser.uid, "Email:", email, "Profile Role:", resolvedRole, "Final Assigned Role:", role, "Stored Terminal Mode:", isTerminalStored, "All LocalStorage:", allLocalStorage);
-          
-          if (role === 'DEVICE') {
-            localStorage.removeItem('auto_ads_tv_mode');
-            localStorage.removeItem('auto_ads_device_mode');
-            if (typeof window !== 'undefined' && window.location.search) {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('tv');
-              url.searchParams.delete('tv_mode');
-              url.searchParams.delete('device');
-              url.searchParams.delete('device_mode');
-              window.history.replaceState({}, '', url.pathname + url.search);
-            }
-          }
-          setRole(role);
         } catch (err: any) {
           console.error("Auth role resolution failed:", err);
-          // Fallback to customer instead of locking screen on parsing details error
-          setRole('CUSTOMER');
+          setRole('NO_ROLE');
         }
       } else {
         setRole(null);
@@ -298,6 +211,11 @@ export default function App() {
 
     // Role-based routing for other authenticated users
     console.log("[FORENSIC] App routing. TOGGLE =", localStorage.getItem("auto_ads_is_terminal"), "ROLE =", role, "PATH =", path);
+    
+    // Strict Route Guards
+    if (path === '/customer' && role === 'DRIVER') { window.location.replace('/driver'); return null; }
+    if (path === '/driver' && role === 'CUSTOMER') { window.location.replace('/customer'); return null; }
+
     if (path === '/support' && (role === 'SUPPORT_TEAM' || role === 'SUPPORT' || role === 'SUPPORT_AGENT' || role === 'SUPPORT_MANAGER' || role === 'HQ_SUPPORT' || role === 'STAFF')) {
       console.log("ACTUAL_COMPONENT_RENDERED = SupportPortal");
       return <SupportPortal onLogout={handleLogout} />;
@@ -320,17 +238,17 @@ export default function App() {
     }
 
     switch(role) {
+      case 'ADMIN':
       case 'HQ_ADMIN':
-      case 'ADMIN': 
         window.history.replaceState({}, '', '/admin'); 
         console.log("ACTUAL_COMPONENT_RENDERED = AdminPortal");
         return <AdminPortal onLogout={handleLogout} />;
-      case 'HQ_SUPPORT':
       case 'SUPPORT':
       case 'SUPPORT_AGENT':
       case 'SUPPORT_MANAGER':
       case 'STAFF':
-      case 'SUPPORT_TEAM': 
+      case 'SUPPORT_TEAM':
+      case 'HQ_SUPPORT':
         window.history.replaceState({}, '', '/support'); 
         console.log("ACTUAL_COMPONENT_RENDERED = SupportPortal");
         return <SupportPortal onLogout={handleLogout} />;
@@ -356,22 +274,22 @@ export default function App() {
         window.history.replaceState({}, '', '/customer'); 
         console.log("ACTUAL_COMPONENT_RENDERED = CustomerPortal");
         return <CustomerPortal onLogout={handleLogout} />;
+      case 'NO_ROLE':
       default: 
-        console.log("ACTUAL_COMPONENT_RENDERED = UnknownRoleScreen");
+        console.log("ACTUAL_COMPONENT_RENDERED = AccessRestrictedScreen");
         return (
           <div className="text-white bg-[#0b0f19] min-h-screen flex flex-col items-center justify-center gap-6 p-4 text-center">
             <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl max-w-sm w-full">
               <h2 className="text-lg font-black uppercase tracking-widest text-red-500 mb-2">ACCESS RESTRICTED</h2>
               <p className="text-slate-400 text-xs font-bold leading-relaxed mb-8 uppercase tracking-widest">
-                Unknown role: {role || 'undefined'}.<br/>
-                Your account type is not recognized.
+                Account role not configured. Contact administrator.
               </p>
               
               <button 
                 onClick={handleLogout}
                 className="w-full py-4 bg-white text-black font-black uppercase tracking-widest text-[10px] rounded-xl hover:bg-slate-200 transition-all cursor-pointer"
               >
-                Sign Out & Return
+                Sign Out
               </button>
             </div>
             

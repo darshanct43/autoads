@@ -610,7 +610,7 @@ export default function Auth({ onLogin }: AuthProps) {
       }
 
       if (err.code === 'auth/email-already-in-use' || errorMessage.includes('email-already-in-use')) {
-        setError('This number is already registered. Please log in.');
+        setError('This number is already registered. Please log in using your password.');
       } else {
         setError(errorMessage || 'Signup Failed');
       }
