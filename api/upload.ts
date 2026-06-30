@@ -2,8 +2,36 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
-import { s3Service } from '../src/services/s3Service';
 import { dbAdm, admin } from '../lib/firebase-admin.js';
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+// Inlined s3Service logic
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: (process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID)!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+async function uploadFileToS3(fileName: string, buffer: Buffer, contentType: string) {
+  const bucket = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || process.env.AWS_BUCKET_NAME || 'darshan-autoads-storage';
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: fileName,
+    Body: buffer,
+    ContentType: contentType,
+  });
+  await s3Client.send(command);
+  
+  const cloudFrontDomain = process.env.AWS_CLOUDFRONT_DOMAIN;
+  if (cloudFrontDomain) {
+    const cleanDomain = cloudFrontDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return `https://${cleanDomain}/${encodeURI(fileName)}`;
+  }
+  
+  return `https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+}
 
 export const config = {
   api: {
@@ -119,7 +147,7 @@ export default async function handler(req: any, res: any) {
             process.env.AWS_ACCESS_KEY ? process.env.AWS_ACCESS_KEY.slice(-4) : "UNSET",
             process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.slice(-4) : "UNSET"
           );
-          const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
+          const fileUrl = await uploadFileToS3(filename, fileBuffer, mimetype);
           console.log("S3_UPLOAD_SUCCESS");
           await trackAwsAction(true);
 
