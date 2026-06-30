@@ -61,14 +61,22 @@ export default async function handler(req: any, res: any) {
           return resolve();
         }
 
-        const fileField = files.file;
-        if (!fileField) {
-          console.warn('[UPLOAD_WARN] No file field found in request');
-          sendJson(400, { error: 'No file uploaded under key "file"' });
-          return resolve();
+        const keys = Object.keys(files);
+        let fileField = null;
+
+        if (keys.length > 0) {
+          // Try to find a known key or fallback to the first key found
+          const preferredKey = ['file', 'upload', 'document'].find(k => keys.includes(k)) || keys[0];
+          fileField = files[preferredKey];
         }
 
         const file = Array.isArray(fileField) ? fileField[0] : fileField;
+
+        if (!file || !file.filepath) {
+          console.warn('[UPLOAD_ERROR] No valid file found in request');
+          sendJson(400, { error: 'No file uploaded' });
+          return resolve();
+        }
 
         try {
           console.log("UPLOAD_START");
