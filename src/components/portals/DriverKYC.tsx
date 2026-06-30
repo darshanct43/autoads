@@ -21,9 +21,12 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
   const [upiId, setUpiId] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverData, setDriverData] = useState<any>(null);
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   useEffect(() => {
     if (!driverId) return;
+    
+    setHasInitialized(false);
     
     // Subscribe to driver profile to load existing data
     const unsub = onSnapshot(doc(db, 'drivers', driverId), (snap: any) => {
@@ -36,8 +39,15 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
           selfie: data.selfiePhoto || '',
           rc: data.rcPhoto || ''
         });
-        setUpiId(data.upiId || '');
-        setVehicleNumber(data.vehicleNumber || '');
+        
+        setHasInitialized(prev => {
+          if (!prev) {
+            setUpiId(data.upiId || '');
+            setVehicleNumber(data.vehicleNumber || '');
+            return true;
+          }
+          return prev;
+        });
       }
     });
     return unsub;

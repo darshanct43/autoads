@@ -139,14 +139,52 @@ export const storageService = {
 
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
+            const rawResponse = xhr.responseText ? xhr.responseText.trim() : '';
             try {
-              const data = JSON.parse(xhr.responseText);
-              if (onProgress) {
-                onProgress({ progress: 100, status: 'SUCCESS', url: data.url });
+              // 1. Try parsing as JSON first
+              if (rawResponse.startsWith('{') || rawResponse.startsWith('[')) {
+                const data = JSON.parse(rawResponse);
+                if (data && typeof data === 'object') {
+                  const urlValue = data.url || data.fileUrl || data.location;
+                  if (urlValue) {
+                    if (onProgress) {
+                      onProgress({ progress: 100, status: 'SUCCESS', url: urlValue });
+                    }
+                    resolve(urlValue);
+                    return;
+                  }
+                }
               }
-              resolve(data.url);
+              
+              // 2. Fallback: If it's a raw URL string (starts with http or /)
+              if (rawResponse.startsWith('http://') || rawResponse.startsWith('https://') || rawResponse.startsWith('/')) {
+                if (onProgress) {
+                  onProgress({ progress: 100, status: 'SUCCESS', url: rawResponse });
+                }
+                resolve(rawResponse);
+                return;
+              }
+
+              // 3. Fallback to rawResponse if anything else non-empty
+              if (rawResponse) {
+                if (onProgress) {
+                  onProgress({ progress: 100, status: 'SUCCESS', url: rawResponse });
+                }
+                resolve(rawResponse);
+                return;
+              }
+
+              reject(new Error("Empty response from upload API"));
             } catch (jsonErr) {
-              reject(new Error("Invalid JSON response from upload API"));
+              // If JSON parsing fails but the response is non-empty, try resolving raw text
+              if (rawResponse) {
+                if (onProgress) {
+                  onProgress({ progress: 100, status: 'SUCCESS', url: rawResponse });
+                }
+                resolve(rawResponse);
+              } else {
+                reject(new Error("Invalid JSON response from upload API"));
+              }
             }
           } else {
             reject(new Error(`Upload failed with status ${xhr.status}`));

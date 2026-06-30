@@ -29,7 +29,7 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [lang, setLang] = useState<string>('en');
+  const [lang, setLang] = useState<string>('EN');
   const [showLangPicker, setShowLangPicker] = useState(false);
   const t = (translations as any)[lang.toLowerCase()] || translations.en;
   const getStatusLabel = (val: string) => {
