@@ -82,7 +82,8 @@ export default function App() {
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          // Resolve role strictly from Firestore
+          // Force role resolution strictly from Firestore.
+          // Triggering sync for commit UI.
           let resolvedRole: UserRole | null = null;
           try {
             const profile = await firebaseService.getUserProfile(firebaseUser.uid);
