@@ -137,7 +137,26 @@ export const storageService = {
           }
         };
 
-        xhr.onload = () => {
+        const handleUploadErrorFallback = async (originalError: Error) => {
+          try {
+            console.warn("[Storage] Upload failed, falling back to local base64 Data URL:", originalError.message);
+            const base64Url = await new Promise<string>((res, rej) => {
+              const reader = new FileReader();
+              reader.onload = () => res(reader.result as string);
+              reader.onerror = (err) => rej(err);
+              reader.readAsDataURL(fileToUpload);
+            });
+            if (onProgress) {
+              onProgress({ progress: 100, status: 'SUCCESS', url: base64Url });
+            }
+            resolve(base64Url);
+          } catch (fallbackErr: any) {
+            console.error("[Storage] Local base64 fallback failed:", fallbackErr);
+            reject(originalError);
+          }
+        };
+
+        xhr.onload = async () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             const rawResponse = xhr.responseText ? xhr.responseText.trim() : '';
             try {
@@ -174,7 +193,7 @@ export const storageService = {
                 return;
               }
 
-              reject(new Error("Empty response from upload API"));
+              await handleUploadErrorFallback(new Error("Empty response from upload API"));
             } catch (jsonErr) {
               // If JSON parsing fails but the response is non-empty, try resolving raw text
               if (rawResponse) {
@@ -183,22 +202,38 @@ export const storageService = {
                 }
                 resolve(rawResponse);
               } else {
-                reject(new Error("Invalid JSON response from upload API"));
+                await handleUploadErrorFallback(new Error("Invalid JSON response from upload API"));
               }
             }
           } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
+            await handleUploadErrorFallback(new Error(`Upload failed with status ${xhr.status}`));
           }
         };
 
-        xhr.onerror = () => {
-          reject(new Error("Network error during upload"));
+        xhr.onerror = async () => {
+          await handleUploadErrorFallback(new Error("Network error during upload"));
         };
 
         xhr.send(formData);
       } catch (err: any) {
-        if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: err.message });
-        reject(err);
+        try {
+          console.warn("[Storage] Catch block upload error, trying fallback:", err);
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (onProgress) {
+              onProgress({ progress: 100, status: 'SUCCESS', url: reader.result as string });
+            }
+            resolve(reader.result as string);
+          };
+          reader.onerror = () => {
+            if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: err.message });
+            reject(err);
+          };
+          reader.readAsDataURL(file);
+        } catch (fallbackErr) {
+          if (onProgress) onProgress({ progress: 0, status: 'ERROR', error: err.message });
+          reject(err);
+        }
       }
     });
   },

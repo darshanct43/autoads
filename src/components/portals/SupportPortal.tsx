@@ -386,6 +386,25 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
     }
   }, [opFeedback]);
 
+  useEffect(() => {
+    if (!selectedDriverForAgreement?.id) return;
+    const unsub = firebaseService.subscribeToAgreement(selectedDriverForAgreement.id, (agreementData) => {
+      if (agreementData) {
+        setSelectedDriverForAgreement((prev: any) => {
+          if (!prev || prev.id !== selectedDriverForAgreement.id) return prev;
+          return {
+            ...prev,
+            _agreementData: {
+              ...prev._agreementData,
+              ...agreementData
+            }
+          };
+        });
+      }
+    });
+    return unsub;
+  }, [selectedDriverForAgreement?.id]);
+
   // Load User Profile
   useEffect(() => {
     const user = auth.currentUser;

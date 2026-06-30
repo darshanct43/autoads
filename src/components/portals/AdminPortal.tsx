@@ -191,6 +191,7 @@ export const getSafeUrl = (url: string | undefined | null) => {
   if (typeof url !== 'string') return undefined;
 
   let cleaned = url.trim();
+  if (cleaned.startsWith('data:')) return cleaned;
   console.log('RAW URL', cleaned);
   
   if (cleaned.startsWith('https://https://')) {
@@ -1213,6 +1214,25 @@ export default function AdminPortal({
   const totalSuccessfulRevenue = productionRevenueSum;
   const testRevenueSum = testPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const totalRevenueSum = productionRevenueSum + testRevenueSum;
+
+  useEffect(() => {
+    if (!selectedDriverForAgreement?.id) return;
+    const unsub = firebaseService.subscribeToAgreement(selectedDriverForAgreement.id, (agreementData) => {
+      if (agreementData) {
+        setSelectedDriverForAgreement((prev: any) => {
+          if (!prev || prev.id !== selectedDriverForAgreement.id) return prev;
+          return {
+            ...prev,
+            _agreementData: {
+              ...prev._agreementData,
+              ...agreementData
+            }
+          };
+        });
+      }
+    });
+    return unsub;
+  }, [selectedDriverForAgreement?.id]);
 
   useEffect(() => {
     // Analytics Logger

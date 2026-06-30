@@ -2412,11 +2412,16 @@ export const firebaseService = {
       const driverRef = doc(db, 'drivers', driverId);
 
       batch.set(subRef, { ...agreementData, updatedAt: serverTimestamp() }, { merge: true });
-      batch.update(driverRef, { 
+      
+      const updates: any = {
         agreementAccepted: true,
-        agreementStatus: 'SIGNED',
-        _agreementData: agreementData 
-      });
+        agreementStatus: 'SIGNED'
+      };
+      for (const [key, value] of Object.entries(agreementData)) {
+        updates[`_agreementData.${key}`] = value;
+      }
+      
+      batch.update(driverRef, updates);
 
       await batch.commit();
     } catch (e) {

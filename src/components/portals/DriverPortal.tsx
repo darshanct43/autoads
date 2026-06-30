@@ -278,12 +278,24 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
   );
 
   useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
+    let unsubscribeAgreement: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setLoading(false);
       
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+      if (unsubscribeAgreement) {
+        unsubscribeAgreement();
+        unsubscribeAgreement = null;
+      }
+
       if (u) {
         setUser(u);
-        const unsubscribeProfile = firebaseService.subscribeToDriverProfile(u.uid, (profile) => {
+        unsubscribeProfile = firebaseService.subscribeToDriverProfile(u.uid, (profile) => {
             if (profile) {
             setDriverProfile(profile);
             if (profile.bankDetails) setBankDetails(profile.bankDetails);
@@ -319,21 +331,19 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
              });
           }
         });
-        const unsubscribeAgreement = firebaseService.subscribeToAgreement(u.uid, (agr) => {
+        unsubscribeAgreement = firebaseService.subscribeToAgreement(u.uid, (agr) => {
             setAgreement(agr);
             if (agr && agr.agreementAccepted) {
                 setShowAgreement(false);
             }
         });
-
-        return () => {
-          unsubscribe();
-          unsubscribeProfile();
-          unsubscribeAgreement();
-        }
       }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubscribeProfile) unsubscribeProfile();
+      if (unsubscribeAgreement) unsubscribeAgreement();
+    };
   }, []);
 
   // Real Geolocation: Track live location with high accuracy

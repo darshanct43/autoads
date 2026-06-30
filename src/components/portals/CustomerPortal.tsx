@@ -29,6 +29,7 @@ const getSafeUrl = (url: string | undefined | null) => {
   if (typeof url !== 'string') return undefined;
 
   let cleaned = url.trim();
+  if (cleaned.startsWith('data:')) return cleaned;
   if (cleaned.startsWith('https://https://')) {
     cleaned = cleaned.replace('https://https://', 'https://');
   } else if (cleaned.startsWith('http://https://')) {
