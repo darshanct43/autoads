@@ -389,6 +389,18 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+                      {setSelectedDriverForEarning && setShowEarningModal && isAdmin && (
+                        <button
+                          onClick={() => {
+                            setSelectedDriverForEarning(driver);
+                            setShowEarningModal(true);
+                          }}
+                          className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
+                        >
+                          <Wallet size={12} />
+                          Wallet
+                        </button>
+                      )}
                       {setSelectedDriverForDocs && setShowDocModal && (
                         <button
                           onClick={() => {

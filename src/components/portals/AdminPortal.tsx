@@ -243,17 +243,15 @@ const clauses = [
 ];
 
 const generateMissingPDF = async (driverData: any) => {
-  return;
   const aadhaarUrl = driverData.aadharPhoto || driverData.documents?.aadhaar;
   const dlUrl = driverData.dlPhoto || driverData.documents?.drivingLicense;
   const selfieUrl = driverData._agreementData?.verificationSelfieUrl || driverData._agreementData?.selfieUrl || driverData.selfiePhoto;
+  
   if (!selfieUrl) {
-    console.error("Verification selfie required before agreement completion.");
-    return;
+    console.warn("Verification selfie missing for agreement.");
   }
   if (!driverData._agreementData?.signatureUrl) {
-    console.error("Digital signature required before agreement completion.");
-    return;
+    console.warn("Digital signature missing for agreement.");
   }
 
   const fetchImageAsBase64 = async (url: string): Promise<{dataUrl: string, width: number, height: number}> => {
@@ -1483,6 +1481,23 @@ export default function AdminPortal({
     }
   };
 
+  const handleInitiatePayout = async (driverId: string, amount: number, upiId: string) => {
+    try {
+      const driver = drivers.find((d: any) => d.id === driverId || d.uid === driverId);
+      await firebaseService.requestWithdrawal({
+        driverId,
+        amount,
+        upiId,
+        driverName: driver?.name || '',
+        driverPhone: driver?.phone || '',
+        driverVehicle: driver?.vehicleNumber || driver?.vNo || ''
+      } as any);
+      showToast("Payout request initiated successfully.", "success");
+    } catch (e: any) {
+      showToast("Failed to initiate payout: " + e.message, "error");
+    }
+  };
+
   const handleProvisionDriver = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedDriverForProvision) return;
@@ -2157,6 +2172,7 @@ export default function AdminPortal({
         return (
           <DriversTab
             isHQ={true}
+            isAdmin={true}
             setSelectedDriverForEarning={setSelectedDriverForEarning}
             setShowEarningModal={setShowEarningModal}
             setSelectedDriverForProvision={setSelectedDriverForProvision}
@@ -2201,6 +2217,7 @@ export default function AdminPortal({
                 showToast("Failed to reject request.", "error");
               }
             }}
+            onInitiatePayout={handleInitiatePayout}
           />
         );
       case "PAYMENTS":

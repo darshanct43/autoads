@@ -1582,23 +1582,31 @@ export const firebaseService = {
       
       const driverData = driverSnap.data();
       const terminalId = driverData?.terminalId || `TRM-${driverId.substring(0, 8).toUpperCase()}`;
-      const accessKey = driverData?.accessKey || "ENABLED";
+      // Generate a clean 6-digit access key if none exists
+      const accessKey = driverData?.accessKey || Math.floor(100000 + Math.random() * 900000).toString();
       
       const terminalRef = doc(db, 'terminals', terminalId);
       const terminalSnap = await getDoc(terminalRef);
       
-      if (!terminalSnap.exists()) {
-        console.log(`[firebaseService] Terminal ${terminalId} does not exist for driver ${driverId}, auto-provisioning...`);
-        const batch = writeBatch(db);
-        
+      const batch = writeBatch(db);
+      let needsCommit = false;
+
+      // 1. Ensure driver profile holds terminal association fields
+      if (!driverData?.terminalId || !driverData?.accessKey || driverData?.provisionStatus !== 'ACTIVE') {
         batch.update(driverRef, {
           terminalId,
           accessKey,
           provisionStatus: 'ACTIVE',
           status: 'active',
-          isVerified: true
+          isVerified: true,
+          updatedAt: serverTimestamp()
         });
-        
+        needsCommit = true;
+      }
+
+      // 2. Ensure terminal record exists and is synced with driverId and accessKey
+      if (!terminalSnap.exists()) {
+        console.log(`[firebaseService] Terminal ${terminalId} does not exist, creating paired record...`);
         batch.set(terminalRef, {
           id: terminalId,
           driverId,
@@ -1607,13 +1615,23 @@ export const firebaseService = {
           createdAt: serverTimestamp(),
           lastSync: serverTimestamp()
         });
-        
-        await batch.commit();
+        needsCommit = true;
       } else {
         const terminalData = terminalSnap.data();
-        if (terminalData.status !== 'ACTIVE') {
-          await updateDoc(terminalRef, { status: 'ACTIVE' });
+        if (terminalData?.status !== 'ACTIVE' || terminalData?.driverId !== driverId || terminalData?.accessKey !== accessKey) {
+          console.log(`[firebaseService] Terminal ${terminalId} exists but out of sync. Syncing status and driver pairing...`);
+          batch.update(terminalRef, {
+            status: 'ACTIVE',
+            driverId,
+            accessKey,
+            lastSync: serverTimestamp()
+          });
+          needsCommit = true;
         }
+      }
+
+      if (needsCommit) {
+        await batch.commit();
       }
       
       return { terminalId, accessKey };
@@ -2793,16 +2811,25 @@ export const firebaseService = {
   // Driver Payment System
   async createDriverPayment(payment: Omit<DriverPayment, 'id' | 'createdAt' | 'updatedAt'> & { stateId?: string, territoryId?: string, cityId?: string, franchiseId?: string | null }) {
     try {
-      const docRef = await addDoc(collection(db, DRIVER_PAYMENTS_COLLECTION), {
+      const rawData: any = {
         ...payment,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        // Territory Architecture Fields
-        stateId: payment.stateId,
-        territoryId: payment.territoryId,
-        cityId: payment.cityId,
-        franchiseId: payment.franchiseId
+        stateId: payment.stateId ?? null,
+        territoryId: payment.territoryId ?? null,
+        cityId: payment.cityId ?? null,
+        franchiseId: payment.franchiseId ?? null
+      };
+
+      // Sanitize undefined fields to prevent Firestore serialization errors
+      const cleanData: any = {};
+      Object.keys(rawData).forEach(key => {
+        if (rawData[key] !== undefined) {
+          cleanData[key] = rawData[key];
+        }
       });
+
+      const docRef = await addDoc(collection(db, DRIVER_PAYMENTS_COLLECTION), cleanData);
       await updateDoc(doc(db, DRIVER_PAYMENTS_COLLECTION, docRef.id), {
         paymentId: docRef.id
       });

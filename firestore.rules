@@ -260,7 +260,12 @@ service cloud.firestore {
     
     match /terminals/{terminalId} {
       allow read: if true;
-      allow write: if isHQ() || isFranchiseStaffFor(resource.data.franchiseId);
+      allow write: if isHQ() || 
+                    isFranchiseStaffFor(resource.data.franchiseId) || 
+                    (isSignedIn() && (
+                      (resource == null && request.resource.data.driverId == request.auth.uid) ||
+                      (resource != null && (resource.data.driverId == request.auth.uid || request.resource.data.driverId == request.auth.uid))
+                    ));
     }
 
     match /liveStatus/{terminalId} {

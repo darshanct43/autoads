@@ -287,6 +287,12 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
             if (profile) {
             setDriverProfile(profile);
             if (profile.bankDetails) setBankDetails(profile.bankDetails);
+            if (!profile.terminalId) {
+              console.log("[DriverPortal] No terminal assigned, auto-ensuring terminal for", u.uid);
+              firebaseService.autoEnsureTerminalForDriver(u.uid).catch((err) => {
+                console.error("[DriverPortal] Failed to auto-provision terminal:", err);
+              });
+            }
           } else {
              // If no profile, we still need to fetch once to create it
              firebaseService.getDriverProfile(u.uid).then(async (p) => {

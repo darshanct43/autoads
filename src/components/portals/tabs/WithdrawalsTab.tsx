@@ -19,6 +19,7 @@ interface WithdrawalsTabProps {
   drivers: any[];
   onApprove: (req: any) => void | Promise<void>;
   onReject: (req: any) => void | Promise<void>;
+  onInitiatePayout?: (driverId: string, amount: number, upiId: string) => void | Promise<void>;
 }
 
 export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
@@ -27,8 +28,58 @@ export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
   drivers,
   onApprove,
   onReject,
+  onInitiatePayout,
 }) => {
   const [processingId, setProcessingId] = useState<string | null>(null);
+  
+  // Manual payout modal states
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [upiId, setUpiId] = useState("");
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
+
+  const handleSubmitPayout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError(null);
+    if (!selectedDriverId) {
+      setModalError("Please select a driver");
+      return;
+    }
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      setModalError("Please enter a valid amount greater than 0");
+      return;
+    }
+    
+    // Check if driver has sufficient balance
+    const selectedDriver = drivers.find(d => d.id === selectedDriverId || d.uid === selectedDriverId);
+    if (selectedDriver && (selectedDriver.walletBalance || 0) < numericAmount) {
+      setModalError(`Sufficient wallet balance not available. Driver balance: ₹${selectedDriver.walletBalance || 0}`);
+      return;
+    }
+
+    if (!upiId || !upiId.includes("@")) {
+      setModalError("Please enter a valid UPI ID (e.g. name@upi)");
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    try {
+      if (onInitiatePayout) {
+        await onInitiatePayout(selectedDriverId, numericAmount, upiId);
+      }
+      setShowPayoutModal(false);
+      setSelectedDriverId("");
+      setAmount("");
+      setUpiId("");
+    } catch (err: any) {
+      setModalError(err.message || "Failed to initiate payout");
+    } finally {
+      setIsSubmittingModal(false);
+    }
+  };
 
   // Helper to format date
   const formatTimestamp = (ts: any) => {
@@ -152,9 +203,24 @@ export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
 
       {/* Active Requests Queue */}
       <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
-        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-6">
-          Pending Settlement Queue ({pendingCount})
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+            Pending Settlement Queue ({pendingCount})
+          </h3>
+          <button
+            onClick={() => {
+              setModalError(null);
+              setSelectedDriverId("");
+              setAmount("");
+              setUpiId("");
+              setShowPayoutModal(true);
+            }}
+            className="px-4 py-2 bg-slate-900 text-amber-400 rounded-xl font-black uppercase text-[10px] tracking-wider hover:bg-slate-800 transition-all flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+          >
+            <Wallet size={12} />
+            Create Manual Payout
+          </button>
+        </div>
 
         {pendingCount === 0 ? (
           <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
@@ -247,6 +313,124 @@ export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Manual Payout Modal */}
+      {showPayoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-[2rem] border border-slate-100 p-6 md:p-8 w-full max-w-lg shadow-2xl relative font-sans"
+          >
+            <button
+              onClick={() => setShowPayoutModal(false)}
+              className="absolute right-6 top-6 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-50 transition-colors"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl">
+                <Wallet size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black italic uppercase text-slate-900 leading-none">
+                  Manual Driver Payout
+                </h3>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mt-1">
+                  Initiate Settlement On Behalf of Driver
+                </p>
+              </div>
+            </div>
+
+            {modalError && (
+              <div className="p-4 mb-4 bg-red-50 border border-red-100 text-red-600 rounded-2xl flex items-start gap-2 text-xs font-semibold leading-relaxed">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitPayout} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                  Select Partner Driver
+                </label>
+                <select
+                  value={selectedDriverId}
+                  onChange={(e) => {
+                    const drvId = e.target.value;
+                    setSelectedDriverId(drvId);
+                    const drv = drivers.find(d => d.id === drvId || d.uid === drvId);
+                    if (drv) {
+                      setUpiId(drv.upiId || "");
+                      setAmount(drv.walletBalance ? drv.walletBalance.toString() : "");
+                    } else {
+                      setUpiId("");
+                      setAmount("");
+                    }
+                  }}
+                  required
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:border-amber-500 font-medium text-sm text-slate-800"
+                >
+                  <option value="">-- Choose Driver --</option>
+                  {drivers.map(d => (
+                    <option key={d.id || d.uid} value={d.id || d.uid}>
+                      {d.name?.toUpperCase()} ({d.vNo || d.vehicleNumber || "No Vehicle"}) - Bal: ₹{d.walletBalance || 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                  Payout Amount (INR)
+                </label>
+                <input
+                  type="number"
+                  placeholder="₹ Amount to pay out"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                  min="1"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:border-amber-500 font-mono text-sm text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                  Driver UPI ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="driver@upi"
+                  value={upiId}
+                  onChange={(e) => setUpiId(e.target.value)}
+                  required
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:border-amber-500 font-mono text-sm text-slate-800"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPayoutModal(false)}
+                  disabled={isSubmittingModal}
+                  className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-[10px] tracking-wider hover:bg-slate-200 transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingModal}
+                  className="px-5 py-3 bg-amber-500 text-slate-950 rounded-2xl font-black uppercase text-[10px] tracking-wider hover:bg-amber-400 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSubmittingModal ? "Initiating..." : "Initiate Payout"}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
