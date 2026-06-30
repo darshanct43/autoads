@@ -65,6 +65,7 @@ export default async function handler(req: any, res: any) {
   
   // Ensure we always have a JSON content type if we send JSON
   const sendJson = (status: number, body: any) => {
+    console.log("SEND_JSON_CALLED", { status, body, headersSent: res.headersSent, hasStatus: !!res.status, hasJson: !!res.json });
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'application/json');
       res.status(status).json(body);
