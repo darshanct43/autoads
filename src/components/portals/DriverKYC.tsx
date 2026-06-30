@@ -33,12 +33,12 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
       if (snap.exists()) {
         const data = snap.data();
         setDriverData(data);
-        setDocuments({
-          aadhaar: data.aadharPhoto || '',
-          drivingLicense: data.dlPhoto || '',
-          selfie: data.selfiePhoto || '',
-          rc: data.rcPhoto || ''
-        });
+        setDocuments(prev => ({
+          aadhaar: prev.aadhaar || data.aadharPhoto || data.documents?.aadhaar || '',
+          drivingLicense: prev.drivingLicense || data.dlPhoto || data.documents?.drivingLicense || '',
+          selfie: prev.selfie || data.selfiePhoto || data.documents?.selfie || '',
+          rc: prev.rc || data.rcPhoto || data.documents?.rc || ''
+        }));
         
         setHasInitialized(prev => {
           if (!prev) {
@@ -110,6 +110,10 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
       setLoading(false);
     }
   };
+
+  console.log("DRIVER_DOC_FROM_FIRESTORE", driverData);
+  console.log("DOCUMENTS_STATE", documents);
+  console.log("AADHAAR_VALUE", documents.aadhaar);
 
   return (
     <div className="p-5 bg-white rounded-[2rem] shadow-xl border border-slate-100 max-w-2xl mx-auto space-y-5">
