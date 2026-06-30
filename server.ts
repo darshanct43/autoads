@@ -13,6 +13,7 @@ import razorpayHealthHandler from './api/razorpay-health.js';
 import createStaffHandler from './api/create-staff.js';
 import razorpayWebhookHandler from './api/razorpay-webhook.js';
 import envSecurityHandler from './api/env-security.js';
+import mediaHandler from './api/media.js';
 
 import { getCredential, printAudit } from './lib/env.js';
 printAudit();
@@ -63,6 +64,7 @@ async function startServer() {
   app.post('/api/create-staff', createStaffHandler as any);
   app.post('/api/razorpay-webhook', razorpayWebhookHandler as any);
   app.post('/api/env-security', envSecurityHandler as any);
+  app.get('/api/media', mediaHandler as any);
 
   app.get('/api/env-check', (req, res) => {
     res.json({
