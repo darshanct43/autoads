@@ -104,6 +104,10 @@ export default async function handler(req: any, res: any) {
 
           // Upload to S3 using s3Service
           console.log("S3_UPLOAD_START");
+          console.log("AWS_KEY_LAST4_LOGS:", 
+            process.env.AWS_ACCESS_KEY ? process.env.AWS_ACCESS_KEY.slice(-4) : "UNSET",
+            process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.slice(-4) : "UNSET"
+          );
           const fileUrl = await s3Service.uploadFile(filename, fileBuffer, mimetype);
           console.log("S3_UPLOAD_SUCCESS");
           await trackAwsAction(true);
