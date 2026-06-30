@@ -2238,8 +2238,11 @@ export const firebaseService = {
       // Use standard getDoc instead of getDocFromServer to allow cache usage
       const snap = await getDoc(userRef);
       if (snap.exists()) {
-        return { id: snap.id, ...snap.data() } as any;
+        const profile = { id: snap.id, ...snap.data() } as any;
+        console.log("PROFILE_RETURNED", JSON.stringify(profile));
+        return profile;
       }
+      console.log("PROFILE_RETURNED", null);
       return null;
     } catch (e: any) {
       console.warn("[FirebaseService] getUserProfile failed (Resilient fallback):", e.message);
