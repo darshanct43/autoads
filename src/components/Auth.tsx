@@ -170,9 +170,9 @@ export default function Auth({ onLogin }: AuthProps) {
           const profile = await firebaseService.getUserProfile(user.uid);
           const driverProfile = await firebaseService.getDriverProfile(user.uid);
           
-          let userRole: UserRole = 'CUSTOMER';
+          let userRole: UserRole = 'NO_ROLE';
           
-          if (profile) {
+          if (profile && profile.role) {
             const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
             if (isAdminEmail) {
               if (profile.role !== 'ADMIN') {
@@ -187,6 +187,9 @@ export default function Auth({ onLogin }: AuthProps) {
             }
             userRole = profile.role as UserRole;
             console.log("[FORENSIC] Profile exists on check. Using profile.role only:", userRole);
+          } else if (driverProfile) {
+            userRole = 'DRIVER';
+            console.log("[FORENSIC] Profile missing but driverProfile exists. Setting role to DRIVER");
           } else {
             // Profile missing: self-heal if modern privileged email is loaded
             if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com') {
@@ -209,8 +212,8 @@ export default function Auth({ onLogin }: AuthProps) {
               userRole = 'SUPPORT_TEAM';
             } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
               userRole = 'FRANCHISE_OWNER';
-            } else if (driverProfile) {
-              userRole = 'DRIVER';
+            } else {
+              userRole = 'NO_ROLE';
             }
           }
 
@@ -386,9 +389,9 @@ export default function Auth({ onLogin }: AuthProps) {
       const profile = await firebaseService.getUserProfile(user.uid);
       const driverProfile = await firebaseService.getDriverProfile(user.uid);
       
-      let userRole: UserRole = 'CUSTOMER';
+      let userRole: UserRole = 'NO_ROLE';
 
-      if (profile) {
+      if (profile && profile.role) {
         const isAdminEmail = emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com';
         if (isAdminEmail) {
           if (profile.role !== 'ADMIN') {
@@ -403,6 +406,9 @@ export default function Auth({ onLogin }: AuthProps) {
         }
         userRole = profile.role as UserRole;
         console.log("[FORENSIC] saved profile exists on handleLoginSubmit. Using profile.role only:", userRole);
+      } else if (driverProfile) {
+        userRole = 'DRIVER';
+        console.log("[FORENSIC] saved profile missing but driverProfile exists on handleLoginSubmit. Setting role to DRIVER");
       } else {
         // Profile missing: self-heal if modern privileged email is loaded
         if (emailLower === 'admin@autoads.in' || emailLower === 'darshanct43@gmail.com' || emailLower === 'dashanct43@gmail.com') {
@@ -425,8 +431,8 @@ export default function Auth({ onLogin }: AuthProps) {
           userRole = 'SUPPORT_TEAM';
         } else if (emailLower === 'franchise@autoads.in' || emailLower.includes('franchise')) {
           userRole = 'FRANCHISE_OWNER';
-        } else if (driverProfile) {
-          userRole = 'DRIVER';
+        } else {
+          userRole = 'NO_ROLE';
         }
       }
 

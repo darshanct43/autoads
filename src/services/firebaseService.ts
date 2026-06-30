@@ -2150,21 +2150,42 @@ export const firebaseService = {
     
     const userRef = doc(db, USERS_COLLECTION, userId);
     try {
-      // Use setDoc with merge for reliability
-      const res = await setDoc(userRef, {
+      const isOwner = auth.currentUser?.uid === userId;
+      const emailLower = auth.currentUser?.email?.toLowerCase() || '';
+      
+      const isStaticPrivileged = 
+        emailLower === 'admin@autoads.in' || 
+        emailLower === 'darshanct43@gmail.com' || 
+        emailLower === 'dashanct43@gmail.com' || 
+        emailLower === 'vijayathrishu@gmail.com';
+
+      const dataToSave: any = {
         uid: userId,
         name,
         phone,
         role,
-        subscriptionTier,
-        isApproved: role === 'CUSTOMER' ? true : false,
         updatedAt: serverTimestamp(),
-        // Territory Architecture Fields
         stateId: territoryData?.stateId || 'KA',
         territoryId: territoryData?.territoryId || 'T-UNASSIGNED',
-        cityId: territoryData?.cityId || 'UNASSIGNED',
-        franchiseId: territoryData?.franchiseId || null
-      }, { merge: true });
+      };
+
+      if (isOwner && !isStaticPrivileged) {
+        // Strict adherence to self-registration owner rules:
+        // Do NOT include subscriptionTier, franchiseId, cityId, studioPlan, permissions
+        // isApproved can be false or absent. If driver, set false. If customer, omit or set false.
+        if (role === 'DRIVER') {
+          dataToSave.isApproved = false;
+        }
+      } else {
+        // Admin or staff write: include everything
+        dataToSave.subscriptionTier = subscriptionTier;
+        dataToSave.isApproved = role === 'CUSTOMER' ? true : false;
+        dataToSave.cityId = territoryData?.cityId || 'UNASSIGNED';
+        dataToSave.franchiseId = territoryData?.franchiseId || null;
+      }
+
+      // Use setDoc with merge for reliability
+      const res = await setDoc(userRef, dataToSave, { merge: true });
       console.log("[FirebaseService] Save success");
       return res;
     } catch (e) {
@@ -2233,15 +2254,19 @@ export const firebaseService = {
 
   async getUserProfile(userId: string) {
     if (!userId) return null;
+    console.log("[FORENSIC] getUserProfile querying collection:", USERS_COLLECTION, "for UID:", userId);
     const userRef = doc(db, USERS_COLLECTION, userId);
     try {
       // Use standard getDoc instead of getDocFromServer to allow cache usage
       const snap = await getDoc(userRef);
       if (snap.exists()) {
-        const profile = { id: snap.id, ...snap.data() } as any;
+        const data = snap.data();
+        console.log("[FORENSIC] Document users/" + userId + " exists. Checking role field:", data?.role || "NOT_FOUND");
+        const profile = { id: snap.id, ...data } as any;
         console.log("PROFILE_RETURNED", JSON.stringify(profile));
         return profile;
       }
+      
       console.log("PROFILE_RETURNED", null);
       return null;
     } catch (e: any) {

@@ -141,6 +141,16 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, RolePermissions> = {
     canManageFranchises: false,
     canAccessSystemsAudit: true,
     canDischargeFinances: false
+  },
+  NO_ROLE: {
+    canApproveDrivers: false,
+    canApproveCampaigns: false,
+    canApproveDevices: false,
+    canManageSupportTeams: false,
+    canViewGlobalAnalytics: false,
+    canManageFranchises: false,
+    canAccessSystemsAudit: false,
+    canDischargeFinances: false
   }
 };
 

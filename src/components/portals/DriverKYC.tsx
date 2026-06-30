@@ -130,7 +130,7 @@ export default function DriverKYC({ driverId, onSuccess, onCancel }: DriverKYCPr
                </div>
                {documents[doc] && (
                  <div className="mt-2">
-                   {console.log(`[DEBUG] Rendering image for ${doc}:`, documents[doc])}
+                   
                    <img src={documents[doc]} alt={doc} className="w-full h-32 object-cover rounded-lg border border-slate-200" />
                  </div>
                )}
