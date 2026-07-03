@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { 
   Search, RefreshCw, MapPin, ShieldCheck, Monitor, 
   IndianRupee, Activity, Link as LinkIcon, Sliders, Layers, Wifi,
@@ -172,7 +173,11 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
               />
             </span>
             <button 
-              onClick={() => showToast("Real-time telemetry updated", "success")} 
+              onClick={async () => {
+                showToast("Attempting to reconnect...", "info");
+                await firebaseService.reconnect();
+                showToast("Real-time telemetry refreshed", "success");
+              }} 
               className="p-4 bg-[#0B1220] text-[#FF8A00] rounded-2xl shadow-md hover:scale-105 active:scale-95 transition-all flex-shrink-0"
             >
               <RefreshCw size={18} />
@@ -194,7 +199,7 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                 <th className="p-4">Last Sync</th>
                 <th className="p-4 text-center">Campaign Count</th>
                 <th className="p-4">Today's Plays</th>
-                <th className="p-4">Revenue</th>
+                <th className="p-4">Estimated Revenue</th>
                 <th className="p-4 text-right rounded-tr-3xl">Actions</th>
               </tr>
             </thead>
@@ -445,8 +450,8 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
       </div>
 
       {/* Dynamic Campaigns Assignment Modal */}
-      {showCampaignModal && selectedTerminal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      {showCampaignModal && selectedTerminal && createPortal(
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
           <div className="bg-[#0B1220] rounded-[2rem] border border-slate-800 shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col text-white">
             
             {/* Header section with terminal device metadata */}
@@ -527,116 +532,113 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                       <thead>
                         <tr className="bg-slate-950/60 uppercase text-[9px] font-black tracking-widest border-b border-slate-800 text-slate-400">
                           <th className="p-4">Campaign Name</th>
-                          <th className="p-4">Campaign ID</th>
-                          <th className="p-4">Customer Name</th>
-                          <th className="p-4">Media Type</th>
                           <th className="p-4">Status</th>
                           <th className="p-4">Start Date</th>
                           <th className="p-4">End Date</th>
+                          <th className="p-4">Budget</th>
                           <th className="p-4">Impressions</th>
-                          <th className="p-4">Priority</th>
-                          <th className="p-4">Assigned By</th>
+                          <th className="p-4">Today's Plays</th>
+                          <th className="p-4">Estimated Revenue</th>
                           <th className="p-4 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {terminalCampaigns.map((c) => {
-                          const isSelectedForPreview = previewCampaign?.id === c.id;
-                          return (
-                            <tr key={c.id} className={cn(
-                              "border-b border-slate-800/60 hover:bg-white/5 transition-all",
-                              isSelectedForPreview && "bg-white/5 border-l-2 border-l-[#FF8A00]"
-                            )}>
-                              <td className="p-4 font-black uppercase text-white">{c.title || c.name || "N/A"}</td>
-                              <td className="p-4 font-mono font-bold text-[#FF8A00]">{c.uid || c.id || "N/A"}</td>
-                              <td className="p-4 font-black uppercase text-slate-300">{c.clientName || c.customerId || "N/A"}</td>
-                              <td className="p-4">
-                                <span className={cn(
-                                  "px-2.5 py-1 rounded-md text-[9px] font-black uppercase",
-                                  c.mediaType === "IMAGE" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" : "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                                )}>
-                                  {c.mediaType || "N/A"}
-                                </span>
-                              </td>
-                              <td className="p-4">
-                                <span className={cn(
-                                  "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase",
-                                  c.status === "ACTIVE" || c.status === "LIVE" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                )}>
-                                  {c.status || "N/A"}
-                                </span>
-                              </td>
-                              <td className="p-4 font-mono text-[10px] text-slate-300">
-                                {c.startDate || "N/A"}
-                              </td>
-                              <td className="p-4 font-mono text-[10px] text-slate-300">
-                                {c.endDate || "N/A"}
-                              </td>
-                              <td className="p-4 font-mono font-bold text-slate-300">
-                                {(c.impressions || c.impressionsCount || 0).toLocaleString()}
-                              </td>
-                              <td className="p-4">
-                                <span className={cn(
-                                  "px-2 py-0.5 rounded text-[9px] font-black uppercase",
-                                  c.priority === "HIGH" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" : 
-                                  c.priority === "MEDIUM" || c.priority === "NORMAL" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : 
-                                  "bg-slate-500/10 text-slate-400 border border-slate-500/20"
-                                )}>
-                                  {c.priority || c.planId || "NORMAL"}
-                                </span>
-                              </td>
-                              <td className="p-4 font-black uppercase text-slate-300">
-                                {c.approvedBy || c.assignedBy || "SYSTEM"}
-                              </td>
-                              <td className="p-4 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  
-                                  {/* Preview */}
-                                  <button
-                                    onClick={() => setPreviewCampaign(isSelectedForPreview ? null : c)}
-                                    className={cn(
-                                      "p-2 rounded-lg transition-all border text-slate-300 cursor-pointer",
-                                      isSelectedForPreview 
-                                        ? "bg-[#FF8A00] text-[#0B1220] border-[#FF8A00]" 
-                                        : "bg-white/5 border-slate-800 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40"
-                                    )}
-                                    title="Preview Campaign Media"
-                                  >
-                                    <Eye size={12} />
-                                  </button>
+                        {(() => {
+                          const assignedCount = terminalCampaigns.length;
+                          const stats = getDeviceStats(selectedTerminal.terminalId || selectedTerminal.uid, assignedCount);
+                          
+                          return terminalCampaigns.map((c, index) => {
+                            const isSelectedForPreview = previewCampaign?.id === c.id;
+                            const campaignTodayPlays = assignedCount === 0 ? 0 : Math.round(stats.todayPlays / assignedCount);
+                            const campaignRevenue = assignedCount === 0 ? 0 : Math.round(stats.totalRevenue / assignedCount);
+                            
+                            return (
+                              <tr key={c.id} className={cn(
+                                "border-b border-slate-800/60 hover:bg-white/5 transition-all",
+                                isSelectedForPreview && "bg-white/5 border-l-2 border-l-[#FF8A00]"
+                              )}>
+                                <td className="p-4 font-black uppercase text-white">
+                                  <div className="flex flex-col">
+                                    <span className="text-white text-[11px] font-black">{c.title || c.name || "N/A"}</span>
+                                    <span className="text-slate-500 font-mono text-[9px] uppercase tracking-wider">{c.uid || c.id || "N/A"}</span>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <span className={cn(
+                                    "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase",
+                                    c.status === "ACTIVE" || c.status === "LIVE" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                  )}>
+                                    {c.status || "N/A"}
+                                  </span>
+                                </td>
+                                <td className="p-4 font-mono text-[10px] text-slate-300">
+                                  {c.startDate || "N/A"}
+                                </td>
+                                <td className="p-4 font-mono text-[10px] text-slate-300">
+                                  {c.endDate || "N/A"}
+                                </td>
+                                <td className="p-4 font-black text-slate-300">
+                                  ₹{(c.budget || 0).toLocaleString()}
+                                </td>
+                                <td className="p-4 font-mono font-bold text-slate-300">
+                                  {(c.impressions || c.impressionsCount || 0).toLocaleString()}
+                                </td>
+                                <td className="p-4 font-mono font-black text-[#FF8A00]">
+                                  {(campaignTodayPlays).toLocaleString()}
+                                </td>
+                                <td className="p-4 font-mono font-black text-white">
+                                  ₹{(campaignRevenue).toLocaleString()}
+                                </td>
+                                <td className="p-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    
+                                    {/* Preview */}
+                                    <button
+                                      onClick={() => setPreviewCampaign(isSelectedForPreview ? null : c)}
+                                      className={cn(
+                                        "p-2 rounded-lg transition-all border text-slate-300 cursor-pointer",
+                                        isSelectedForPreview 
+                                          ? "bg-[#FF8A00] text-[#0B1220] border-[#FF8A00]" 
+                                          : "bg-white/5 border-slate-800 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40"
+                                      )}
+                                      title="Preview Campaign Media"
+                                    >
+                                      <Eye size={12} />
+                                    </button>
 
-                                  {/* Open Link */}
-                                  <button
-                                    onClick={() => {
-                                      const url = c.mediaUrl || c.assetUrl;
-                                      if (url) {
-                                        window.open(getSafeUrl(url), "_blank");
-                                      } else {
-                                        showToast("No Media URL found for this campaign", "error");
-                                      }
-                                    }}
-                                    className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
-                                    title="Open Media URL"
-                                  >
-                                    <ExternalLink size={12} />
-                                  </button>
+                                    {/* Open Link */}
+                                    <button
+                                      onClick={() => {
+                                        const url = c.mediaUrl || c.assetUrl;
+                                        if (url) {
+                                          window.open(getSafeUrl(url), "_blank");
+                                        } else {
+                                          showToast("No Media URL found for this campaign", "error");
+                                        }
+                                      }}
+                                      className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
+                                      title="Open Media URL"
+                                    >
+                                      <ExternalLink size={12} />
+                                    </button>
 
-                                  {/* View Customer Details */}
-                                  <button
-                                    onClick={() => {
-                                      showToast(`Customer: ${c.clientName || 'N/A'} (ID: ${c.customerId || 'N/A'})`, "info");
-                                    }}
-                                    className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
-                                    title="View Customer Details"
-                                  >
-                                    <User size={12} />
-                                  </button>
+                                    {/* View Customer Details */}
+                                    <button
+                                      onClick={() => {
+                                        showToast(`Customer: ${c.clientName || 'N/A'} (ID: ${c.customerId || 'N/A'})`, "info");
+                                      }}
+                                      className="p-2 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-[#FF8A00]/10 hover:text-[#FF8A00] hover:border-[#FF8A00]/40 transition-all cursor-pointer"
+                                      title="View Customer Details"
+                                    >
+                                      <User size={12} />
+                                    </button>
 
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -672,7 +674,7 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
                               <img 
                                 src={getSafeUrl(previewCampaign.mediaUrl || previewCampaign.assetUrl)} 
                                 alt="Campaign Media Preview" 
-                                className="w-full h-full object-contain"
+                                className="w-full h-full object-contain brightness-110 contrast-110"
                                 referrerPolicy="no-referrer"
                               />
                             )
@@ -730,7 +732,8 @@ export const TerminalHubTab: React.FC<TerminalHubTabProps> = ({
             </div>
 
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

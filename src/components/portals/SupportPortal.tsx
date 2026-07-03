@@ -18,6 +18,7 @@ import {
 
 // Modular Components
 import SupportSidebar from '../support/SupportSidebar';
+import SupportThoughtManager from '../support/SupportThoughtManager';
 import SupportHeader from '../support/SupportHeader';
 import SupportOverview from '../support/SupportOverview';
 import SupportTickets from '../support/SupportTickets';
@@ -1640,6 +1641,12 @@ export default function SupportPortal({ onLogout }: SupportPortalProps) {
                       handleDeleteNotice={handleDeleteNotice}
                     />
                   </div>
+                </ErrorBoundary>
+              )}
+              {/* Thought of the Day tab */}
+              {activeTab === 'THOUGHT_OF_THE_DAY' && isManager && (
+                <ErrorBoundary componentName="Thought Manager">
+                  <SupportThoughtManager showToast={showToast} />
                 </ErrorBoundary>
               )}
 

@@ -124,7 +124,7 @@ export const PaymentsTab: React.FC<PaymentsTabProps> = ({
   const getDriverName = (driverId?: string) => {
     if (!driverId) return "Unknown Driver";
     const d = drivers.find((drv) => drv.id === driverId || drv.uid === driverId);
-    return d ? d.name : `Driver (${driverId.substring(0, 6)})`;
+    return d ? (d.fullName || d.name || `Driver (${driverId.substring(0, 6)})`) : `Driver (${driverId.substring(0, 6)})`;
   };
 
   // Helper to fetch Campaign Banner/Name

@@ -1988,7 +1988,7 @@ export default function AdminPortal({
           merged.push({
             id: u.id,
             uid: u.id,
-            name: u.name || 'Unknown Driver',
+            name: u.fullName || u.name || 'Unknown Driver',
             phone: u.phone || u.id,
             email: u.email || `${u.id}@autoads.in`,
             status: 'pending_verification',

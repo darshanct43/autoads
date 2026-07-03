@@ -72,6 +72,46 @@ const isVideoMedia = (ad: any) => {
 };
 
 export default function DevicePortal({ onLogout }: DevicePortalProps) {
+  const wakeLockSentinelRef = useRef<any>(null);
+  // Auto-trigger full screen & WakeLock on first interaction
+  useEffect(() => {
+    const handleInteraction = async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await document.documentElement.requestFullscreen().catch((err) => console.error("Error attempting full-screen:", err));
+        }
+        if ('wakeLock' in navigator) {
+            try {
+                wakeLockSentinelRef.current = await (navigator.wakeLock as any).request('screen');
+                console.log("[DevicePortal] Wake Lock activated.");
+            } catch (lockErr: any) {
+                if (lockErr.name === 'NotAllowedError') {
+                    console.warn("[DevicePortal] Wake Lock not allowed by permissions policy.");
+                } else {
+                    console.error("[DevicePortal] Wake Lock request error:", lockErr);
+                }
+            }
+        }
+        console.log("FULLSCREEN", !!document.fullscreenElement);
+        console.log("WAKELOCK", !!wakeLockSentinelRef.current);
+        console.log("ORIENTATION", screen.orientation?.type);
+      } catch (err) {
+        console.error("Error attempting full-screen:", err);
+      }
+      window.removeEventListener('click', handleInteraction);
+      window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('keydown', handleInteraction);
+    };
+    window.addEventListener('click', handleInteraction);
+    window.addEventListener('touchstart', handleInteraction);
+    window.addEventListener('keydown', handleInteraction);
+    return () => {
+      window.removeEventListener('click', handleInteraction);
+      window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('keydown', handleInteraction);
+    };
+  }, []);
+
   const [isLogged, setIsLogged] = useState(false);
   const [terminalId, setTerminalId] = useState('');
   const [accessKey, setAccessKey] = useState('');
@@ -80,6 +120,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [driver, setDriver] = useState<Driver | null>(null);
   const [activeTerminal, setActiveTerminal] = useState<any>(null);
   const [playlist, setPlaylist] = useState<any[]>([]);
+  const [thoughts, setThoughts] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(() => {
     const saved = localStorage.getItem('terminal_ad_current_index');
     return saved ? parseInt(saved, 10) : 0;
@@ -719,7 +760,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     if (!document.fullscreenElement) {
       const elem = document.documentElement;
       if (elem.requestFullscreen) {
-        elem.requestFullscreen();
+        elem.requestFullscreen().catch((err) => console.error("Error attempting full-screen:", err));
       }
     } else {
       if (document.exitFullscreen) {
@@ -769,33 +810,119 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     handleActivationManual(terminalId, 'DRIVER_LOGIN_MODE');
   };
 
+  const updatePlaylist = async (assignments: any[], thoughts: any[]) => {
+    const active = assignments.filter(a => ['assigned', 'running', 'approved', 'pending'].includes(a.status));
+    const ads = await Promise.all(active.map(async (a) => await firebaseService.getCampaign(a.campaignId)));
+    
+    const allThoughts = thoughts.filter(t => t.isActive);
+    
+    const adsList = ads.filter(Boolean);
+    const combined: any[] = [];
+    
+    // Simple interleave: 5 ads, 1 thought
+    let thoughtIdx = 0;
+    let thoughtAdded = false;
+    for (let i = 0; i < adsList.length; i++) {
+      combined.push(adsList[i]);
+      if ((i + 1) % 5 === 0 && allThoughts.length > 0) {
+        const t = allThoughts[thoughtIdx % allThoughts.length];
+        combined.push({
+          id: t.id,
+          url: t.imageUrl,
+          title: t.quote,
+          isThought: true, // Marker for display logic
+          quote: t.quote,
+          author: t.author
+        });
+        thoughtIdx++;
+        thoughtAdded = true;
+      }
+    }
+
+    // Append at end if no thought added and active thoughts exist
+    if (!thoughtAdded && allThoughts.length > 0) {
+      const t = allThoughts[thoughtIdx % allThoughts.length];
+      combined.push({
+        id: t.id,
+        url: t.imageUrl,
+        title: t.quote,
+        isThought: true,
+        quote: t.quote,
+        author: t.author
+      });
+    }
+    setPlaylist(combined);
+    if (currentIndex >= combined.length) {
+      setCurrentIndex(0);
+    }
+    setLoading(false);
+  };
+
   const fetchAdsManual = async () => {
     if (!driver?.uid) return;
     setLoading(true);
     try {
       const assignments = await firebaseService.getDriverAssignments(driver.uid);
-      const active = assignments.filter(a => ['assigned', 'running', 'approved'].includes(a.status));
-      const ads = await Promise.all(active.map(async (a) => await firebaseService.getCampaign(a.campaignId)));
-      setPlaylist(ads.filter(Boolean));
-    } finally {
+      const thoughts = await firebaseService.getActiveThoughts();
+      await updatePlaylist(assignments, thoughts);
+    } catch (e) {
+      console.error("Error fetching ads manually:", e);
       setLoading(false);
     }
   };
 
+  // Real-time subscription to assignments and thoughts
+  useEffect(() => {
+    if (!driver?.uid) return;
+    setLoading(true);
+    
+    let currentAssignments: any[] = [];
+    let currentThoughts: any[] = [];
+    
+    const unsubAssignments = firebaseService.subscribeToDriverAssignments(driver.uid, (assignments) => {
+      currentAssignments = assignments;
+      updatePlaylist(currentAssignments, currentThoughts);
+    });
+    
+    const unsubThoughts = firebaseService.subscribeToThoughts((thoughts) => {
+      currentThoughts = thoughts;
+      updatePlaylist(currentAssignments, currentThoughts);
+    });
+    
+    return () => {
+        unsubAssignments();
+        unsubThoughts();
+    };
+  }, [driver?.uid]);
+
+  const [direction, setDirection] = useState(1); // 1 for forward, -1 for backward
+
   const playNextValidAd = (startIndex: number) => {
     if (playlist.length === 0) return;
-    let nextIdx = startIndex;
-    for (let i = 0; i < playlist.length; i++) {
-      const ad = playlist[nextIdx];
-      const adUrl = getSafeUrl(ad?.url || ad?.assetUrl || ad?.mediaUrl) || '';
-      if (adUrl.trim() !== '') {
-        console.log(`[Terminal ROTATION] Index: ${nextIdx}, Tick: ${playbackTick + 1}, Title: ${ad.title}`);
-        setCurrentIndex(nextIdx);
-        setPlaybackTick(prev => prev + 1);
+    
+    // If only one ad, don't change
+    if (playlist.length === 1) {
+        setCurrentIndex(0);
         return;
-      }
-      nextIdx = (nextIdx + 1) % playlist.length;
     }
+
+    let nextIdx = startIndex;
+    
+    // Check if we hit the end or beginning
+    if (nextIdx >= playlist.length) {
+        setDirection(-1);
+        nextIdx = playlist.length - 2;
+    } else if (nextIdx < 0) {
+        setDirection(1);
+        nextIdx = 1;
+    }
+
+    // Ensure we don't go out of bounds if length changed
+    if (nextIdx < 0) nextIdx = 0;
+    if (nextIdx >= playlist.length) nextIdx = playlist.length - 1;
+
+    setCurrentIndex(nextIdx);
+    setPlaybackTick(prev => prev + 1);
   };
 
   // Synchronize ad progress animation duration
@@ -830,7 +957,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       // If it's a static image, we need a timer.
       if (!isVideo) {
         const timer = setTimeout(() => {
-          playNextValidAd((currentIndex + 1) % playlist.length);
+          playNextValidAd(currentIndex + direction);
         }, 10000); // 10s per static ad as requested
         return () => clearTimeout(timer);
       }
@@ -942,9 +1069,19 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   const currentAd = playlist[currentIndex];
 
+  if (currentAd?.isThought) {
+    return (
+      <div className="fixed inset-0 bg-slate-900 flex flex-col items-center justify-center p-12 text-center select-none z-[100]">
+        <div className="text-[10px] uppercase tracking-widest text-amber-500 font-bold mb-4">Thought of the Day</div>
+        <p className="text-4xl md:text-6xl font-serif text-white mb-8 italic">"{currentAd.quote}"</p>
+        <p className="text-xl text-amber-300 font-medium">— {currentAd.author}</p>
+      </div>
+    );
+  }
+
   return (
     <div 
-      className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none"
+      className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden font-sans select-none brightness-110 contrast-105"
       onClick={triggerOverlayOnDemand}
     >
       {/* Locked Device Overlay */}
@@ -1252,10 +1389,8 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                   "w-full h-full relative transition-[filter]"
                 )}
                 style={{
-                  filter: `brightness(${brightnessProfile ? brightnessProfile.level / 100 : 1.0}) ${
-                    brightnessProfile?.reducedContrast ? 'contrast(0.75)' : ''
-                  } ${
-                    brightnessProfile?.reducedGlow ? 'saturate(0.5) contrast(0.9)' : ''
+                  filter: `brightness(${brightnessProfile ? Math.max(brightnessProfile.level / 100, 1.0) : 1.0}) ${
+                    brightnessProfile?.reducedContrast ? 'contrast(1.0)' : 'contrast(1.1)'
                   }`,
                   transition: 'filter 1.5s ease'
                 }}

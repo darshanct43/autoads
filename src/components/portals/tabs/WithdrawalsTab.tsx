@@ -111,7 +111,7 @@ export const WithdrawalsTab: React.FC<WithdrawalsTabProps> = ({
   // Helper to get driver details
   const getDriverInfo = (driverId: string) => {
     const d = drivers.find((drv) => drv.id === driverId || drv.uid === driverId);
-    return d || { name: "Unknown Driver", phone: "N/A", vNo: "N/A" };
+    return d ? { name: d.fullName || d.name || "Unknown Driver", phone: d.phone || "N/A", vNo: d.vNo || d.vehicleNo || d.vehicleNumber || "N/A" } : { name: "Unknown Driver", phone: "N/A", vNo: "N/A" };
   };
 
   const handleApproveAction = async (req: WithdrawRequest) => {

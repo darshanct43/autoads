@@ -17,7 +17,9 @@ import {
   deleteDoc,
   collectionGroup as firestoreCollectionGroup,
   or,
-  arrayUnion
+  arrayUnion,
+  enableNetwork,
+  disableNetwork
 } from 'firebase/firestore';
 import { db, auth, storage } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -1490,6 +1492,17 @@ export const firebaseService = {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'terminals'));
   },
 
+  async reconnect() {
+    console.log("[FORENSIC] [Firebase] Force reconnecting...");
+    try {
+      await disableNetwork(db);
+      await enableNetwork(db);
+      console.log("[FORENSIC] [Firebase] Network reconnected successfully");
+    } catch (e) {
+      console.error("[FORENSIC] [Firebase] Reconnect failed:", e);
+    }
+  },
+
   subscribeToLiveStatus(callback: (status: any[]) => void) {
     const q = query(collection(db, 'liveStatus'));
     return onSnapshot(q, (snapshot) => {
@@ -2361,7 +2374,7 @@ export const firebaseService = {
           
           const docData = {
             driverId: uid,
-            driverName: driverProfile?.name || 'Unknown Driver',
+            driverName: driverProfile?.fullName || driverProfile?.name || 'Unknown Driver',
             type: type,
             downloadUrl: url,
             fileName: fileName,
@@ -3812,12 +3825,58 @@ export const firebaseService = {
     }
   },
 
-  async deletePlanConfiguration(planId: string) {
+  async createThoughtOfTheDay(thought: any) {
     try {
-      const docRef = doc(db, 'planConfigurations', planId);
+      const colRef = collection(db, 'thoughtOfTheDay');
+      return await addDoc(colRef, {
+        ...thought,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'thoughtOfTheDay');
+      throw e;
+    }
+  },
+
+  async updateThoughtOfTheDay(id: string, updates: any) {
+    try {
+      const docRef = doc(db, 'thoughtOfTheDay', id);
+      await updateDoc(docRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'thoughtOfTheDay');
+      throw e;
+    }
+  },
+
+  async deleteThoughtOfTheDay(id: string) {
+    try {
+      const docRef = doc(db, 'thoughtOfTheDay', id);
       await deleteDoc(docRef);
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, 'planConfigurations');
+      handleFirestoreError(e, OperationType.DELETE, 'thoughtOfTheDay');
+      throw e;
+    }
+  },
+
+  subscribeToThoughts(callback: (thoughts: any[]) => void) {
+    const q = query(collection(db, 'thoughtOfTheDay'));
+    return onSnapshot(q, (snapshot) => {
+      const thoughts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(thoughts);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'thoughtOfTheDay'));
+  },
+
+  async getActiveThoughts() {
+    try {
+      const q = query(collection(db, 'thoughtOfTheDay'), where('isActive', '==', true));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'thoughtOfTheDay');
       throw e;
     }
   },

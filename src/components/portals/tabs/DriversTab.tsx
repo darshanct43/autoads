@@ -258,7 +258,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                             </div>
                             <div>
                               <h4 className="text-sm font-black text-slate-900">
-                                {driver.name || "Unknown Driver"}
+                                {driver.fullName || driver.name || "Unknown Driver"}
                               </h4>
                               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
                                 {driver.email || "No email linked"}
@@ -354,7 +354,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
                         </div>
                         <div>
                           <h4 className="text-sm font-black text-slate-900">
-                            {driver.name || "Unknown Driver"}
+                            {driver.fullName || driver.name || "Unknown Driver"}
                           </h4>
                           <span className="font-mono text-[10px] bg-slate-50 border border-slate-100 px-2 py-0.5 text-slate-500 rounded select-all mt-1 inline-block">
                             ID: {drvCode}

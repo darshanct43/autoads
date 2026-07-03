@@ -42,7 +42,7 @@ export default function SmartPassengerQR({ deviceId, onLogout }: SmartPassengerQ
   const rawDeviceId = deviceId || 'ACTIVE';
   // Sanitize: ensure deviceId isn't a URL
   const safeDeviceId = rawDeviceId.includes('://') ? 'ACTIVE' : rawDeviceId;
-  const qrValue = `https://autoads.in/family-ride/${encodeURIComponent(safeDeviceId)}`;
+  const qrValue = `https://autoads-nine.vercel.app/family-ride/${encodeURIComponent(safeDeviceId)}`;
   console.log("ACTIVE TERMINAL ID (from props):", deviceId);
   console.log("FINAL QR URL:", qrValue);
 

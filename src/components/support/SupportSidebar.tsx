@@ -25,6 +25,7 @@ export default function SupportSidebar({ activeTab, setActiveTab, onLogout, user
   const managerGroups = [
     { title: 'Operations', items: [
       { id: 'DASHBOARD', title: 'Dashboard', icon: LayoutDashboard },
+      { id: 'THOUGHT_OF_THE_DAY', title: 'Thought of the Day', icon: Sparkles },
       ...(hasPermission('viewPayments') ? [{ id: 'TRANSACTIONS', title: 'Transactions Registry', icon: DollarSign }] : []),
       ...(hasPermission('viewDevices') ? [{ id: 'TERMINAL_HUB', title: 'Terminal Fleet Control', icon: Cpu }] : []),
       ...(hasPermission('managePlans') ? [{ id: 'PLAN_MANAGEMENT', title: 'Plan Management', icon: Sliders }] : []),
