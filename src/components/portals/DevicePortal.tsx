@@ -158,6 +158,8 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   const [activeRidePref, setActiveRidePref] = useState<any>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
   const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
+  const [assignedCampaigns, setAssignedCampaigns] = useState<any[]>([]);
+  const [bypassScheduleFilter, setBypassScheduleFilter] = useState(false);
 
   // --- Recovered Hardware Controllers ---
   const [terminalVolume, setTerminalVolume] = useState<number>(75);
@@ -237,6 +239,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Check if campaign is active and within scheduled time/day
   const isRunTimeCompliant = (campaign: AdCampaign) => {
+    if (bypassScheduleFilter) return true;
     const now = new Date();
     
     // 1. Day of Week Check
@@ -410,6 +413,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     setLoading(true);
     // Subscribe directly to campaigns that are ACTIVE and assigned to this driver
     const unsubscribe = firebaseService.subscribeToActiveAssignedCampaigns(dId, (campaigns) => {
+      setAssignedCampaigns(campaigns);
       // Flatten ads from all assigned campaigns
       let allAds: any[] = [];
       const compliantCampaigns = campaigns.filter(c => isRunTimeCompliant(c));
@@ -486,7 +490,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     });
 
     return () => unsubscribe();
-  }, [isLogged, driver?.uid, lastCheckTime]);
+  }, [isLogged, driver?.uid, lastCheckTime, bypassScheduleFilter]);
 
   // Periodic check for scheduler transitions removed
 
@@ -1300,15 +1304,52 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
                  </div>
 
                  <div className="space-y-4">
-                   <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 rounded-2xl inline-block">
-                     <p className="text-red-500 text-sm md:text-lg font-black uppercase tracking-widest animate-pulse">
-                       NO ACTIVE CAMPAIGNS ASSIGNED
-                     </p>
-                   </div>
-                   
-                   <p className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest max-w-sm mx-auto leading-relaxed">
-                     Waiting for campaign assignment...
-                   </p>
+                   {assignedCampaigns.length > 0 ? (
+                     <>
+                       <div className="px-6 py-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl inline-block">
+                         <p className="text-amber-500 text-sm md:text-lg font-black uppercase tracking-widest animate-pulse">
+                           CAMPAIGNS ASSIGNED ({assignedCampaigns.length})
+                         </p>
+                       </div>
+                       
+                       <p className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest max-w-sm mx-auto leading-relaxed">
+                         OUTSIDE SCHEDULED COMPLIANCE HOURS
+                       </p>
+                       
+                       <div className="bg-white/5 border border-white/10 rounded-2xl p-4 max-w-md mx-auto space-y-2 text-left">
+                         {assignedCampaigns.map((c, idx) => (
+                           <div key={idx} className="flex justify-between text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                             <span className="truncate pr-2 font-bold text-slate-300">⚡ {c.title || 'Ad Unit'}</span>
+                             <span className="text-amber-500 font-bold shrink-0">{c.startTime || '06:00'} - {c.endTime || '22:00'}</span>
+                           </div>
+                         ))}
+                       </div>
+                       
+                       <div className="pt-2">
+                         <button
+                           onClick={() => {
+                             setBypassScheduleFilter(true);
+                             setStatusLogs(prev => ["CMD: Bypass campaign scheduled hours", ...prev]);
+                           }}
+                           className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase tracking-widest rounded-xl transition-all active:scale-95 shadow-lg shadow-amber-500/20 mx-auto block"
+                         >
+                           Force Play Ad Rotation
+                         </button>
+                       </div>
+                     </>
+                   ) : (
+                     <>
+                       <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 rounded-2xl inline-block">
+                         <p className="text-red-500 text-sm md:text-lg font-black uppercase tracking-widest animate-pulse">
+                           NO ACTIVE CAMPAIGNS ASSIGNED
+                         </p>
+                       </div>
+                       
+                       <p className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest max-w-sm mx-auto leading-relaxed">
+                         Waiting for campaign assignment...
+                       </p>
+                     </>
+                   )}
                  </div>
 
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

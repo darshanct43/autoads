@@ -229,7 +229,8 @@ service cloud.firestore {
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 'franchiseId' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && resource.data.franchiseId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franchiseId) ||
         resource.data.customerId == request.auth.uid ||
         resource.data.createdBy == request.auth.uid ||
-        resource.data.advertiserId == request.auth.uid
+        resource.data.advertiserId == request.auth.uid ||
+        ('assignedDrivers' in resource.data && resource.data.assignedDrivers.hasAny([request.auth.uid]))
       ));
       allow create: if isSignedIn() && (request.resource.data.createdBy == request.auth.uid || request.resource.data.customerId == request.auth.uid || request.resource.data.advertiserId == request.auth.uid);
       allow update: if isHQ() || (isSignedIn() && (
