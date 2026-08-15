@@ -744,11 +744,8 @@ export default function DriverPortal({ onLogout }: DriverPortalProps) {
       default:
         const isAgreementSigned = driverProfile?.agreementStatus === 'SIGNED' || agreement?.agreementAccepted;
         const isTerminalUnlocked = isAgreementSigned;
-        const isTerminalAccessGranted = 
-          isAgreementSigned &&
-          driverProfile?.paymentStatus === 'SUCCESS' &&
-          driverProfile?.documentStatus === 'APPROVED' &&
-          driverProfile?.supportApproval === 'APPROVED';
+        // Restrictions lifted per user request
+        const isTerminalAccessGranted = true;
 
         return (
           <>

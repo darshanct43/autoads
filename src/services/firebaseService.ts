@@ -2311,7 +2311,7 @@ export const firebaseService = {
     const docRef = doc(db, DRIVERS_COLLECTION, uid);
     try {
       const snap = await getDoc(docRef);
-      return snap.exists() ? { id: snap.id, ...snap.data() } as Driver : null;
+      return snap.exists() ? { id: snap.id, uid: snap.id, ...snap.data() } as Driver : null;
     } catch (e: any) {
       console.warn("[FirebaseService] getDriverProfile failure (Resilient fallback):", e.message);
       return null;
@@ -2321,7 +2321,7 @@ export const firebaseService = {
   subscribeToDriverProfile(uid: string, callback: (driver: Driver | null) => void) {
     const docRef = doc(db, DRIVERS_COLLECTION, uid);
     return onSnapshot(docRef, (snap) => {
-      callback(snap.exists() ? { id: snap.id, ...snap.data() } as Driver : null);
+      callback(snap.exists() ? { id: snap.id, uid: snap.id, ...snap.data() } as Driver : null);
     }, (error) => handleFirestoreError(error, OperationType.GET, DRIVERS_COLLECTION, true));
   },
 

@@ -404,11 +404,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Real-time ad assignments
   useEffect(() => {
-    if (!isLogged || !driver?.uid) return;
+    const dId = driver?.uid || driver?.id;
+    if (!isLogged || !dId) return;
 
     setLoading(true);
     // Subscribe directly to campaigns that are ACTIVE and assigned to this driver
-    const unsubscribe = firebaseService.subscribeToActiveAssignedCampaigns(driver.uid, (campaigns) => {
+    const unsubscribe = firebaseService.subscribeToActiveAssignedCampaigns(dId, (campaigns) => {
       // Flatten ads from all assigned campaigns
       let allAds: any[] = [];
       const compliantCampaigns = campaigns.filter(c => isRunTimeCompliant(c));
@@ -859,10 +860,11 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   };
 
   const fetchAdsManual = async () => {
-    if (!driver?.uid) return;
+    const dId = driver?.uid || driver?.id;
+    if (!dId) return;
     setLoading(true);
     try {
-      const assignments = await firebaseService.getDriverAssignments(driver.uid);
+      const assignments = await firebaseService.getDriverAssignments(dId);
       const thoughts = await firebaseService.getActiveThoughts();
       await updatePlaylist(assignments, thoughts);
     } catch (e) {
@@ -873,13 +875,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
   // Real-time subscription to assignments and thoughts
   useEffect(() => {
-    if (!driver?.uid) return;
+    const dId = driver?.uid || driver?.id;
+    if (!dId) return;
     setLoading(true);
     
     let currentAssignments: any[] = [];
     let currentThoughts: any[] = [];
     
-    const unsubAssignments = firebaseService.subscribeToDriverAssignments(driver.uid, (assignments) => {
+    const unsubAssignments = firebaseService.subscribeToDriverAssignments(dId, (assignments) => {
       currentAssignments = assignments;
       updatePlaylist(currentAssignments, currentThoughts);
     });
@@ -893,7 +896,7 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
         unsubAssignments();
         unsubThoughts();
     };
-  }, [driver?.uid]);
+  }, [driver?.uid, driver?.id]);
 
   const [direction, setDirection] = useState(1); // 1 for forward, -1 for backward
 

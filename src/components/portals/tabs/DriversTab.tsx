@@ -163,7 +163,7 @@ export const DriversTab: React.FC<DriversTabProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {[
           { label: "Total Drivers Registry", value: drivers.length, icon: User, color: "text-amber-500 bg-amber-50" },
-          { label: "Verified Node Power", value: drivers.filter(d => (d.status || "").toLowerCase() === "active").length, icon: ShieldCheck, color: "text-emerald-500 bg-emerald-50" },
+          { label: "Verified Node Power", value: drivers.filter(d => (d.status || "").toLowerCase() === "active" || (d.kycStatus || "").toLowerCase() === "approved").length, icon: ShieldCheck, color: "text-emerald-500 bg-emerald-50" },
         ].map((stat) => (
           <div key={stat.label} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
             <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center shrink-0", stat.color)}>
