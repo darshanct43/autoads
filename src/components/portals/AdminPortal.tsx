@@ -4050,6 +4050,8 @@ export default function AdminPortal({
                            });
 
                            const updatePayload = { 
+                               documentStatus: 'APPROVED',
+                               supportApproval: 'APPROVED',
                                kycStatus: 'APPROVED', 
                                status: 'active', 
                                verificationStatus: 'VERIFIED',
@@ -4072,7 +4074,13 @@ export default function AdminPortal({
                            }
                            
                            showToast("Driver Network Profile Approved and Permissions Granted.", 'success');
-                           setSelectedDriverForAgreement({ ...selectedDriverForAgreement, kycStatus: 'APPROVED', status: 'active' });
+                           setSelectedDriverForAgreement({ 
+                               ...selectedDriverForAgreement, 
+                               kycStatus: 'APPROVED', 
+                               documentStatus: 'APPROVED',
+                               supportApproval: 'APPROVED',
+                               status: 'active' 
+                           });
                         }}
                         className="flex-1 py-4 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl bg-blue-600 hover:bg-blue-700 transition"
                       >
@@ -4166,6 +4174,8 @@ export default function AdminPortal({
                    <button 
                     onClick={async () => {
                        await firebaseService.updateDriverProfile(selectedDriverForDocs.id, { 
+                         documentStatus: 'APPROVED',
+                         supportApproval: 'APPROVED',
                          kycStatus: 'APPROVED', 
                          adminApproved: true,
                          payoutEnabled: true 

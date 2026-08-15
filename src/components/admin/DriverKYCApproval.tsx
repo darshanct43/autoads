@@ -15,7 +15,9 @@ export default function DriverKYCApproval() {
     await firebaseService.updateDriverProfile(driverId, {
       kycStatus: status,
       payoutEnabled: status === 'APPROVED',
-      adminApproved: status === 'APPROVED'
+      adminApproved: status === 'APPROVED',
+      documentStatus: status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+      supportApproval: status === 'APPROVED' ? 'APPROVED' : 'REJECTED'
     });
   };
 
