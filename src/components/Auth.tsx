@@ -703,6 +703,72 @@ export default function Auth({ onLogin }: AuthProps) {
       console.error("[Auth] Signup Error:", err);
       const errorMessage = err.message || '';
       
+      const isNetworkError = 
+        err.code === 'auth/network-request-failed' ||
+        err.message?.includes('network-request-failed') ||
+        err.message?.toLowerCase().includes('failed to fetch') ||
+        err.message?.toLowerCase().includes('network error');
+
+      if (isNetworkError) {
+        console.warn("[Auth Warning] Network Request Failed during signup. Activating Offline Signup caching.");
+        const mockUid = `DRV-OFFLINE-${phone}`;
+        const finalEmail = `${phone}@autoads.in`.toLowerCase();
+
+        localStorage.setItem('auto_ads_offline_mode', 'true');
+        localStorage.setItem('auto_ads_offline_role', role);
+
+        // Pre-cache mock credentials
+        const mockDriver = {
+          id: mockUid,
+          uid: mockUid,
+          name: 'Customer Mobile ' + phone,
+          phone: phone,
+          email: finalEmail,
+          status: 'active',
+          accountStatus: 'ACTIVE',
+          isVerified: true,
+          driverCode: `DRV-${Math.floor(1000 + Math.random() * 9000)}`,
+          password: password,
+          vNo: 'N/A',
+          vehicleNumber: 'N/A',
+          city: 'Mayaan Network'
+        };
+
+        const tId = `TRM-OFFLINE-${phone}`;
+        localStorage.setItem('auto_ads_terminal_id', tId);
+        localStorage.setItem('temp_terminal_id', tId);
+        localStorage.setItem('temp_access_key', 'OFFLINE-KEY');
+
+        localStorage.setItem('auto_ads_cached_terminal', JSON.stringify({
+          id: tId,
+          driverId: mockUid,
+          driverName: mockDriver.name,
+          status: 'ACTIVE',
+          accessKey: 'OFFLINE-KEY'
+        }));
+        localStorage.setItem('auto_ads_cached_driver', JSON.stringify(mockDriver));
+
+        if (isTerminalMode) {
+          localStorage.setItem('auto_ads_is_terminal', 'true');
+        } else {
+          localStorage.removeItem('auto_ads_is_terminal');
+        }
+
+        // Add to offline sync queue so we can synchronize to Firestore later if connectivity restores
+        try {
+          const syncQueue = JSON.parse(localStorage.getItem('auto_ads_sync_queue') || '[]');
+          syncQueue.push({ type: 'DRIVER_SIGNUP', driver: mockDriver, role, tId, finalEmail });
+          localStorage.setItem('auto_ads_sync_queue', JSON.stringify(syncQueue));
+        } catch (queueErr) {}
+
+        if (role === 'DRIVER') {
+          setAuthMode('DRIVER_PROFILE');
+        } else {
+          onLogin(isTerminalMode ? 'DEVICE' : role);
+        }
+        return;
+      }
+
       if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/invalid-credential' || errorMessage.toLowerCase().includes('invalid-credential')) {
         setError(`CRITICAL: The 'Email/Password' provider is disabled or restricted in Firebase for project '${firebaseConfig.projectId}'. You MUST enable the Email/Password sign-in provider in the Firebase Console (Authentication > Sign-in method > Email/Password) to create accounts.`);
         return;
