@@ -3413,7 +3413,15 @@ export default function AdminPortal({
                 </div>
                 <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-4 max-h-[300px] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3 custom-scrollbar">
                   {drivers
-                    .filter(d => d.status === 'active' && d.isVerified)
+                    .filter(d => {
+                      const isActiveOrVerified = 
+                        d.status === 'active' || 
+                        d.isVerified === true || 
+                        (d.kycStatus || "").toUpperCase() === "APPROVED" || 
+                        (d.verificationStatus || "").toUpperCase() === "VERIFIED" ||
+                        d.adminApproved === true;
+                      return isActiveOrVerified;
+                    })
                     .map((d) => {
                       const isSelected = selectedDriverIds.includes(d.uid);
                       const isOnline = driverLocations.find(l => l.driverId === d.uid)?.isOnline;

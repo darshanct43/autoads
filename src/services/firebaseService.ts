@@ -1783,13 +1783,15 @@ export const firebaseService = {
   subscribeToActiveAssignedCampaigns(driverId: string, callback: (campaigns: AdCampaign[]) => void) {
     const q = query(
       collection(db, 'campaigns'),
-      where('status', 'in', ['ACTIVE', 'LIVE', 'APPROVED', 'PAID']),
       where('assignedDrivers', 'array-contains', driverId)
     );
     return onSnapshot(q, (snapshot) => {
       const campaigns = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        .filter((c: any) => c.operationalStatus !== 'PAUSED') as AdCampaign[];
+        .filter((c: any) => 
+          ['ACTIVE', 'LIVE', 'APPROVED', 'PAID'].includes(c.status) && 
+          c.operationalStatus !== 'PAUSED'
+        ) as AdCampaign[];
       callback(campaigns);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'campaigns', true));
   },
