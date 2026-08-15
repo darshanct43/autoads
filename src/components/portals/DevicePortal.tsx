@@ -112,13 +112,41 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
     };
   }, []);
 
-  const [isLogged, setIsLogged] = useState(false);
+  const [isLogged, setIsLogged] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem('auto_ads_cached_terminal') && !!localStorage.getItem('auto_ads_cached_driver');
+    } catch (e) {
+      return false;
+    }
+  });
   const [terminalId, setTerminalId] = useState('');
   const [accessKey, setAccessKey] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(!!localStorage.getItem('auto_ads_terminal_id'));
-  const [driver, setDriver] = useState<Driver | null>(null);
-  const [activeTerminal, setActiveTerminal] = useState<any>(null);
+  const [loading, setLoading] = useState(() => {
+    try {
+      const hasTerminalId = !!localStorage.getItem('auto_ads_terminal_id');
+      const hasCachedTerminal = !!localStorage.getItem('auto_ads_cached_terminal');
+      return hasTerminalId && !hasCachedTerminal; // Only show initial loading screen if we don't have a cached session ready
+    } catch (e) {
+      return true;
+    }
+  });
+  const [driver, setDriver] = useState<Driver | null>(() => {
+    try {
+      const cached = localStorage.getItem('auto_ads_cached_driver');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [activeTerminal, setActiveTerminal] = useState<any>(() => {
+    try {
+      const cached = localStorage.getItem('auto_ads_cached_terminal');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [playlist, setPlaylist] = useState<any[]>([]);
   const [thoughts, setThoughts] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(() => {
@@ -157,7 +185,14 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
   // --- Smart Ad Filtering states & listeners ---
   const [activeRidePref, setActiveRidePref] = useState<any>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(isSchoolTiming());
-  const [rawPlaylist, setRawPlaylist] = useState<any[]>([]);
+  const [rawPlaylist, setRawPlaylist] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('auto_ads_cached_playlist');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [assignedCampaigns, setAssignedCampaigns] = useState<any[]>([]);
   const [bypassScheduleFilter, setBypassScheduleFilter] = useState(false);
 
@@ -474,6 +509,9 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       setLoading(false);
       
       if (validAds.length > 0) {
+        try {
+          localStorage.setItem('auto_ads_cached_playlist', JSON.stringify(validAds));
+        } catch (e) {}
         setStatusLogs(prev => [`HUB: manifest received (${campaigns.length} campaigns)`, `AD_SRV: ${allAds.length} assets ready`, ...prev]);
         setShowComplianceNotice(false);
         
@@ -630,6 +668,21 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
 
       } catch (err: any) {
           console.error("[Terminal] Auto activation sequence failed:", err);
+          try {
+            const cachedTermStr = localStorage.getItem('auto_ads_cached_terminal');
+            const cachedDriverStr = localStorage.getItem('auto_ads_cached_driver');
+            if (cachedTermStr && cachedDriverStr) {
+               console.log("[Terminal] AutoConnect failed but found offline cache. Restoring cached session...");
+               const termObj = JSON.parse(cachedTermStr);
+               const driverObj = JSON.parse(cachedDriverStr);
+               setActiveTerminal(termObj);
+               setDriver(driverObj);
+               setIsLogged(true);
+               setError("");
+               setLoading(false);
+               return;
+            }
+          } catch(cacheErr) {}
           setError("Auto-login error: " + err.message);
       } finally {
           setLoading(false);
@@ -718,6 +771,12 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
           console.log("[Terminal] Authentication complete, showing portal.");
           // Auto-bypass notice for authorized terminal sessions (like our demo)
           setShowComplianceNotice(false);
+
+          // Save to local cache
+          try {
+            localStorage.setItem('auto_ads_cached_terminal', JSON.stringify(term));
+            localStorage.setItem('auto_ads_cached_driver', JSON.stringify(d));
+          } catch (cacheErr) {}
         } else {
           console.error("[Terminal] Driver profile not found for terminal:", term.driverId);
           setError("Hardware linked to missing profile. Autocompensating...");
@@ -733,6 +792,27 @@ export default function DevicePortal({ onLogout }: DevicePortalProps) {
       }
     } catch (e: any) {
       console.error("[Terminal] Session resume failure:", e);
+      
+      // Attempt to load from offline localStorage cache
+      try {
+        const cachedTermStr = localStorage.getItem('auto_ads_cached_terminal');
+        const cachedDriverStr = localStorage.getItem('auto_ads_cached_driver');
+        if (cachedTermStr && cachedDriverStr) {
+          console.log("[Terminal] Offline mode: Restoring terminal and driver profiles from cache...");
+          const termObj = JSON.parse(cachedTermStr);
+          const driverObj = JSON.parse(cachedDriverStr);
+          setActiveTerminal(termObj);
+          setDriver(driverObj);
+          setIsLogged(true);
+          setError(""); // Clear error
+          setLoading(false);
+          setStatusLogs(prev => ["SYS: Running in OFFLINE mode using cached credentials", ...prev]);
+          return;
+        }
+      } catch (cacheErr) {
+        console.error("[Terminal] Failed to read cached credentials:", cacheErr);
+      }
+
       setError("Sync Connection Offline. Retrying...");
       // Do NOT clear localStorage. Keep credentials and retry in 5 seconds to preserve pairing!
       setTimeout(() => {

@@ -541,12 +541,18 @@ export const firebaseService = {
   },
 
   async getTerminal(terminalId: string) {
-    const docRef = doc(db, 'terminals', terminalId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return { id: snap.id, ...snap.data() };
+    if (!terminalId) return null;
+    try {
+      const docRef = doc(db, 'terminals', terminalId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        return { id: snap.id, ...snap.data() };
+      }
+      return null;
+    } catch (e: any) {
+      console.warn("[FirebaseService] getTerminal failed (Resilient fallback):", e.message);
+      return null;
     }
-    return null;
   },
 
   async initializeDevices(devices: Omit<Device, 'id'>[]) {
@@ -1463,8 +1469,8 @@ export const firebaseService = {
       const snap = await getDocs(q);
       return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (e) {
-      handleFirestoreError(e, OperationType.LIST, 'terminals');
-      throw e;
+      console.warn("[FirebaseService] getTerminals failed (Resilient fallback):", e);
+      return [];
     }
   },
 
@@ -3450,6 +3456,17 @@ export const firebaseService = {
       const users = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       callback(users);
     });
+  },
+
+  async getUsers(): Promise<any[]> {
+    try {
+      const q = query(collection(db, "users"));
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      console.warn("[FirebaseService] getUsers failed:", e);
+      return [];
+    }
   },
 
   // Franchises and Cities Methods for Phase 1

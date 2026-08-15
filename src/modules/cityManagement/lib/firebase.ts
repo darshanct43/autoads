@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
-  memoryLocalCache,
+  persistentLocalCache,
   doc, 
   getDocFromServer, 
   getFirestore,
@@ -78,7 +78,7 @@ let dbInstance: Firestore;
 try {
   console.log("[TRACE 2.1] Before initializeFirestore");
   dbInstance = initializeFirestore(app, {
-    localCache: memoryLocalCache(),
+    localCache: persistentLocalCache(),
     ignoreUndefinedProperties: true
   }, firestoreDbId === '(default)' ? undefined : firestoreDbId);
   console.log("[TRACE 2.2] After initializeFirestore");

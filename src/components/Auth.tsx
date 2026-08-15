@@ -310,36 +310,129 @@ export default function Auth({ onLogin }: AuthProps) {
           (authErr.message && authErr.message.toLowerCase().includes('failed to fetch')) ||
           (authErr.message && authErr.message.toLowerCase().includes('network error'));
 
-        if (isNetworkError) {
-          const isSupportDemo = (inputEmailLower === 'support@autoads.in' || inputEmailLower === 'support') && inputPassword === 'autoads123';
-          const isAdminDemo = (inputEmailLower === 'admin@autoads.in' || inputEmailLower === 'admin') && inputPassword === 'autoads123';
-          const isCustomerDemo = (inputEmailLower === 'customer@autoads.in' || inputEmailLower === 'customer') && inputPassword === 'autoads123';
-          const isFranchiseDemo = (inputEmailLower === 'franchise@autoads.in' || inputEmailLower === 'franchise') && inputPassword === 'autoads123';
-          const isDriverDemo = (inputEmailLower.startsWith('drv-') || inputEmailLower === 'driver') && inputPassword === 'autoads123';
-          const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower === 'dashanct43@gmail.com' || inputEmailLower.startsWith('darshanct') || inputEmailLower.startsWith('dashanct');
+         if (isNetworkError) {
+           const isSupportDemo = (inputEmailLower === 'support@autoads.in' || inputEmailLower === 'support') && inputPassword === 'autoads123';
+           const isAdminDemo = (inputEmailLower === 'admin@autoads.in' || inputEmailLower === 'admin') && inputPassword === 'autoads123';
+           const isCustomerDemo = (inputEmailLower === 'customer@autoads.in' || inputEmailLower === 'customer') && inputPassword === 'autoads123';
+           const isFranchiseDemo = (inputEmailLower === 'franchise@autoads.in' || inputEmailLower === 'franchise') && inputPassword === 'autoads123';
+           const isDriverDemo = (inputEmailLower.startsWith('drv-') || inputEmailLower === 'driver') && inputPassword === 'autoads123';
+           const isDeveloperDemo = inputEmailLower === 'darshanct43@gmail.com' || inputEmailLower === 'dashanct43@gmail.com' || inputEmailLower.startsWith('darshanct') || inputEmailLower.startsWith('dashanct');
 
-          if (isSupportDemo || isAdminDemo || isCustomerDemo || isFranchiseDemo || isDriverDemo || isDeveloperDemo) {
-            console.warn("[Auth Warning] Network Request Failed. Activating Majestic Offline Auth Fallback for testing.");
-            let resolvedRole: UserRole = 'CUSTOMER';
-            if (isSupportDemo) resolvedRole = 'SUPPORT_TEAM';
-            else if (isAdminDemo || isDeveloperDemo) resolvedRole = 'ADMIN';
-            else if (isFranchiseDemo) resolvedRole = 'FRANCHISE_OWNER';
-            else if (isDriverDemo) resolvedRole = 'DRIVER';
+           if (isSupportDemo || isAdminDemo || isCustomerDemo || isFranchiseDemo || isDriverDemo || isDeveloperDemo) {
+             console.warn("[Auth Warning] Network Request Failed. Activating Majestic Offline Auth Fallback for testing.");
+             let resolvedRole: UserRole = 'CUSTOMER';
+             if (isSupportDemo) resolvedRole = 'SUPPORT_TEAM';
+             else if (isAdminDemo || isDeveloperDemo) resolvedRole = 'ADMIN';
+             else if (isFranchiseDemo) resolvedRole = 'FRANCHISE_OWNER';
+             else if (isDriverDemo) resolvedRole = 'DRIVER';
 
-            localStorage.setItem('auto_ads_offline_mode', 'true');
-            localStorage.setItem('auto_ads_offline_role', resolvedRole);
+             localStorage.setItem('auto_ads_offline_mode', 'true');
+             localStorage.setItem('auto_ads_offline_role', resolvedRole);
 
-            if (resolvedRole === 'DRIVER') {
-              localStorage.setItem('auto_ads_terminal_id', 'TRM-MOBILE-DEV');
-              localStorage.setItem('temp_terminal_id', 'TRM-MOBILE-DEV');
-              localStorage.setItem('temp_access_key', 'OFFLINE-KEY');
-            }
+             if (resolvedRole === 'DRIVER') {
+               localStorage.setItem('auto_ads_terminal_id', 'TRM-MOBILE-DEV');
+               localStorage.setItem('temp_terminal_id', 'TRM-MOBILE-DEV');
+               localStorage.setItem('temp_access_key', 'OFFLINE-KEY');
+             }
 
-            const finalDestRole = (resolvedRole === 'ADMIN' || ['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(resolvedRole)) ? resolvedRole : (isTerminalMode ? 'DEVICE' : resolvedRole);
-            onLogin(finalDestRole);
-            return;
-          }
-        }
+             const finalDestRole = (resolvedRole === 'ADMIN' || ['SUPPORT', 'SUPPORT_AGENT', 'SUPPORT_MANAGER', 'SUPPORT_TEAM'].includes(resolvedRole)) ? resolvedRole : (isTerminalMode ? 'DEVICE' : resolvedRole);
+             onLogin(finalDestRole);
+             return;
+           }
+
+           // Resilient offline/cached matching fallback for registered drivers
+           try {
+             console.log("[Auth] Network error detected. Trying local/cached drivers lookup for input:", inputEmailLower);
+             const driversList = await firebaseService.getDrivers();
+             const cleanInputPhone = inputEmailLower.replace(/\D/g, '');
+             
+             const matchedDriver = driversList.find(d => {
+               const dPhone = String(d.phone || '').trim().replace(/\D/g, '');
+               const dEmail = String(d.email || '').trim().toLowerCase();
+               const dCode = String(d.driverCode || '').trim().toLowerCase();
+               const dPassword = String(d.password || '').trim();
+               
+               const isPhoneMatch = cleanInputPhone && dPhone && dPhone === cleanInputPhone;
+               const isEmailMatch = dEmail && dEmail === finalEmail;
+               const isCodeMatch = dCode && dCode === inputEmailLower;
+               
+               return (isPhoneMatch || isEmailMatch || isCodeMatch) && dPassword === inputPassword;
+             });
+
+             if (matchedDriver) {
+               console.log("[Auth Success] Verified driver credentials offline via Firestore cache:", matchedDriver);
+               localStorage.setItem('auto_ads_offline_mode', 'true');
+               localStorage.setItem('auto_ads_offline_role', 'DRIVER');
+               
+               const tId = matchedDriver.terminalId || 'TRM-MOBILE-DEV';
+               localStorage.setItem('auto_ads_terminal_id', tId);
+               localStorage.setItem('temp_terminal_id', tId);
+               localStorage.setItem('temp_access_key', matchedDriver.accessKey || 'OFFLINE-KEY');
+               
+               // Pre-cache terminal and driver credentials
+               localStorage.setItem('auto_ads_cached_terminal', JSON.stringify({
+                 id: tId,
+                 driverId: matchedDriver.id || matchedDriver.uid,
+                 driverName: matchedDriver.name || matchedDriver.fullName || 'Driver',
+                 status: 'active',
+                 accessKey: matchedDriver.accessKey || 'OFFLINE-KEY'
+               }));
+               localStorage.setItem('auto_ads_cached_driver', JSON.stringify(matchedDriver));
+
+               if (isTerminalMode) {
+                 localStorage.setItem('auto_ads_is_terminal', 'true');
+               } else {
+                 localStorage.removeItem('auto_ads_is_terminal');
+               }
+
+               onLogin(isTerminalMode ? 'DEVICE' : 'DRIVER');
+               return;
+             }
+           } catch (err) {
+             console.error("[Auth] Offline driver match error:", err);
+           }
+
+           // Resilient offline/cached matching fallback for registered users (Admin, Support, Franchise)
+           try {
+             console.log("[Auth] Checking users collection via cached Firestore list...");
+             const usersList = await firebaseService.getUsers();
+             const cleanInputPhone = inputEmailLower.replace(/\D/g, '');
+
+             const matchedUser = usersList.find(u => {
+               const uPhone = String(u.phoneNumber || u.phone || '').trim().replace(/\D/g, '');
+               const uEmail = String(u.email || '').trim().toLowerCase();
+               const uPassword = String(u.password || '').trim();
+               
+               const isPhoneMatch = cleanInputPhone && uPhone && uPhone === cleanInputPhone;
+               const isEmailMatch = uEmail && uEmail === finalEmail;
+               
+               // For users, some might have their password in fields, or default password fallback
+               const matchesPassword = uPassword ? uPassword === inputPassword : (inputPassword === 'autoads123');
+               
+               return (isPhoneMatch || isEmailMatch) && matchesPassword;
+             });
+
+             if (matchedUser) {
+               console.log("[Auth Success] Verified user credentials offline via Firestore cache:", matchedUser);
+               const userRole = (matchedUser.role || 'CUSTOMER') as UserRole;
+               
+               localStorage.setItem('auto_ads_offline_mode', 'true');
+               localStorage.setItem('auto_ads_offline_role', userRole);
+
+               if (isTerminalMode) {
+                 localStorage.setItem('auto_ads_is_terminal', 'true');
+               } else {
+                 localStorage.removeItem('auto_ads_is_terminal');
+               }
+
+               const finalDestRole = isTerminalMode ? 'DEVICE' : userRole;
+               onLogin(finalDestRole);
+               return;
+             }
+           } catch (err) {
+             console.error("[Auth] Offline user match error:", err);
+           }
+         }
 
         const isInvalidCredential = 
           authErr.code === 'auth/invalid-credential' || 
