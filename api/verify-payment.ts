@@ -21,15 +21,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const finalCampaignId = req.body.campaignId || (campaignData && (campaignData.campaignId || campaignData.id));
 
     // 2. VERIFY KEYS
-    const key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
-    const key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
+    let key_id = getCredential('RAZORPAY_KEY_ID').trim().replace(/^["']|["']$/g, '');
+    let key_secret = getCredential('RAZORPAY_KEY_SECRET').trim().replace(/^["']|["']$/g, '');
+
+    if (!key_id) key_id = process.env.RAZORPAY_KEY_ID || '';
+    if (!key_secret) key_secret = process.env.RAZORPAY_KEY_SECRET || '';
 
     // FORENSIC AUDIT LOG
     console.log("------------------------------------------");
     console.log("RAZORPAY VERIFY RUNTIME AUDIT:");
+    console.log(`KEY_ID_RETRIEVED = ${!!key_id}`);
+    console.log(`SECRET_RETRIEVED = ${!!key_secret}`);
     console.log(`KEY_ID_PREFIX = ${key_id ? key_id.substring(0, 12) : "NONE"}`);
-    console.log(`KEY_ID_SUFFIX = ${key_id ? key_id.substring(key_id.length - 6) : "NONE"}`);
-    console.log(`SECRET_LENGTH = ${key_secret ? key_secret.length : 0}`);
     console.log(`CONSISTENCY_CHECK (Verify Match) = YES`);
     console.log("------------------------------------------");
 
