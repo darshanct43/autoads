@@ -55,6 +55,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
 
+    console.log(`[RAZORPAY_DEBUG] ORDER_ID: ${razorpay_order_id}`);
+    console.log(`[RAZORPAY_DEBUG] PAYMENT_ID: ${razorpay_payment_id}`);
+    console.log(`[RAZORPAY_DEBUG] RECEIVED_SIG: ${razorpay_signature}`);
+    console.log(`[RAZORPAY_DEBUG] GENERATED_SIG: ${generated_signature}`);
+    console.log(`[RAZORPAY_DEBUG] SECRET_LENGTH: ${key_secret.length}`);
+
     if (generated_signature !== razorpay_signature) {
       console.log('[RAZORPAY_VERIFY_AUTH] Signature verification check failed against configured Secret.');
       return res.status(400).json({ success: false, error: "Invalid signature" });
