@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /support
+Disallow: /customer
+Disallow: /driver
+Disallow: /franchise
+Disallow: /terminal
+Disallow: /api/
+
+Sitemap: https://autoads.co.in/sitemap.xml

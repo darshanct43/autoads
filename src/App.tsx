@@ -10,6 +10,7 @@ import DriverPortal from './components/portals/DriverPortal';
 import SafeRideView from './components/public/SafeRideView';
 import DevicePortal from './components/portals/DevicePortal';
 import LoaderPage from './components/public/LoaderPage';
+import MarketingHome from './components/public/MarketingHome';
 import BrandIntroduction from './components/common/BrandIntroduction';
 import BootAnimation from './components/common/BootAnimation';
 import { UserRole } from './types';
