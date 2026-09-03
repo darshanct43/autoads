@@ -145,6 +145,7 @@ export default function App() {
   }, []);
 
   const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isMarketingPath = MARKETING_PATHS.has(path);
   console.log("[FORENSIC] [App] Current Pathname:", path);
 
   // Consolidated path detection
