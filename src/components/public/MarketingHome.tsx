@@ -67,10 +67,11 @@ const pages: Record<string, PageConfig> = {
 };
 
 function setMeta(name: string, content: string) {
-  let element = document.head.querySelector('meta[name="' + name + '"]') as HTMLMetaElement | null;
+  const attribute = name.startsWith('og:') ? 'property' : 'name';
+  let element = document.head.querySelector('meta[' + attribute + '="' + name + '"]') as HTMLMetaElement | null;
   if (!element) {
     element = document.createElement('meta');
-    element.name = name;
+    element.setAttribute(attribute, name);
     document.head.appendChild(element);
   }
   element.content = content;
