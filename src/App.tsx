@@ -27,37 +27,7 @@ export default function App() {
   const [showIntro, setShowIntro] = useState(true);
 
   useEffect(() => {
-    // Robust offline-first recovery: check if offline session is active
-    const isOfflineMode = localStorage.getItem('auto_ads_offline_mode') === 'true';
-    console.log("[FORENSIC] App useEffect - isOfflineMode:", isOfflineMode);
-    if (isOfflineMode) {
-      console.log("[FORENSIC] [Bypass] Recovering active offline-mode session on boot/refresh");
-      const offlineRole = localStorage.getItem('auto_ads_offline_role') as UserRole || 'CUSTOMER';
-      const isTerminalStored = localStorage.getItem('auto_ads_is_terminal') === 'true';
-      
-      setUser({ uid: 'offline_mock_device_uuid', email: 'offline-device@autoads.in' });
-      setRole(offlineRole === 'DEVICE' || (offlineRole === 'DRIVER' && isTerminalStored) ? 'DEVICE' : offlineRole);
-      setLoading(false);
-      return () => {};
-    }
-
-    // Dynamic Firebase Auth bypass strategy for raw Chrome/WebView 66 compatibility validation
-    const bypassFirebase = (typeof window !== 'undefined') && (
-      window.location.search.indexOf('bypass_firebase=true') !== -1 ||
-      localStorage.getItem('auto_ads_bypass_firebase') === 'true'
-    );
-
-    if (bypassFirebase) {
-      console.log("[FORENSIC] [Bypass] Bypassing Firebase Auth entirely for old WebView/MXQ");
-      // Load a direct, responsive mock simulation
-      setUser({ uid: 'legacy_mock_device_uuid', email: 'legacy-device@autoads.in' });
-      setRole('DEVICE'); // Directly boot to DevicePortal (IoT active-status player)
-      setLoading(false);
-      return () => {};
-    }
-
     const path = typeof window !== 'undefined' ? window.location.pathname : '';
-  const isMarketingPath = MARKETING_PATHS.has(path);
     const safeRideMatch = path.match(/^\/(?:safe-ride|ride)\/([^/]+)/);
 
     if (safeRideMatch) {
@@ -162,8 +132,6 @@ export default function App() {
     localStorage.removeItem('auto_ads_is_terminal');
     localStorage.removeItem('auto_ads_terminal_id');
     localStorage.removeItem('auto_ads_access_key');
-    localStorage.removeItem('auto_ads_offline_mode');
-    localStorage.removeItem('auto_ads_offline_role');
     localStorage.removeItem('auto_ads_last_role');
     localStorage.removeItem('auto_ads_tv_mode');
     localStorage.removeItem('auto_ads_device_mode');
