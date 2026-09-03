@@ -8,15 +8,4 @@ Disallow: /franchise
 Disallow: /terminal
 Disallow: /api/
 
-# Allow ChatGPT search to discover public AutoAds information
-User-agent: OAI-SearchBot
-Allow: /
-Disallow: /admin
-Disallow: /support
-Disallow: /customer
-Disallow: /driver
-Disallow: /franchise
-Disallow: /terminal
-Disallow: /api/
-
 Sitemap: https://autoads.co.in/sitemap.xml
