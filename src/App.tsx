@@ -17,6 +17,8 @@ import { UserRole } from './types';
 import { firebaseService } from './services/firebaseService';
 import { MotionConfig } from 'motion/react';
 
+const MARKETING_PATHS = new Set(['/', '/for-drivers', '/for-brands', '/locations/hassan', '/locations/chikkamagaluru']);
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<UserRole | null>(null);
@@ -55,6 +57,7 @@ export default function App() {
     }
 
     const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isMarketingPath = MARKETING_PATHS.has(path);
     const safeRideMatch = path.match(/^\/(?:safe-ride|ride)\/([^/]+)/);
 
     if (safeRideMatch) {
@@ -74,6 +77,13 @@ export default function App() {
     if (isRidePath) {
        console.log("[FORENSIC] [App] Public path detected during Auth setup. Skipping Auth listener.");
        setUser({ uid: 'public_view_user' });
+       setLoading(false);
+       return () => {};
+    }
+
+    if (MARKETING_PATHS.has(currentPath)) {
+       console.log("[FORENSIC] [App] Public marketing path detected. Skipping Auth listener.");
+       setUser({ uid: 'public_marketing_view_user' });
        setLoading(false);
        return () => {};
     }
@@ -186,6 +196,11 @@ export default function App() {
        console.log("[FORENSIC] Returning SafeRideView");
        console.log("ACTUAL_COMPONENT_RENDERED = SafeRideView");
        return <SafeRideView terminalId={terminalId} />;
+    }
+
+    if (isMarketingPath) {
+       console.log("ACTUAL_COMPONENT_RENDERED = MarketingHome");
+       return <MarketingHome path={path} />;
     }
 
     // Require Auth for all other routes
