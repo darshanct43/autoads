@@ -1,38 +1,6 @@
 {
   "rewrites": [
     {
-      "source": "/for-drivers",
-      "destination": "/for-drivers.html"
-    },
-    {
-      "source": "/for-drivers/",
-      "destination": "/for-drivers.html"
-    },
-    {
-      "source": "/for-brands",
-      "destination": "/for-brands.html"
-    },
-    {
-      "source": "/for-brands/",
-      "destination": "/for-brands.html"
-    },
-    {
-      "source": "/locations/hassan",
-      "destination": "/locations/hassan.html"
-    },
-    {
-      "source": "/locations/hassan/",
-      "destination": "/locations/hassan.html"
-    },
-    {
-      "source": "/locations/chikkamagaluru",
-      "destination": "/locations/chikkamagaluru.html"
-    },
-    {
-      "source": "/locations/chikkamagaluru/",
-      "destination": "/locations/chikkamagaluru.html"
-    },
-    {
       "source": "/api/canva/login",
       "destination": "/api/canva/login"
     },
