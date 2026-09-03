@@ -15,14 +15,14 @@ type PageConfig = {
 
 const pages: Record<string, PageConfig> = {
   '/': {
-    title: 'AutoAds | Advertising on Passenger Autos in Karnataka',
-    description: 'AutoAds helps brands advertise on screens inside passenger autos. Drivers can host ad displays and earn. Starting in Hassan and expanding to Chikkamagaluru, Karnataka.',
+    title: 'Auto Rickshaw Advertising & Auto Advertising in Karnataka | AutoAds',
+    description: 'AutoAds offers auto rickshaw advertising, auto advertising, and digital screen advertising inside passenger autos in Karnataka. Starting in Hassan and expanding city by city.',
     eyebrow: 'MAYAAN PRESENTS AUTOADS',
-    heading: 'Reach local customers while they travel.',
-    intro: 'AutoAds connects brands with passenger-auto audiences through digital screens installed inside autos. Drivers can host ad displays and earn from their daily routes.',
+    heading: 'Auto rickshaw advertising that reaches local customers.',
+    intro: 'AutoAds connects brands with passenger-auto audiences through digital screens installed inside autos. Advertise on auto rickshaws while drivers host campaigns on their daily routes.',
     primaryLabel: 'Advertise with AutoAds',
-    sectionHeading: 'A simple advertising network for growing cities',
-    sectionBody: 'Launch a local campaign on passenger autos, choose the city you want to reach, and track the campaign through the AutoAds platform. AutoAds is currently operating in Hassan and preparing for Chikkamagaluru.',
+    sectionHeading: 'Hyperlocal digital advertising in passenger autos',
+    sectionBody: 'Launch an auto advertising campaign, choose the city you want to reach, and build local visibility through screens inside passenger autos. AutoAds is currently operating in Hassan and preparing for Chikkamagaluru.',
   },
   '/for-drivers': {
     title: 'Earn by Hosting Ads in Your Auto | AutoAds',
@@ -35,31 +35,31 @@ const pages: Record<string, PageConfig> = {
     sectionBody: 'Get an easy screen setup, display campaigns while serving passengers, and manage your AutoAds activity through one account. Availability begins city by city, starting with Hassan and expanding to Chikkamagaluru.',
   },
   '/for-brands': {
-    title: 'Advertise on Passenger Autos in Karnataka | AutoAds',
-    description: 'Advertise on digital screens inside passenger autos in Hassan and Chikkamagaluru. AutoAds offers local brand visibility starting at ₹19 per day for one auto.',
+    title: 'Auto Rickshaw Advertising Cost & Packages in Karnataka | AutoAds',
+    description: 'Compare auto rickshaw advertising cost and auto advertising packages with AutoAds. Advertise on digital screens inside passenger autos in Hassan and Chikkamagaluru from ₹19 per day for one auto.',
     eyebrow: 'FOR BRANDS AND LOCAL BUSINESSES',
-    heading: 'Put your brand in front of people on the move.',
-    intro: 'AutoAds helps brands display campaigns on digital screens inside passenger autos. Start from ₹19 per day for one auto and build visibility across the city you want to reach.',
+    heading: 'Advertise your business on passenger auto screens.',
+    intro: 'AutoAds helps brands advertise on auto rickshaws through digital screens inside passenger autos. Start from ₹19 per day for one auto and build visibility across your target city.',
     primaryLabel: 'Start an advertising enquiry',
-    sectionHeading: 'Local visibility at a practical starting price',
-    sectionBody: 'Use passenger-auto screens to promote a local business, offer, event, product, or service. Begin in Hassan, plan for Chikkamagaluru, and expand your campaign city by city as the AutoAds network grows.',
+    sectionHeading: 'Affordable auto advertising for local businesses',
+    sectionBody: 'Use advertising on auto rickshaws to promote a local business, offer, event, product, or service. Ask about auto advertising rates, campaign packages, and city-by-city reach starting in Hassan and expanding to Chikkamagaluru.',
   },
   '/locations/hassan': {
-    title: 'Auto Advertising in Hassan, Karnataka | AutoAds',
-    description: 'Reach customers in Hassan through digital advertising screens inside passenger autos. AutoAds supports brands and passenger-auto drivers in Hassan, Karnataka.',
+    title: 'Auto Rickshaw Advertising in Hassan, Karnataka | AutoAds',
+    description: 'Reach customers in Hassan through auto rickshaw advertising and digital screen advertising inside passenger autos. AutoAds supports local brands and passenger-auto drivers in Hassan, Karnataka.',
     eyebrow: 'AUTOADS IN HASSAN',
-    heading: 'Passenger-auto advertising in Hassan.',
-    intro: 'AutoAds is currently operating in Hassan, Karnataka. Brands can display campaigns on screens inside passenger autos, while local drivers can join the network and host ad displays.',
+    heading: 'Auto rickshaw advertising in Hassan.',
+    intro: 'AutoAds is currently operating in Hassan, Karnataka. Brands can advertise on auto rickshaws through screens inside passenger autos, while local drivers can join the network and host ad displays.',
     primaryLabel: 'Enquire about Hassan advertising',
     sectionHeading: 'Built for Hassan businesses and drivers',
     sectionBody: 'Whether you are promoting a local business or looking for an additional earning opportunity as a passenger-auto driver, AutoAds brings both sides of the network together in Hassan.',
   },
   '/locations/chikkamagaluru': {
-    title: 'Auto Advertising in Chikkamagaluru | AutoAds',
-    description: 'AutoAds is expanding to Chikkamagaluru with digital advertising screens inside passenger autos for local brands and driver partners.',
+    title: 'Auto Rickshaw Advertising in Chikkamagaluru | AutoAds',
+    description: 'AutoAds is expanding to Chikkamagaluru with auto rickshaw advertising and digital screens inside passenger autos for local brands and driver partners.',
     eyebrow: 'COMING NEXT TO CHIKKAMAGALURU',
-    heading: 'Auto advertising is coming to Chikkamagaluru.',
-    intro: 'AutoAds is preparing to expand from Hassan to Chikkamagaluru, Karnataka. Local brands and passenger-auto drivers can register interest for the next city launch.',
+    heading: 'Auto rickshaw advertising is coming to Chikkamagaluru.',
+    intro: 'AutoAds is preparing to expand from Hassan to Chikkamagaluru, Karnataka. Local brands and passenger-auto drivers can register interest for the next auto advertising launch.',
     primaryLabel: 'Register interest for Chikkamagaluru',
     sectionHeading: 'Be ready for the next city launch',
     sectionBody: 'Advertisers can plan local campaigns, and drivers can learn about joining the AutoAds network. The rollout is designed to grow city by city with local partners.',
@@ -67,10 +67,11 @@ const pages: Record<string, PageConfig> = {
 };
 
 function setMeta(name: string, content: string) {
-  let element = document.head.querySelector('meta[name="' + name + '"]') as HTMLMetaElement | null;
+  const attribute = name.startsWith('og:') ? 'property' : 'name';
+  let element = document.head.querySelector('meta[' + attribute + '="' + name + '"]') as HTMLMetaElement | null;
   if (!element) {
     element = document.createElement('meta');
-    element.name = name;
+    element.setAttribute(attribute, name);
     document.head.appendChild(element);
   }
   element.content = content;
@@ -163,6 +164,14 @@ export default function MarketingHome({ path }: MarketingHomeProps) {
               <a href="/locations/hassan" className="rounded-full bg-black px-5 py-3 text-white hover:bg-white hover:text-black">AutoAds in Hassan</a>
               <a href="/locations/chikkamagaluru" className="rounded-full bg-black px-5 py-3 text-white hover:bg-white hover:text-black">AutoAds in Chikkamagaluru</a>
             </div>
+          </div>
+        </section>
+
+        <section className="border-t border-white/10 bg-[#0b0f19]" aria-labelledby="keyword-heading">
+          <div className="mx-auto max-w-6xl px-6 py-16 md:py-20">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-amber-400">AUTO ADVERTISING FOR LOCAL BUSINESSES</p>
+            <h2 id="keyword-heading" className="mt-4 text-3xl font-black tracking-tight md:text-5xl">Digital advertising inside passenger autos.</h2>
+            <p className="mt-5 max-w-4xl text-lg leading-8 text-slate-300">Looking for auto rickshaw advertising cost, auto advertising rates, or an affordable way to advertise your business on auto rickshaws? AutoAds uses digital screens inside passenger autos for hyperlocal advertising, helping brands reach people during everyday travel. Ask about auto advertising packages and city availability.</p>
           </div>
         </section>
 
