@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/portfolio",
+      "destination": "/portfolio/",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/canva/login",
@@ -27,6 +34,18 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/$1"
+    },
+    {
+      "source": "/portfolio",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/"
+    },
+    {
+      "source": "/portfolio/",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/"
+    },
+    {
+      "source": "/portfolio/:match*",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/:match*"
     },
     {
       "source": "/(.*)",
