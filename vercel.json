@@ -44,6 +44,22 @@
       "destination": "https://autoads-cinematic-portfolio.vercel.app/"
     },
     {
+      "source": "/portfolio/index.html",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/"
+    },
+    {
+      "source": "/portfolio/cities/:city.html",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/cities/:city/"
+    },
+    {
+      "source": "/portfolio/cities/:city",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/cities/:city/"
+    },
+    {
+      "source": "/portfolio/cities/:city/",
+      "destination": "https://autoads-cinematic-portfolio.vercel.app/cities/:city/"
+    },
+    {
       "source": "/portfolio/:match*",
       "destination": "https://autoads-cinematic-portfolio.vercel.app/:match*"
     },
