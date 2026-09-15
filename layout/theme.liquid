@@ -20,16 +20,42 @@
   {{ content_for_header }}
 
   <script>
-    // Dynamically inject Shopify Asset CDN prefix for frame loader
     window.AUTOADS_CDN_PATH = "{{ 'scene-1.jpg' | asset_url }}".split('scene-1.jpg')[0];
   </script>
 </head>
 <body class="autoads-theme-body template-{{ template.name }}">
-  <a class="skip-to-content-link button visually-hidden" href="#MainContent">
-    Skip to content
-  </a>
+
+<!-- FIXED CINEMATIC VIEWPORT STAGE -->
+  <div class="cinematic-stage" aria-hidden="true">
+    <canvas id="canvas-frames" class="canvas-layer"></canvas>
+    <canvas id="canvas-particles" class="canvas-layer"></canvas>
+    <div class="film-grain"></div>
+    <div class="cinematic-vignette"></div>
+    <div id="light-sweep" class="light-sweep"></div>
+    <div class="letterbox top"></div>
+    <div class="letterbox bottom"></div>
+  </div>
 
   {% section 'header' %}
+
+<!-- FIXED SIDE SCENE PROGRESS HUD -->
+  <aside class="scene-hud" aria-label="Scene Progress">
+    <div class="hud-label">
+      <span id="hud-number">01 / 08</span>
+      <span id="hud-title" class="hud-title">ADVERTISING IN INDIA</span>
+    </div>
+    <div class="hud-track">
+      <div id="hud-progress" class="hud-progress-bar"></div>
+    </div>
+  </aside>
+
+<!-- BOTTOM SCROLL INDICATOR -->
+  <div id="scroll-cue" class="scroll-cue">
+    <span class="scroll-cue-text">SCROLL TO EXPLORE CAMPAIGN STORY</span>
+    <div class="scroll-cue-mouse">
+      <div class="scroll-cue-wheel"></div>
+    </div>
+  </div>
 
   <main id="MainContent" class="content-for-layout focus-none" role="main" tabindex="-1">
     {{ content_for_layout }}
@@ -37,6 +63,7 @@
 
   {% section 'footer' %}
 
+  {{ 'particles.js' | asset_url | script_tag }}
   {{ 'cinematic-scroll.js' | asset_url | script_tag }}
   {{ 'app.js' | asset_url | script_tag }}
 </body>

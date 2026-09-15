@@ -1,21 +1,52 @@
+<header class="cinematic-nav">
+    <a href="#scene-1" class="nav-brand" data-scene="1">
+      <div class="brand-crown">A</div>
+      <div class="brand-text">
+        <span class="brand-name">AUTOADS</span>
+        <span class="brand-sub">ADVERTISING IN INDIA</span>
+      </div>
+    </a>
 
+    <ul class="nav-menu" id="nav-menu">
+      <li class="nav-item"><a href="#scene-1" data-scene="1" class="active">PLATFORM</a></li>
+      <li class="nav-item"><a href="#scene-2" data-scene="2">TRANSIT MEDIA</a></li>
+      <li class="nav-item"><a href="#scene-3" data-scene="3">HYPERLOCAL</a></li>
+      <li class="nav-item"><a href="#scene-4" data-scene="4">STRATEGY</a></li>
+      <li class="nav-item"><a href="#scene-5" data-scene="5">PORTAL LAUNCH</a></li>
+      <li class="nav-item"><a href="#scene-6" data-scene="6">FITNESS</a></li>
+      <li class="nav-item"><a href="#scene-7" data-scene="7">VIRAL REELS</a></li>
+      <li class="nav-item"><a href="#cities">38 CITIES</a></li>
+      <li class="nav-item"><a href="#international">GLOBAL ENTRY</a></li>
+      <li class="nav-item"><a href="#faqs">FAQS</a></li>
+      <li class="nav-item"><a href="#connect" data-scene="9">CONNECT</a></li>
+    </ul>
+
+    <div class="nav-actions">
+      <button id="btn-audio" class="btn-audio audio-muted" aria-label="Toggle atmospheric sound">
+        <div class="sound-bars">
+          <span class="audio-bar"></span>
+          <span class="audio-bar"></span>
+          <span class="audio-bar"></span>
+          <span class="audio-bar"></span>
+        </div>
+        <span class="lbl">SOUND OFF</span>
+      </button>
+
+      <a href="https://autoads.co.in" target="_blank" rel="noopener noreferrer" class="btn-cta-nav">
+        <span>START ADVERTISING ↗</span>
+      </a>
+
+      <button id="nav-toggle" class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+      </button>
+    </div>
+  </header>
 
 {% schema %}
 {
   "name": "Header",
-  "settings": [
-    {
-      "type": "text",
-      "id": "cta_text",
-      "label": "CTA Button Text",
-      "default": "START ADVERTISING ↗"
-    },
-    {
-      "type": "url",
-      "id": "cta_url",
-      "label": "CTA Button Link",
-      "default": "https://autoads.co.in"
-    }
-  ]
+  "settings": []
 }
 {% endschema %}
