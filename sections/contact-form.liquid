@@ -62,9 +62,9 @@
 
       <!-- Native Shopify Contact Form -->
       <div class="contact-form-card">
-        {% form 'contact', id: 'AutoAdsContactForm', class: 'autoads-contact-form' %}
+        {% form 'contact', id: 'ContactForm', class: 'autoads-contact-form' %}
           {% if form.posted_successfully? %}
-            <div class="form-feedback-banner form-success">
+            <div class="form-feedback-banner form-success" id="contact-success-banner" tabindex="-1" autofocus>
               <span class="feedback-icon">✅</span>
               <div>
                 <h4>Campaign Inquiry Submitted Successfully!</h4>
@@ -74,7 +74,7 @@
           {% endif %}
 
           {% if form.errors %}
-            <div class="form-feedback-banner form-error">
+            <div class="form-feedback-banner form-error" id="contact-error-banner" tabindex="-1" autofocus>
               <span class="feedback-icon">⚠️</span>
               <div>
                 <h4>Please check the form:</h4>
@@ -91,7 +91,7 @@
 
             <div class="form-group">
               <label for="ContactFormBrand">Brand / Company Name *</label>
-              <input type="text" id="ContactFormBrand" name="contact[brand]" placeholder="Your Brand or Agency" required>
+              <input type="text" id="ContactFormBrand" name="contact[Brand]" placeholder="Your Brand or Agency" required>
             </div>
           </div>
 
@@ -110,7 +110,7 @@
           <div class="form-row">
             <div class="form-group">
               <label for="ContactFormCity">Target Indian City *</label>
-              <select id="ContactFormCity" name="contact[target_city]" required>
+              <select id="ContactFormCity" name="contact[Target City]" required>
                 <option value="" disabled selected>Select Primary City</option>
                 <option value="Bengaluru">Bengaluru (Silicon Valley & Tech Hubs)</option>
                 <option value="Mumbai">Mumbai (Financial Capital & High-Density)</option>
@@ -127,7 +127,7 @@
 
             <div class="form-group">
               <label for="ContactFormFleet">Estimated Fleet Size</label>
-              <select id="ContactFormFleet" name="contact[fleet_size]">
+              <select id="ContactFormFleet" name="contact[Fleet Size]">
                 <option value="10-25 Autos">Starter: 10 – 25 Autos</option>
                 <option value="25-50 Autos" selected>Growth: 25 – 50 Autos</option>
                 <option value="50-100 Autos">Dominance: 50 – 100 Autos</option>
@@ -146,6 +146,30 @@
             <span>SUBMIT CAMPAIGN INQUIRY →</span>
           </button>
         {% endform %}
+
+        <script>
+          (function() {
+            function autoScrollIfSubmitted() {
+              var isSubmitted = window.location.search.indexOf('contact_posted=true') !== -1 ||
+                                window.location.hash.indexOf('contact') !== -1 ||
+                                document.getElementById('contact-success-banner') !== null ||
+                                document.getElementById('contact-error-banner') !== null;
+              if (isSubmitted) {
+                var contactSec = document.getElementById('contact');
+                if (contactSec) {
+                  setTimeout(function() {
+                    contactSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }, 300);
+                }
+              }
+            }
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', autoScrollIfSubmitted);
+            } else {
+              autoScrollIfSubmitted();
+            }
+          })();
+        </script>
       </div>
     </div>
   </div>

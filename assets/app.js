@@ -177,6 +177,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Keyboard Navigation for Cinematic Journey
   document.addEventListener('keydown', (e) => {
+    // Do not intercept keystrokes if the user is typing in a form field
+    const active = document.activeElement;
+    if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)) {
+      return;
+    }
     const step = window.innerHeight * 0.55;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
       e.preventDefault();
