@@ -1,0 +1,27 @@
+[
+  {
+    "name": "theme_info",
+    "theme_name": "AutoAds Cinematic Portfolio Theme",
+    "theme_version": "1.0.0",
+    "theme_author": "AutoAds Technologies",
+    "theme_documentation_url": "https://autoads.co.in/portfolio/",
+    "theme_support_url": "https://autoads.co.in"
+  },
+  {
+    "name": "Brand Colors",
+    "settings": [
+      {
+        "type": "color",
+        "id": "accent_gold",
+        "label": "Accent Gold",
+        "default": "#FFCC00"
+      },
+      {
+        "type": "color",
+        "id": "background_color",
+        "label": "Background Obsidian",
+        "default": "#050608"
+      }
+    ]
+  }
+]

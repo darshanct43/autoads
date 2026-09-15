@@ -1,0 +1,164 @@
+/* ==========================================================================
+   AUTOADS CINEMATIC BRAND STORY - CINEMATIC EFFECTS & STAGE
+   ========================================================================== */
+
+:root {
+  --gold-primary: #FFCC00;
+  --gold-glow: rgba(255, 204, 0, 0.45);
+  --gold-ambient: rgba(255, 204, 0, 0.09);
+  --obsidian-deep: #050608;
+  --obsidian-surface: #0c0e12;
+  --text-pure: #FFFFFF;
+  --text-muted: #9BA0AA;
+  --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Master Fixed Viewport Stage */
+.cinematic-stage {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  background-color: var(--obsidian-deep);
+}
+
+/* Canvas Layers */
+.canvas-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#canvas-frames {
+  z-index: 2;
+  transform-origin: center center;
+  will-change: transform, opacity, filter;
+  transition: opacity 0.3s ease-out;
+}
+
+#canvas-particles {
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* High-Resolution Scene Backdrop Layers */
+.scene-backdrop-container {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.scene-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  opacity: 0;
+  transform: scale(1.0);
+  transform-origin: center center;
+  transition: opacity 0.5s ease, transform 0.6s ease;
+  will-change: transform, opacity, filter;
+}
+
+.scene-backdrop.active {
+  opacity: 1;
+}
+
+/* Subtle Film Grain Overlay */
+.film-grain {
+  position: absolute;
+  inset: -100%;
+  width: 300%;
+  height: 300%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.045'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0.55;
+  animation: grainJitter 0.5s steps(3) infinite;
+}
+
+@keyframes grainJitter {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-2%, 2%); }
+  50% { transform: translate(2%, -1%); }
+  75% { transform: translate(-1%, -2%); }
+  100% { transform: translate(1%, 1%); }
+}
+
+/* Radial Vignette & Edge Shadowing */
+.cinematic-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(5, 6, 8, 0) 30%,
+    rgba(5, 6, 8, 0.45) 65%,
+    rgba(5, 6, 8, 0.92) 100%
+  );
+  box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.85);
+}
+
+/* Anamorphic Light Sweep on Transition */
+.light-sweep {
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 204, 0, 0.08) 40%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 204, 0, 0.08) 60%,
+    transparent 100%
+  );
+  transform: skewX(-25deg);
+  z-index: 7;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.light-sweep.sweeping {
+  animation: sweepAnim 1.0s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes sweepAnim {
+  0% { left: -120%; opacity: 0; }
+  30% { opacity: 0.9; }
+  100% { left: 160%; opacity: 0; }
+}
+
+/* Subtle Widescreen Cinematic Letterboxing */
+.letterbox {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: clamp(12px, 2vh, 24px);
+  background: #030405;
+  z-index: 9;
+  pointer-events: none;
+}
+.letterbox.top { top: 0; box-shadow: 0 8px 24px rgba(0,0,0,0.9); }
+.letterbox.bottom { bottom: 0; box-shadow: 0 -8px 24px rgba(0,0,0,0.9); }
+
+@media (prefers-reduced-motion: reduce) {
+  .film-grain { animation: none; }
+  .light-sweep { display: none; }
+  .scene-backdrop { transition: opacity 0.3s ease; }
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html class="no-js" lang="{{ request.locale.iso_code }}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <title>{{ page_title }} | {{ shop.name }}</title>
+  {% if page_description %}
+    <meta name="description" content="{{ page_description | escape }}">
+  {% endif %}
+
+  {{ 'autoads-cinematic.css' | asset_url | stylesheet_tag }}
+  {{ 'autoads-style.css' | asset_url | stylesheet_tag }}
+
+  {{ content_for_header }}
+
+  <script>
+    // Dynamically inject Shopify Asset CDN prefix for frame loader
+    window.AUTOADS_CDN_PATH = "{{ 'scene-1.jpg' | asset_url }}".split('scene-1.jpg')[0];
+  </script>
+</head>
+<body class="autoads-theme-body template-{{ template.name }}">
+  <a class="skip-to-content-link button visually-hidden" href="#MainContent">
+    Skip to content
+  </a>
+
+  {% section 'header' %}
+
+  <main id="MainContent" class="content-for-layout focus-none" role="main" tabindex="-1">
+    {{ content_for_layout }}
+  </main>
+
+  {% section 'footer' %}
+
+  {{ 'cinematic-scroll.js' | asset_url | script_tag }}
+  {{ 'app.js' | asset_url | script_tag }}
+</body>
+</html>

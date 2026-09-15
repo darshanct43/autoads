@@ -1,0 +1,19 @@
+{
+  "name": "Cinematic Story Homepage",
+  "sections": {
+    "cinematic_story": {
+      "type": "cinematic-story",
+      "settings": {
+        "enable_sound": true
+      }
+    },
+    "discovery_hub": {
+      "type": "discovery-hub",
+      "settings": {}
+    }
+  },
+  "order": [
+    "cinematic_story",
+    "discovery_hub"
+  ]
+}
