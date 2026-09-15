@@ -1,0 +1,164 @@
+<section id="contact" class="contact-section">
+  <div class="contact-container">
+    <div class="contact-header">
+      <span class="contact-tag">DIRECT CAMPAIGN INQUIRY · RAPID DEPLOYMENT</span>
+      <h2 class="contact-title">START YOUR ADVERTISING CAMPAIGN</h2>
+      <p class="contact-subtitle">
+        Connect directly with our transit media strategists to plan auto-rickshaw wraps, mobile transit media, and hyperlocal brand promotion across 38+ Indian commercial cities.
+      </p>
+    </div>
+
+    <div class="contact-grid">
+      <!-- Contact Info Card -->
+      <div class="contact-info-card">
+        <h3 class="info-card-title">WHY ADVERTISE WITH AUTOADS?</h3>
+        
+        <div class="contact-benefit">
+          <div class="benefit-icon">📍</div>
+          <div class="benefit-text">
+            <h4>Hyperlocal Pincode Targeting</h4>
+            <p>Deploy fleets exactly where your target customers commute, shop, and live.</p>
+          </div>
+        </div>
+
+        <div class="contact-benefit">
+          <div class="benefit-icon">⏱️</div>
+          <div class="benefit-text">
+            <h4>Rapid 48-Hour Deployment</h4>
+            <p>From creative design verification to active on-road branded transit fleets.</p>
+          </div>
+        </div>
+
+        <div class="contact-benefit">
+          <div class="benefit-icon">📊</div>
+          <div class="benefit-text">
+            <h4>Verified Daily Proof of Run</h4>
+            <p>GPS tracking, km-run verification, and time-stamped photo audits for every auto.</p>
+          </div>
+        </div>
+
+        <div class="contact-badges">
+          <div class="badge-item">
+            <span class="badge-num">38+</span>
+            <span class="badge-lbl">Cities Covered</span>
+          </div>
+          <div class="badge-item">
+            <span class="badge-num">10M+</span>
+            <span class="badge-lbl">Monthly Reach</span>
+          </div>
+          <div class="badge-item">
+            <span class="badge-num">100%</span>
+            <span class="badge-lbl">Verified Fleets</span>
+          </div>
+        </div>
+
+        <div class="contact-direct-box">
+          <span class="direct-box-label">NEED IMMEDIATE CAMPAIGN PLANNING?</span>
+          <a href="https://autoads.co.in" target="_blank" rel="noopener noreferrer" class="btn-direct-portal">
+            <span>GO TO OFFICIAL PORTAL (AUTOADS.CO.IN) ↗</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Native Shopify Contact Form -->
+      <div class="contact-form-card">
+        {% form 'contact', id: 'AutoAdsContactForm', class: 'autoads-contact-form' %}
+          {% if form.posted_successfully? %}
+            <div class="form-feedback-banner form-success">
+              <span class="feedback-icon">✅</span>
+              <div>
+                <h4>Campaign Inquiry Submitted Successfully!</h4>
+                <p>Thank you for reaching out. Our campaign planning team will contact you within 2-4 hours with route pricing, fleet availability, and recommendations.</p>
+              </div>
+            </div>
+          {% endif %}
+
+          {% if form.errors %}
+            <div class="form-feedback-banner form-error">
+              <span class="feedback-icon">⚠️</span>
+              <div>
+                <h4>Please check the form:</h4>
+                <p>{{ form.errors | default_errors }}</p>
+              </div>
+            </div>
+          {% endif %}
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ContactFormName">Contact Name *</label>
+              <input type="text" id="ContactFormName" name="contact[name]" placeholder="Your Full Name" required value="{% if form.name %}{{ form.name }}{% endif %}">
+            </div>
+
+            <div class="form-group">
+              <label for="ContactFormBrand">Brand / Company Name *</label>
+              <input type="text" id="ContactFormBrand" name="contact[brand]" placeholder="Your Brand or Agency" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ContactFormEmail">Work Email *</label>
+              <input type="email" id="ContactFormEmail" name="contact[email]" placeholder="name@company.com" required value="{% if form.email %}{{ form.email }}{% endif %}">
+            </div>
+
+            <div class="form-group">
+              <label for="ContactFormPhone">Phone / WhatsApp Number *</label>
+              <input type="tel" id="ContactFormPhone" name="contact[phone]" placeholder="+91 98765 43210" required value="{% if form.phone %}{{ form.phone }}{% endif %}">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ContactFormCity">Target Indian City *</label>
+              <select id="ContactFormCity" name="contact[target_city]" required>
+                <option value="" disabled selected>Select Primary City</option>
+                <option value="Bengaluru">Bengaluru (Silicon Valley & Tech Hubs)</option>
+                <option value="Mumbai">Mumbai (Financial Capital & High-Density)</option>
+                <option value="Delhi NCR">Delhi NCR (Gurugram, Noida, Central)</option>
+                <option value="Hyderabad">Hyderabad (HITEC City & High-Density)</option>
+                <option value="Chennai">Chennai (Industrial & Coastal Corridors)</option>
+                <option value="Pune">Pune (Auto & IT Corridor)</option>
+                <option value="Ahmedabad">Ahmedabad (Gujarat Commercial Engine)</option>
+                <option value="Kolkata">Kolkata (Eastern Metros & Trade Hubs)</option>
+                <option value="Pan-India">Pan-India (Multiple Metros)</option>
+                <option value="Tier-2/3">Tier 2 & 3 Emerging Hubs</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="ContactFormFleet">Estimated Fleet Size</label>
+              <select id="ContactFormFleet" name="contact[fleet_size]">
+                <option value="10-25 Autos">Starter: 10 – 25 Autos</option>
+                <option value="25-50 Autos" selected>Growth: 25 – 50 Autos</option>
+                <option value="50-100 Autos">Dominance: 50 – 100 Autos</option>
+                <option value="100+ Autos">City Blast: 100+ Autos</option>
+                <option value="Custom Fleet">Custom Transit Mix</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="ContactFormMessage">Campaign Goals & Timeline</label>
+            <textarea id="ContactFormMessage" name="contact[body]" rows="3" placeholder="Describe your target audience, preferred corridors (e.g. Koramangala, Bandra, HSR), target start date, or any specific questions..."></textarea>
+          </div>
+
+          <button type="submit" class="btn-submit-campaign">
+            <span>SUBMIT CAMPAIGN INQUIRY →</span>
+          </button>
+        {% endform %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Contact & Campaign Form",
+  "settings": [],
+  "presets": [
+    {
+      "name": "Contact & Campaign Form"
+    }
+  ]
+}
+{% endschema %}

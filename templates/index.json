@@ -10,10 +10,15 @@
     "discovery_hub": {
       "type": "discovery-hub",
       "settings": {}
+    },
+    "contact_form": {
+      "type": "contact-form",
+      "settings": {}
     }
   },
   "order": [
     "cinematic_story",
-    "discovery_hub"
+    "discovery_hub",
+    "contact_form"
   ]
 }
