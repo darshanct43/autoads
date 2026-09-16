@@ -175,20 +175,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Keyboard Navigation for Cinematic Journey
+  // Keyboard Navigation for Cinematic Journey (Scene-by-Scene progression)
   document.addEventListener('keydown', (e) => {
     // Do not intercept keystrokes if the user is typing in a form field
     const active = document.activeElement;
     if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.isContentEditable)) {
       return;
     }
-    const step = window.innerHeight * 0.55;
-    if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+    if (e.key === 'ArrowDown' || e.key === 'PageDown') {
       e.preventDefault();
-      window.scrollBy({ top: step, behavior: 'smooth' });
+      if (scrollEngine && scrollEngine.nextScene) {
+        scrollEngine.nextScene();
+      } else {
+        window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+      }
     } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
       e.preventDefault();
-      window.scrollBy({ top: -step, behavior: 'smooth' });
+      if (scrollEngine && scrollEngine.prevScene) {
+        scrollEngine.prevScene();
+      } else {
+        window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
+      }
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      window.scrollBy({ top: window.innerHeight * 0.55, behavior: 'smooth' });
     }
   });
 });

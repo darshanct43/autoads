@@ -359,10 +359,19 @@ body {
    SCROLL TRACK & PURE FLOATING TYPOGRAPHY
    ========================================================================== */
 
+#MainContent,
+.shopify-section {
+  display: block !important;
+  width: 100% !important;
+  overflow: visible !important;
+}
+
 .story-track {
-  position: relative;
-  width: 100%;
-  height: 1600vh; /* Long generous runway across 7 scenes + FAQ */
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
+  height: 1600vh !important; /* Long generous runway across 7 scenes + FAQ */
+  min-height: 1600vh !important;
   pointer-events: none;
 }
 

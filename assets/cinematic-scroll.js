@@ -50,7 +50,8 @@ class CinematicScrollEngine {
 
   init() {
     this.resize();
-    window.addEventListener('resize', () => this.resize(), { passive: true });
+    this.onScroll();
+    window.addEventListener('resize', () => { this.resize(); this.onScroll(); }, { passive: true });
     window.addEventListener('scroll', () => this.onScroll(), { passive: true });
 
     this.preloadAllFrames();
@@ -83,11 +84,16 @@ class CinematicScrollEngine {
   }
 
   preloadAllFrames() {
+    const cdn = window.AUTOADS_CDN_PATH || 'assets/';
     [1, 2, 3, 4, 5, 6, 7].forEach(folder => {
       for (let i = 1; i <= this.framesCount; i++) {
         const frameNum = String(i).padStart(3, '0');
         const img = new Image();
-        img.src = (window.AUTOADS_CDN_PATH || 'assets/') + `f${folder}_${frameNum}.jpg`;
+        if (cdn.includes('autoads.co.in')) {
+          img.src = `${cdn}${folder}/ezgif-frame-${frameNum}.jpg`;
+        } else {
+          img.src = `${cdn}f${folder}_${frameNum}.jpg`;
+        }
         img.onload = () => {
           this.sceneFrames[folder][i - 1] = img;
         };
@@ -367,6 +373,37 @@ class CinematicScrollEngine {
     const targetP = scene.id === 1 ? 0 : (scene.start + 0.02);
     const targetY = targetP * trackRunway;
     window.scrollTo({ top: targetY, behavior: 'smooth' });
+  }
+
+  getCurrentSceneIndex() {
+    const p = this.currentProgress;
+    for (let i = this.scenes.length - 1; i >= 0; i--) {
+      if (p >= this.scenes[i].start - 0.015) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  nextScene() {
+    const currentIdx = this.getCurrentSceneIndex();
+    if (currentIdx < this.scenes.length - 1) {
+      this.scrollToScene(this.scenes[currentIdx + 1].id);
+    } else {
+      const hub = document.getElementById('international') || document.querySelector('.discovery-hub-wrapper') || document.getElementById('contact');
+      if (hub) {
+        hub.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }
+
+  prevScene() {
+    const currentIdx = this.getCurrentSceneIndex();
+    if (currentIdx > 0) {
+      this.scrollToScene(this.scenes[currentIdx - 1].id);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 }
 
